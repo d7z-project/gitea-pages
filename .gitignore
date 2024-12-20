@@ -60,3 +60,4 @@ fabric.properties
 # Built Visual Studio Code Extensions
 *.vsix
 
+config-local.yaml
