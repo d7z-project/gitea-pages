@@ -5,19 +5,24 @@ import (
 )
 
 type Config struct {
-	Bind   string `yaml:"bind"`   // HTTP 绑定
+	Bind string `yaml:"bind"` // HTTP 绑定
+
 	Domain string `yaml:"domain"` // 基础域名
 
-	Auth ConfigAuth `yaml:"auth"` // Gitea 认证配置
+	Auth ConfigAuth `yaml:"auth"` // 后端认证配置
 
-	Cache string `yaml:"cache"` //
+	Cache ConfigCache `yaml:"cache"` // 缓存配置
 
 	Storage string `yaml:"storage"` // 持久化配置
 }
 
 type ConfigAuth struct {
+	// 后端类型
+	Type string `yaml:"type"`
+	// 服务器地址
 	Server string `yaml:"server"`
-	Token  string `yaml:"token"`
+	// 会话 Id
+	Token string `yaml:"token"`
 }
 
 type ConfigCache struct {
