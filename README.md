@@ -2,6 +2,8 @@
 
 > 新一代 Gitea Pages，替换之前的 caddy-gitea-proxy
 
+注意，默认实现未考虑高并发高负载环境，
+
 ## TODO
 
 - [ ] CNAME 自定义域名

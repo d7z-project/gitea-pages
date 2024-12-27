@@ -6,6 +6,14 @@ import (
 
 type ServerOptions struct {
 	Domain string
+	Cache  services.Config
+}
+
+func DefaultOptions(domain string) *ServerOptions {
+	return &ServerOptions{
+		Domain: domain,
+		Cache:  services.NewConfigMemory(),
+	}
 }
 
 type Server struct {
