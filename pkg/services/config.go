@@ -15,44 +15,33 @@ type Config interface {
 
 func NewConfigMemory() Config {
 	return &ConfigMemory{
-		data: make(map[string]string),
-		lock: sync.RWMutex{},
+		data: sync.Map{},
 	}
 }
 
 // ConfigMemory 一个简单的内存配置归档，仅用于测试
 type ConfigMemory struct {
-	data map[string]string
-	lock sync.RWMutex
+	data sync.Map
 }
 
 func (m *ConfigMemory) Put(key string, value string) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	m.data[key] = value
+	m.data.Store(key, value)
 	return nil
 }
 
 func (m *ConfigMemory) Get(key string) (string, error) {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
-	v, ok := m.data[key]
-	if !ok {
-		return "", os.ErrNotExist
+	if value, ok := m.data.Load(key); ok {
+		return value.(string), nil
 	}
-	return v, nil
+	return "", os.ErrNotExist
 }
 
 func (m *ConfigMemory) Delete(key string) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	delete(m.data, key)
+	m.data.Delete(key)
 	return nil
 }
 
 func (m *ConfigMemory) Close() error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	clear(m.data)
+	m.data.Clear()
 	return nil
 }
