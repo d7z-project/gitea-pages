@@ -1,10 +1,11 @@
 package providers
 
 import (
-	"code.gitea.io/sdk/gitea"
 	"net/http"
 	"net/url"
 	"os"
+
+	"code.gitea.io/sdk/gitea"
 )
 
 const GiteaMaxCount = 9999
@@ -70,7 +71,6 @@ func (g *ProviderGitea) Repos(owner string) (map[string]string, error) {
 		return nil, os.ErrNotExist
 	}
 	return result, nil
-
 }
 
 func (g *ProviderGitea) Branches(owner, repo string) (map[string]string, error) {
@@ -98,7 +98,7 @@ func (g *ProviderGitea) Branches(owner, repo string) (map[string]string, error) 
 	return result, nil
 }
 
-func (g *ProviderGitea) Open(client http.Client, owner, repo, commit, path string, headers map[string]string) (*http.Response, error) {
+func (g *ProviderGitea) Open(client *http.Client, owner, repo, commit, path string, headers map[string]string) (*http.Response, error) {
 	giteaURL, err := url.JoinPath(g.BaseUrl, "api/v1/repos", owner, repo, "media", path)
 	if err != nil {
 		return nil, err

@@ -17,8 +17,6 @@ type Config struct {
 }
 
 type ConfigAuth struct {
-	// 后端类型
-	Type string `yaml:"type"`
 	// 服务器地址
 	Server string `yaml:"server"`
 	// 会话 Id

@@ -1,12 +1,13 @@
-package services
+package utils
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"io"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestCacheGetPutDelete(t *testing.T) {
@@ -42,6 +43,10 @@ func TestCacheGetPutDelete(t *testing.T) {
 	require.Equal(t, 1, len(memory.data))
 	require.Equal(t, 1, len(memory.ordered))
 
+	require.NoError(t, memory.Put("hello", nil))
+	value, err = memory.Get("hello")
+	require.NoError(t, err)
+	require.Nil(t, value)
 }
 
 func TestCacheLimit(t *testing.T) {
