@@ -2,8 +2,10 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
@@ -35,6 +37,9 @@ func (c *CacheBackend) Repos(owner string) (map[string]string, error) {
 	if err != nil {
 		ret, err = c.backend.Repos(owner)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				_ = c.config.Put(key, "{}", c.ttl)
+			}
 			return nil, err
 		}
 		data, err := json.Marshal(data)
@@ -49,6 +54,9 @@ func (c *CacheBackend) Repos(owner string) (map[string]string, error) {
 			return nil, err
 		}
 	}
+	if len(ret) == 0 {
+		return ret, os.ErrNotExist
+	}
 	return ret, nil
 }
 
@@ -59,6 +67,9 @@ func (c *CacheBackend) Branches(owner, repo string) (map[string]string, error) {
 	if err != nil {
 		ret, err = c.backend.Branches(owner, repo)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				_ = c.config.Put(key, "{}", c.ttl)
+			}
 			return nil, err
 		}
 		data, err := json.Marshal(data)
@@ -72,6 +83,9 @@ func (c *CacheBackend) Branches(owner, repo string) (map[string]string, error) {
 		if err := json.Unmarshal([]byte(data), &ret); err != nil {
 			return nil, err
 		}
+	}
+	if len(ret) == 0 {
+		return ret, os.ErrNotExist
 	}
 	return ret, nil
 }

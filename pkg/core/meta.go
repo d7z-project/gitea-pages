@@ -14,83 +14,108 @@ import (
 )
 
 type ServerMeta struct {
-	client  *http.Client
-	backend Backend
-	cache   utils.Config
-	ttl     time.Duration
+	client *http.Client
+	Backend
+	cache utils.Config
+	ttl   time.Duration
+
+	locker *utils.Locker
 }
 
 type PageMeta struct {
-	CommitID         string `json:"commit_id"`     // 提交 COMMIT ID
-	IsPage           bool   `json:"is_page"`       // 是否为 Page
-	Domain           string `json:"domain"`        // 匹配的域名和路径
-	HistoryRouteMode bool   `json:"route_history"` // 路由模式
+	CommitID         string `json:"id"`  // 提交 COMMIT ID
+	IsPage           bool   `json:"pg"`  // 是否为 Page
+	Domain           string `json:"dm"`  // 匹配的域名
+	HistoryRouteMode bool   `json:"rt"`  // 路由模式
+	CustomNotFound   bool   `json:"404"` // 注册了自定义 404 页面
+
+}
+
+func (m *PageMeta) From(data string) error {
+	return json.Unmarshal([]byte(data), m)
+}
+
+func (m *PageMeta) String() string {
+	marshal, _ := json.Marshal(m)
+	return string(marshal)
 }
 
 func NewServerMeta(client *http.Client, backend Backend, config utils.Config, ttl time.Duration) *ServerMeta {
-	return &ServerMeta{client, backend, config, ttl}
+	return &ServerMeta{client, backend, config, ttl, utils.NewLocker()}
 }
 
-func (s *ServerMeta) Meta(owner, repo, branch string) (*PageMeta, error) {
+func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMeta, error) {
 	rel := &PageMeta{
 		IsPage: false,
 	}
-	key := fmt.Sprintf("meta/%s/%s/%s", owner, repo, branch)
-	pushMeta := func() error {
-		data, err := json.Marshal(rel)
-		if err != nil {
-			return err
+	if repos, err := s.Repos(owner); err != nil {
+		return nil, err
+	} else {
+		defBranch := repos[repo]
+		if defBranch == "" {
+			return nil, os.ErrNotExist
 		}
-		return s.cache.Put(key, string(data), s.ttl)
+		if branch == "" {
+			branch = defBranch
+		}
+	}
+	if branches, err := s.Branches(owner, repo); err != nil {
+		return nil, err
+	} else {
+		rel.CommitID = branches[branch]
+		if rel.CommitID == "" {
+			return nil, os.ErrNotExist
+		}
 	}
 
+	key := fmt.Sprintf("meta/%s/%s/%s", owner, repo, branch)
 	cache, err := s.cache.Get(key)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-	} else {
-		if err = json.Unmarshal([]byte(cache), rel); err == nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err == nil {
+		if err = rel.From(cache); err == nil {
+			if !rel.IsPage {
+				return nil, os.ErrNotExist
+			}
 			return rel, nil
 		}
 	}
-	repos, err := s.backend.Repos(owner)
-	if err != nil {
-		return nil, err
-	}
-	rel.CommitID = repos[repo]
-	if rel.CommitID == "" {
-		_ = pushMeta()
-		return nil, os.ErrNotExist
-	}
-	if branch != "" {
-		branches, err := s.backend.Branches(owner, repo)
-		if err != nil {
-			return nil, err
+	mux := s.locker.Open(key)
+	mux.Lock()
+	defer mux.Unlock()
+	cache, err = s.cache.Get(key)
+	if err == nil {
+		if err = rel.From(cache); err == nil {
+			if !rel.IsPage {
+				return nil, os.ErrNotExist
+			}
+			return rel, nil
 		}
-		rel.CommitID = branches[branch]
 	}
-	if rel.CommitID == "" {
-		_ = pushMeta()
+
+	if find, _ := s.FileExists(owner, repo, rel.CommitID, "index.html"); !find {
+		rel.IsPage = false
+		_ = s.cache.Put(key, rel.String(), s.ttl)
 		return nil, os.ErrNotExist
+	}
+	if find, _ := s.FileExists(owner, repo, rel.CommitID, "404.html"); !find {
+		rel.CustomNotFound = true
 	}
 	if cname, err := s.ReadString(owner, repo, rel.CommitID, "CNAME"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	} else {
 		rel.Domain = strings.TrimSpace(cname)
 	}
-	if find, _ := s.FileExists(owner, repo, rel.CommitID, "index.html"); find {
-		rel.IsPage = true
-	}
-	if find, _ := s.FileExists(owner, repo, rel.CommitID, ".history-mode"); find {
+	if find, _ := s.FileExists(owner, repo, rel.CommitID, ".history"); find {
 		rel.HistoryRouteMode = true
 	}
-	_ = pushMeta()
+	_ = s.cache.Put(key, rel.String(), s.ttl)
 	return rel, nil
 }
 
 func (s *ServerMeta) ReadString(owner, repo, branch, path string) (string, error) {
-	resp, err := s.backend.Open(s.client, owner, repo, branch, path, nil)
+	resp, err := s.Open(s.client, owner, repo, branch, path, nil)
 	if err != nil {
 		return "", err
 	}
@@ -106,7 +131,7 @@ func (s *ServerMeta) ReadString(owner, repo, branch, path string) (string, error
 }
 
 func (s *ServerMeta) FileExists(owner, repo, branch, path string) (bool, error) {
-	resp, err := s.backend.Open(s.client, owner, repo, branch, path, nil)
+	resp, err := s.Open(s.client, owner, repo, branch, path, nil)
 	if err != nil {
 		return false, err
 	}

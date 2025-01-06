@@ -15,6 +15,8 @@ type ServerOptions struct {
 	Cache  utils.Cache
 
 	MaxCacheSize int
+
+	HttpClient *http.Client
 }
 
 func DefaultOptions(domain string) ServerOptions {
@@ -24,22 +26,25 @@ func DefaultOptions(domain string) ServerOptions {
 		Config:       configMemory,
 		Cache:        utils.NewCacheMemory(1024*1024*10, int(memory.FreeMemory()/3*2)),
 		MaxCacheSize: 1024 * 1024 * 10,
+		HttpClient:   http.DefaultClient,
 	}
 }
 
 type Server struct {
-	backend core.Backend
+	meta    *core.ServerMeta
 	options *ServerOptions
 }
 
 func NewPageServer(backend core.Backend, options ServerOptions) *Server {
+	backend = core.NewCacheBackend(backend, options.Config, time.Minute)
 	return &Server{
-		backend: core.NewCacheBackend(backend, options.Config, time.Minute),
+		meta:    core.NewServerMeta(options.HttpClient, backend, options.Config, time.Minute),
 		options: &options,
 	}
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+
 }
 
 func (s *Server) Close() error {
