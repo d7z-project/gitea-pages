@@ -61,3 +61,4 @@ fabric.properties
 *.vsix
 
 config-local.yaml
+gitea-pages

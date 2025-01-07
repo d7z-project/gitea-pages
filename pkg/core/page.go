@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -41,6 +42,7 @@ func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainCo
 
 	rel := &PageDomainContent{}
 	if !strings.HasSuffix(domain, "."+p.baseDomain) {
+		slog.Debug("Page Domain does not end with ."+p.baseDomain, "domain", domain)
 		return nil, os.ErrNotExist
 	}
 

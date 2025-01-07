@@ -27,6 +27,7 @@ type Cache interface {
 var ErrCacheOutOfMemory = errors.New("内容无法被缓存，超过最大限定值")
 
 // TODO: 优化锁结构
+// 复杂场景请使用其他缓存服务
 
 type CacheMemory struct {
 	l          sync.RWMutex

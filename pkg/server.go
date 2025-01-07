@@ -57,21 +57,21 @@ func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	meta, err := s.meta.ParseDomainMeta(request.Method, request.RequestURI, request.URL.Query().Get("branch"))
+	meta, err := s.meta.ParseDomainMeta(request.Host, request.RequestURI, request.URL.Query().Get("branch"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			s.writeError(writer, err)
-		} else {
 			s.writeNotfoundError(writer, request.RequestURI)
+		} else {
+			s.writeError(writer, err)
 		}
 		return
 	}
 	result, err := s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			s.writeError(writer, err)
-		} else {
 			s.writeNotfoundError(writer, request.RequestURI)
+		} else {
+			s.writeError(writer, err)
 		}
 		return
 	}

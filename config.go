@@ -12,8 +12,6 @@ type Config struct {
 	Auth ConfigAuth `yaml:"auth"` // 后端认证配置
 
 	Cache ConfigCache `yaml:"cache"` // 缓存配置
-
-	Storage string `yaml:"storage"` // 持久化配置
 }
 
 type ConfigAuth struct {
@@ -24,6 +22,7 @@ type ConfigAuth struct {
 }
 
 type ConfigCache struct {
-	ttl    time.Duration `yaml:"ttl"`    // 缓存时间
-	length int           `yaml:"length"` // 最大文件大小
+	ttl        time.Duration `yaml:"ttl"`         // 缓存时间
+	singleSize int           `yaml:"single_size"` // 单个文件最大大小
+	maxSize    int           `yaml:"max_size"`    // 最大文件大小
 }
