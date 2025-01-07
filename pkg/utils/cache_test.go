@@ -71,4 +71,5 @@ func TestCacheLimit(t *testing.T) {
 
 	require.Equal(t, 5, len(memory.data))
 	require.Equal(t, 5, len(memory.ordered))
+	require.Equal(t, 5, len(memory.lastModify))
 }

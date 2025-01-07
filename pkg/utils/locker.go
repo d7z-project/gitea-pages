@@ -11,6 +11,7 @@ func NewLocker() *Locker {
 		sy: sync.Map{},
 	}
 }
+
 func (l *Locker) Open(key string) *sync.Mutex {
 	actual, _ := l.sy.LoadOrStore(key, &sync.Mutex{})
 	return actual.(*sync.Mutex)

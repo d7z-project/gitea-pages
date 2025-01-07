@@ -14,38 +14,39 @@ import (
 )
 
 type ServerMeta struct {
-	client *http.Client
 	Backend
-	cache utils.Config
-	ttl   time.Duration
+
+	client *http.Client
+	cache  utils.Config
+	ttl    time.Duration
 
 	locker *utils.Locker
 }
 
-type PageMeta struct {
-	CommitID         string `json:"id"`  // 提交 COMMIT ID
-	IsPage           bool   `json:"pg"`  // 是否为 Page
-	Domain           string `json:"dm"`  // 匹配的域名
-	HistoryRouteMode bool   `json:"rt"`  // 路由模式
-	CustomNotFound   bool   `json:"404"` // 注册了自定义 404 页面
-
+type PageMetaContent struct {
+	CommitID         string    `json:"id"`  // 提交 COMMIT ID
+	IsPage           bool      `json:"pg"`  // 是否为 Page
+	Domain           string    `json:"dm"`  // 匹配的域名
+	HistoryRouteMode bool      `json:"rt"`  // 路由模式
+	CustomNotFound   bool      `json:"404"` // 注册了自定义 404 页面
+	LastModified     time.Time `json:"up"`  // 上次更新时间
 }
 
-func (m *PageMeta) From(data string) error {
+func (m *PageMetaContent) From(data string) error {
 	return json.Unmarshal([]byte(data), m)
 }
 
-func (m *PageMeta) String() string {
+func (m *PageMetaContent) String() string {
 	marshal, _ := json.Marshal(m)
 	return string(marshal)
 }
 
 func NewServerMeta(client *http.Client, backend Backend, config utils.Config, ttl time.Duration) *ServerMeta {
-	return &ServerMeta{client, backend, config, ttl, utils.NewLocker()}
+	return &ServerMeta{backend, client, config, ttl, utils.NewLocker()}
 }
 
-func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMeta, error) {
-	rel := &PageMeta{
+func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, error) {
+	rel := &PageMetaContent{
 		IsPage: false,
 	}
 	if repos, err := s.Repos(owner); err != nil {
@@ -62,10 +63,12 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMeta, error) {
 	if branches, err := s.Branches(owner, repo); err != nil {
 		return nil, err
 	} else {
-		rel.CommitID = branches[branch]
-		if rel.CommitID == "" {
+		info := branches[branch]
+		if info == nil {
 			return nil, os.ErrNotExist
 		}
+		rel.CommitID = info.ID
+		rel.LastModified = info.LastModified
 	}
 
 	key := fmt.Sprintf("meta/%s/%s/%s", owner, repo, branch)

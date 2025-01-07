@@ -7,21 +7,31 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
+
+type CacheContent struct {
+	io.ReadSeekCloser
+	Length       int
+	LastModified time.Time
+}
 
 type Cache interface {
 	Put(key string, reader io.Reader) error
-	// Get return io.ReadSeekCloser or nil when put nil io.reader
-	Get(key string) (io.ReadSeekCloser, error)
+	// Get return CacheContent or nil when put nil io.reader
+	Get(key string) (*CacheContent, error)
 	Delete(pattern string) error
 	io.Closer
 }
 
 var ErrCacheOutOfMemory = errors.New("内容无法被缓存，超过最大限定值")
 
+// TODO: 优化锁结构
+
 type CacheMemory struct {
 	l          sync.RWMutex
 	data       map[string]*[]byte
+	lastModify map[string]time.Time
 	sizeGlobal int
 	sizeItem   int
 
@@ -33,6 +43,7 @@ type CacheMemory struct {
 func NewCacheMemory(maxUsage, maxGlobalUsage int) *CacheMemory {
 	return &CacheMemory{
 		data:       make(map[string]*[]byte),
+		lastModify: make(map[string]time.Time),
 		l:          sync.RWMutex{},
 		sizeGlobal: maxGlobalUsage,
 		sizeItem:   maxUsage,
@@ -79,6 +90,7 @@ func (c *CacheMemory) Put(key string, reader io.Reader) error {
 		}
 		for _, s := range c.ordered[:count] {
 			delete(c.data, s)
+			delete(c.lastModify, s)
 		}
 		c.ordered = c.ordered[count:]
 	}
@@ -87,11 +99,14 @@ func (c *CacheMemory) Put(key string, reader io.Reader) error {
 		dest := make([]byte, size)
 		copy(dest, c.cache[:size])
 		c.data[key] = &dest
+		c.lastModify[key] = time.Now()
 
 		c.current -= currentItemSize
 		c.current += len(dest)
 	} else {
 		c.data[key] = nil
+		c.lastModify[key] = time.Now()
+
 		c.current -= currentItemSize
 	}
 
@@ -105,15 +120,20 @@ func (c *CacheMemory) Put(key string, reader io.Reader) error {
 	return nil
 }
 
-func (c *CacheMemory) Get(key string) (io.ReadSeekCloser, error) {
+func (c *CacheMemory) Get(key string) (*CacheContent, error) {
 	c.l.RLock()
 	defer c.l.RUnlock()
 	if i, ok := c.data[key]; ok {
 		if i == nil {
 			return nil, nil
 		}
-		return nopCloser{
-			bytes.NewReader(*i),
+
+		return &CacheContent{
+			ReadSeekCloser: NopCloser{
+				bytes.NewReader(*i),
+			},
+			Length:       len(*i),
+			LastModified: c.lastModify[key],
 		}, nil
 	}
 	return nil, os.ErrNotExist
@@ -127,6 +147,7 @@ func (c *CacheMemory) Delete(pattern string) error {
 		if strings.HasPrefix(key, pattern) {
 			c.current -= len(*c.data[key])
 			delete(c.data, key)
+			delete(c.lastModify, key)
 		} else {
 			nextOrder = append(nextOrder, key)
 		}
@@ -141,12 +162,13 @@ func (c *CacheMemory) Close() error {
 	defer c.l.Unlock()
 	clear(c.ordered)
 	clear(c.data)
+	clear(c.lastModify)
 	c.current = 0
 	return nil
 }
 
-type nopCloser struct {
+type NopCloser struct {
 	io.ReadSeeker
 }
 
-func (nopCloser) Close() error { return nil }
+func (NopCloser) Close() error { return nil }

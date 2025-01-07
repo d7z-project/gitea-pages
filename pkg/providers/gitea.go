@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"os"
 
+	"code.d7z.net/d7z-project/gitea-pages/pkg/core"
+
 	"code.gitea.io/sdk/gitea"
 )
 
@@ -73,8 +75,8 @@ func (g *ProviderGitea) Repos(owner string) (map[string]string, error) {
 	return result, nil
 }
 
-func (g *ProviderGitea) Branches(owner, repo string) (map[string]string, error) {
-	result := make(map[string]string)
+func (g *ProviderGitea) Branches(owner, repo string) (map[string]*core.BranchInfo, error) {
+	result := make(map[string]*core.BranchInfo)
 	if branches, resp, err := g.gitea.ListRepoBranches(owner, repo, gitea.ListRepoBranchesOptions{
 		ListOptions: gitea.ListOptions{
 			PageSize: GiteaMaxCount,
@@ -89,7 +91,10 @@ func (g *ProviderGitea) Branches(owner, repo string) (map[string]string, error) 
 			_ = resp.Body.Close()
 		}
 		for _, branch := range branches {
-			result[branch.Name] = branch.Commit.ID
+			result[branch.Name] = &core.BranchInfo{
+				ID:           branch.Commit.ID,
+				LastModified: branch.Commit.Timestamp,
+			}
 		}
 	}
 	if len(result) == 0 {
@@ -98,7 +103,7 @@ func (g *ProviderGitea) Branches(owner, repo string) (map[string]string, error) 
 	return result, nil
 }
 
-func (g *ProviderGitea) Open(client *http.Client, owner, repo, commit, path string, headers map[string]string) (*http.Response, error) {
+func (g *ProviderGitea) Open(client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
 	giteaURL, err := url.JoinPath(g.BaseUrl, "api/v1/repos", owner, repo, "media", path)
 	if err != nil {
 		return nil, err
@@ -109,8 +114,10 @@ func (g *ProviderGitea) Open(client *http.Client, owner, repo, commit, path stri
 		return nil, err
 	}
 	if headers != nil {
-		for key, value := range headers {
-			req.Header.Add(key, value)
+		for key, values := range headers {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
 		}
 	}
 	req.Header.Add("Authorization", "token "+g.Token)
