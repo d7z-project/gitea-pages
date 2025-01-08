@@ -3,14 +3,16 @@ package core
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	stdErr "errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
 	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
 )
@@ -25,7 +27,7 @@ type Backend interface {
 	Repos(owner string) (map[string]string, error)
 	// Branches return branch + commit id
 	Branches(owner, repo string) (map[string]*BranchInfo, error)
-	// Open return file or error
+	// Open return file or error (error)
 	Open(client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error)
 }
 
@@ -42,7 +44,7 @@ func NewCacheBackend(backend Backend, config utils.Config, ttl time.Duration) *C
 func (c *CacheBackend) Repos(owner string) (map[string]string, error) {
 	ret := make(map[string]string)
 	key := fmt.Sprintf("repos/%s", owner)
-	data, err := c.config.Get(key)
+	store, err := c.config.Get(key)
 	if err != nil {
 		ret, err = c.backend.Repos(owner)
 		if err != nil {
@@ -51,15 +53,15 @@ func (c *CacheBackend) Repos(owner string) (map[string]string, error) {
 			}
 			return nil, err
 		}
-		data, err := json.Marshal(data)
+		storeBin, err := json.Marshal(ret)
 		if err != nil {
 			return nil, err
 		}
-		if err = c.config.Put(key, string(data), c.ttl); err != nil {
+		if err = c.config.Put(key, string(storeBin), c.ttl); err != nil {
 			return nil, err
 		}
 	} else {
-		if err := json.Unmarshal([]byte(data), &ret); err != nil {
+		if err := json.Unmarshal([]byte(store), &ret); err != nil {
 			return nil, err
 		}
 	}
@@ -81,7 +83,7 @@ func (c *CacheBackend) Branches(owner, repo string) (map[string]*BranchInfo, err
 			}
 			return nil, err
 		}
-		data, err := json.Marshal(data)
+		data, err := json.Marshal(ret)
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +117,7 @@ func NewCacheBackendBlobReader(client *http.Client, base Backend, cache utils.Ca
 }
 
 func (c *CacheBackendBlobReader) Open(owner, repo, commit, path string) (io.ReadCloser, error) {
-	key := fmt.Sprintf("%s/%s/%s%s", owner, repo, commit, path)
+	key := fmt.Sprintf("%s/%s/%s/%s", owner, repo, commit, path)
 	lastCache, err := c.cache.Get(key)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -126,15 +128,17 @@ func (c *CacheBackendBlobReader) Open(owner, repo, commit, path string) (io.Read
 		return lastCache, nil
 	}
 	open, err := c.base.Open(c.client, owner, repo, commit, path, http.Header{})
-	if err != nil {
+	if err != nil || open == nil {
 		if open != nil {
-			if open.StatusCode == http.StatusNotFound {
-				// 缓存 404 路由
-				_ = c.cache.Put(key, nil)
-			}
 			_ = open.Body.Close()
 		}
-		return nil, errors.Join(err, os.ErrNotExist)
+		return nil, stdErr.Join(err, os.ErrNotExist)
+	}
+	if open.StatusCode == http.StatusNotFound {
+		// 缓存 404 路由
+		_ = c.cache.Put(key, nil)
+		_ = open.Body.Close()
+		return nil, os.ErrNotExist
 	}
 
 	lastMod, err := time.Parse(http.TimeFormat, open.Header.Get("Last-Modified"))
@@ -158,7 +162,7 @@ func (c *CacheBackendBlobReader) Open(owner, repo, commit, path string) (io.Read
 		return nil, err
 	}
 	if err = c.cache.Put(key, bytes.NewBuffer(allBytes)); err != nil {
-		slog.Warn("缓存归档失败", "error", err)
+		zap.S().Warn("缓存归档失败", zap.Error(err))
 	}
 	return &utils.CacheContent{
 		ReadSeekCloser: utils.NopCloser{

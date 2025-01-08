@@ -1,13 +1,15 @@
 package pkg
 
 import (
-	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
 	"code.d7z.net/d7z-project/gitea-pages/pkg/core"
 	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
@@ -57,7 +59,7 @@ func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	meta, err := s.meta.ParseDomainMeta(request.Host, request.RequestURI, request.URL.Query().Get("branch"))
+	meta, err := s.meta.ParseDomainMeta(request.Host, request.URL.Path, request.URL.Query().Get("branch"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			s.writeNotfoundError(writer, request.RequestURI)
@@ -68,6 +70,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	result, err := s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	if err != nil {
+		// todo: 添加默认返回
 		if errors.Is(err, os.ErrNotExist) {
 			s.writeNotfoundError(writer, request.RequestURI)
 		} else {
@@ -80,16 +83,16 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		http.ServeContent(writer, request, fileName, reader.LastModified, reader)
 		_ = reader.Close()
 		return
-	} else {
-		writer.Header().Set("Content-Type", mime.TypeByExtension(meta.Path))
-		writer.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(writer, reader)
-		_ = reader.Close()
-		return
 	}
+	writer.Header().Set("Content-Type", mime.TypeByExtension(meta.Path))
+	writer.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(writer, result)
+	_ = result.Close()
+	return
 }
 
 func (s *Server) writeError(writer http.ResponseWriter, err error) {
+	zap.L().Error("write error", zap.Error(err))
 	http.Error(writer, err.Error(), http.StatusInternalServerError)
 }
 

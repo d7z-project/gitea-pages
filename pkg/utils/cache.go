@@ -2,12 +2,13 @@ package utils
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 type CacheContent struct {

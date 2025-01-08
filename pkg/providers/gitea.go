@@ -121,9 +121,5 @@ func (g *ProviderGitea) Open(client *http.Client, owner, repo, commit, path stri
 		}
 	}
 	req.Header.Add("Authorization", "token "+g.Token)
-	resp, err := client.Do(req)
-	if err != nil && resp == nil {
-		return nil, err
-	}
-	return resp, nil
+	return client.Do(req)
 }

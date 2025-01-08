@@ -1,11 +1,13 @@
 package core
 
 import (
-	"errors"
 	"fmt"
-	"log/slog"
 	"os"
+	"regexp"
 	"strings"
+
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 type PageDomain struct {
@@ -32,27 +34,28 @@ type PageDomainContent struct {
 }
 
 func (m *PageDomainContent) CacheKey() string {
-	return fmt.Sprintf("%s/%s/%s%s", m.Owner, m.Repo, m.CommitID, m.Path)
+	return fmt.Sprintf("%s/%s/%s/%s", m.Owner, m.Repo, m.CommitID, m.Path)
 }
 
 func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainContent, error) {
 	if branch == "" {
 		branch = p.defaultBranch
 	}
+	domain = regexp.MustCompile(`:\d+$`).ReplaceAllString(domain, "")
 
 	rel := &PageDomainContent{}
 	if !strings.HasSuffix(domain, "."+p.baseDomain) {
-		slog.Debug("Page Domain does not end with ."+p.baseDomain, "domain", domain)
+		zap.L().Warn("Page Domain does not end with ."+p.baseDomain, zap.String("domain", domain))
 		return nil, os.ErrNotExist
 	}
-
 	rel.Owner = strings.TrimSuffix(domain, "."+p.baseDomain)
 	pathS := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	repo := pathS[0]
+	rel.Repo = pathS[0]
 	defaultRepo := rel.Owner + "." + p.baseDomain
-	if repo == "" {
+	if rel.Repo == "" {
 		// 回退到默认仓库
 		rel.Repo = defaultRepo
+		zap.L().Debug("fail back to default repo", zap.String("repo", defaultRepo))
 	}
 
 	meta, err := p.GetMeta(rel.Owner, rel.Repo, branch)
@@ -60,7 +63,10 @@ func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainCo
 		return nil, err
 	}
 	if err == nil {
-		rel.Path = "/" + strings.Join(pathS[1:], "/")
+		rel.Path = strings.Join(pathS[1:], "/")
+		if strings.HasSuffix(rel.Path, "/") || rel.Path == "" {
+			rel.Path = rel.Path + "index.html"
+		}
 		rel.PageMetaContent = meta
 		return rel, nil
 	}
@@ -70,11 +76,12 @@ func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainCo
 	if meta, err := p.GetMeta(rel.Owner, defaultRepo, branch); err == nil {
 		rel.PageMetaContent = meta
 		rel.Repo = defaultRepo
-		rel.Path = "/" + strings.Join(pathS, "/")
+		rel.Path = strings.Join(pathS[1:], "/")
+		if strings.HasSuffix(rel.Path, "/") || rel.Path == "" {
+			rel.Path = rel.Path + "index.html"
+		}
 		return rel, nil
 	}
-	if strings.HasSuffix(path, "/") {
-		rel.Path = rel.Path + "/index.html"
-	}
+
 	return nil, os.ErrNotExist
 }

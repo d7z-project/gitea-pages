@@ -2,13 +2,14 @@ package core
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
 )
@@ -24,12 +25,12 @@ type ServerMeta struct {
 }
 
 type PageMetaContent struct {
-	CommitID         string    `json:"id"`  // 提交 COMMIT ID
-	IsPage           bool      `json:"pg"`  // 是否为 Page
-	Domain           string    `json:"dm"`  // 匹配的域名
-	HistoryRouteMode bool      `json:"rt"`  // 路由模式
-	CustomNotFound   bool      `json:"404"` // 注册了自定义 404 页面
-	LastModified     time.Time `json:"up"`  // 上次更新时间
+	CommitID         string    `json:"id"`               // 提交 COMMIT ID
+	IsPage           bool      `json:"pg"`               // 是否为 Page
+	Domain           string    `json:"domain"`           // 匹配的域名
+	HistoryRouteMode bool      `json:"historyRouteMode"` // 路由模式
+	CustomNotFound   bool      `json:"404"`              // 注册了自定义 404 页面
+	LastModified     time.Time `json:"up"`               // 上次更新时间
 }
 
 func (m *PageMetaContent) From(data string) error {
@@ -101,6 +102,8 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 		rel.IsPage = false
 		_ = s.cache.Put(key, rel.String(), s.ttl)
 		return nil, os.ErrNotExist
+	} else {
+		rel.IsPage = true
 	}
 	if find, _ := s.FileExists(owner, repo, rel.CommitID, "404.html"); !find {
 		rel.CustomNotFound = true
@@ -119,10 +122,12 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 
 func (s *ServerMeta) ReadString(owner, repo, branch, path string) (string, error) {
 	resp, err := s.Open(s.client, owner, repo, branch, path, nil)
-	if err != nil {
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil || resp == nil {
 		return "", err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return "", os.ErrNotExist
 	}
@@ -135,10 +140,12 @@ func (s *ServerMeta) ReadString(owner, repo, branch, path string) (string, error
 
 func (s *ServerMeta) FileExists(owner, repo, branch, path string) (bool, error) {
 	resp, err := s.Open(s.client, owner, repo, branch, path, nil)
-	if err != nil {
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil || resp == nil {
 		return false, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		return true, nil
 	}

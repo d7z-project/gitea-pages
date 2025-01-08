@@ -3,9 +3,10 @@ package main
 import (
 	"flag"
 	"log"
-	"log/slog"
 	"net/http"
 	"os"
+
+	"go.uber.org/zap"
 
 	"code.d7z.net/d7z-project/gitea-pages/pkg"
 	"code.d7z.net/d7z-project/gitea-pages/pkg/providers"
@@ -26,7 +27,8 @@ func init() {
 
 func main() {
 	flag.Parse()
-	debugInject()
+	inject := debugInject()
+	defer inject()
 	loadConf()
 	gitea, err := providers.NewGitea(config.Auth.Server, config.Auth.Token)
 	if err != nil {
@@ -39,14 +41,20 @@ func main() {
 	_ = http.ListenAndServe(config.Bind, mux)
 }
 
-func debugInject() {
-	programLevel := new(slog.LevelVar)
-	programLevel.Set(slog.LevelDebug)
+func debugInject() func() error {
+	atom := zap.NewAtomicLevel()
 	if debug {
-		h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: programLevel})
-		slog.SetDefault(slog.New(h))
+		atom.SetLevel(zap.DebugLevel)
+	} else {
+		atom.SetLevel(zap.InfoLevel)
 	}
-	slog.Debug("debug mode")
+	cfg := zap.NewProductionConfig()
+	cfg.Level = atom
+
+	logger, _ := cfg.Build()
+	zap.ReplaceGlobals(logger)
+	zap.L().Debug("debug enabled")
+	return logger.Sync
 }
 
 func loadConf() {
