@@ -2,6 +2,8 @@
 
 > 新一代 Gitea Pages，替换之前的 caddy-gitea-proxy
 
+**注意**: 此项目尚未完工
+
 ## Feature
 
 - [x] 内容缓存
