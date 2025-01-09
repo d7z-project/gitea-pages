@@ -17,6 +17,14 @@ type CacheContent struct {
 	LastModified time.Time
 }
 
+func (c *CacheContent) ReadToString() (string, error) {
+	all, err := io.ReadAll(c)
+	if err != nil {
+		return "", err
+	}
+	return string(all), nil
+}
+
 type Cache interface {
 	Put(key string, reader io.Reader) error
 	// Get return CacheContent or nil when put nil io.reader

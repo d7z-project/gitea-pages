@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"go.uber.org/zap"
 
@@ -27,21 +30,29 @@ func init() {
 
 func main() {
 	flag.Parse()
-	inject := debugInject()
-	defer inject()
+	call := logInject()
+	defer call()
 	loadConf()
 	gitea, err := providers.NewGitea(config.Auth.Server, config.Auth.Token)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	server := pkg.NewPageServer(gitea, pkg.DefaultOptions(config.Domain))
-	mux := http.NewServeMux()
-	mux.Handle("/", server)
-	defer server.Close()
-	_ = http.ListenAndServe(config.Bind, mux)
+	giteaServer := pkg.NewPageServer(gitea, pkg.DefaultOptions(config.Domain))
+	defer giteaServer.Close()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	defer stop()
+	svc := http.Server{Addr: config.Bind, Handler: giteaServer}
+	go func() {
+		select {
+		case <-ctx.Done():
+		}
+		zap.L().Debug("shutdown gracefully")
+		_ = svc.Close()
+	}()
+	_ = svc.ListenAndServe()
 }
 
-func debugInject() func() error {
+func logInject() func() error {
 	atom := zap.NewAtomicLevel()
 	if debug {
 		atom.SetLevel(zap.DebugLevel)

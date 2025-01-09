@@ -6,13 +6,18 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/pkg/errors"
 
 	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
 )
+
+var regexpHostname = regexp.MustCompile(`^(?:([a-z0-9-]+|\*)\.)?([a-z0-9-]{1,61})\.([a-z0-9]{2,7})$`)
 
 type ServerMeta struct {
 	Backend
@@ -111,7 +116,12 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 	if cname, err := s.ReadString(owner, repo, rel.CommitID, "CNAME"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	} else {
-		rel.Domain = strings.TrimSpace(cname)
+		cname = strings.TrimSpace(cname)
+		if regexpHostname.MatchString(cname) {
+			rel.Domain = cname
+		} else {
+			zap.L().Debug("指定的 CNAME 不合法", zap.String("cname", cname))
+		}
 	}
 	if find, _ := s.FileExists(owner, repo, rel.CommitID, ".history"); find {
 		rel.HistoryRouteMode = true

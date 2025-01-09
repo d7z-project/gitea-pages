@@ -8,12 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pkg/errors"
-	"go.uber.org/zap"
-
 	"code.d7z.net/d7z-project/gitea-pages/pkg/core"
 	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
 	"github.com/pbnjay/memory"
+	"github.com/pkg/errors"
 )
 
 type ServerOptions struct {
@@ -49,7 +47,7 @@ type Server struct {
 func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 	backend = core.NewCacheBackend(backend, options.Config, time.Minute)
 	svcMeta := core.NewServerMeta(options.HttpClient, backend, options.Config, time.Minute)
-	pageMeta := core.NewPageDomain(svcMeta, options.Domain, options.DefaultBranch)
+	pageMeta := core.NewPageDomain(svcMeta, options.Config, options.Domain, options.DefaultBranch)
 	reader := core.NewCacheBackendBlobReader(options.HttpClient, backend, options.Cache, options.MaxCacheSize)
 	return &Server{
 		meta:    pageMeta,
@@ -59,45 +57,36 @@ func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	err := s.Serve(writer, request)
+	if errors.Is(err, os.ErrNotExist) {
+		http.Error(writer, "page not found.", http.StatusNotFound)
+	} else {
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error {
 	meta, err := s.meta.ParseDomainMeta(request.Host, request.URL.Path, request.URL.Query().Get("branch"))
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			s.writeNotfoundError(writer, request.RequestURI)
-		} else {
-			s.writeError(writer, err)
-		}
-		return
+		return err
 	}
 	result, err := s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	if err != nil {
-		// todo: 添加默认返回
-		if errors.Is(err, os.ErrNotExist) {
-			s.writeNotfoundError(writer, request.RequestURI)
-		} else {
-			s.writeError(writer, err)
-		}
-		return
+		return err
 	}
 	fileName := filepath.Base(meta.Path)
 	if reader, ok := result.(*utils.CacheContent); ok {
+		writer.Header().Add("X-Cache", "HIT")
 		http.ServeContent(writer, request, fileName, reader.LastModified, reader)
 		_ = reader.Close()
-		return
+	} else {
+		writer.Header().Add("X-Cache", "MISS")
+		writer.Header().Set("Content-Type", mime.TypeByExtension(meta.Path))
+		writer.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(writer, result)
+		_ = result.Close()
 	}
-	writer.Header().Set("Content-Type", mime.TypeByExtension(meta.Path))
-	writer.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(writer, result)
-	_ = result.Close()
-	return
-}
-
-func (s *Server) writeError(writer http.ResponseWriter, err error) {
-	zap.L().Error("write error", zap.Error(err))
-	http.Error(writer, err.Error(), http.StatusInternalServerError)
-}
-
-func (s *Server) writeNotfoundError(writer http.ResponseWriter, path string) {
-	http.Error(writer, "page not found.", http.StatusNotFound)
+	return nil
 }
 
 func (s *Server) Close() error {

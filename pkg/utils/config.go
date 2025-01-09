@@ -6,7 +6,11 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
+
+const TtlKeep = -1
 
 type Config interface {
 	Put(key string, value string, ttl time.Duration) error
@@ -36,7 +40,7 @@ func NewConfigMemory(store string) (Config, error) {
 			}
 		}
 		for key, content := range item {
-			if time.Now().Before(content.ttl) {
+			if content.Ttl == nil || time.Now().Before(*content.Ttl) {
 				ret.data.Store(key, content)
 			}
 		}
@@ -46,14 +50,19 @@ func NewConfigMemory(store string) (Config, error) {
 }
 
 type configContent struct {
-	data string
-	ttl  time.Time
+	Data string     `json:"data"`
+	Ttl  *time.Time `json:"ttl,omitempty"`
 }
 
 func (m *ConfigMemory) Put(key string, value string, ttl time.Duration) error {
+	d := time.Now().Add(ttl)
+	td := &d
+	if ttl == -1 {
+		td = nil
+	}
 	m.data.Store(key, configContent{
-		data: value,
-		ttl:  time.Now().Add(ttl),
+		Data: value,
+		Ttl:  td,
 	})
 	return nil
 }
@@ -61,10 +70,10 @@ func (m *ConfigMemory) Put(key string, value string, ttl time.Duration) error {
 func (m *ConfigMemory) Get(key string) (string, error) {
 	if value, ok := m.data.Load(key); ok {
 		content := value.(configContent)
-		if time.Now().After(content.ttl) {
+		if content.Ttl != nil && time.Now().After(*content.Ttl) {
 			return "", os.ErrNotExist
 		}
-		return content.data, nil
+		return content.Data, nil
 	}
 	return "", os.ErrNotExist
 }
@@ -78,11 +87,16 @@ func (m *ConfigMemory) Close() error {
 	defer m.data.Clear()
 	if m.store != "" {
 		item := make(map[string]configContent)
+		now := time.Now()
 		m.data.Range(
 			func(key, value interface{}) bool {
-				item[key.(string)] = value.(configContent)
+				content := value.(configContent)
+				if content.Ttl == nil || now.Before(*content.Ttl) {
+					item[key.(string)] = content
+				}
 				return true
 			})
+		zap.L().Debug("回写内容到本地存储", zap.String("store", m.store), zap.Int("length", len(item)))
 		saved, err := json.Marshal(item)
 		if err != nil {
 			return err
