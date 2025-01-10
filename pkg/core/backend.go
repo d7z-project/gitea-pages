@@ -146,18 +146,19 @@ func (c *CacheBackendBlobReader) Open(owner, repo, commit, path string) (io.Read
 		// 无时间，跳过
 		return open.Body, nil
 	}
-	// 没法计算大小，跳过
 	length, err := strconv.Atoi(open.Header.Get("Content-Length"))
+	// 无法计算大小，跳过
 	if err != nil {
-		return open.Body, err
+		return open.Body, nil
 	}
 	if length > c.maxSize {
 		// 超过最大大小，跳过
 		return &utils.SizeReadCloser{
 			ReadCloser: open.Body,
 			Size:       length,
-		}, err
+		}, nil
 	}
+
 	defer open.Body.Close()
 	allBytes, err := io.ReadAll(open.Body)
 	if err != nil {
