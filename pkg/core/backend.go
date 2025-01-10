@@ -147,14 +147,16 @@ func (c *CacheBackendBlobReader) Open(owner, repo, commit, path string) (io.Read
 		return open.Body, nil
 	}
 	// 没法计算大小，跳过
-	lengthStr := open.Header.Get("Content-Length")
-	if lengthStr == "" {
-		return open.Body, nil
-	}
-	length, err := strconv.Atoi(lengthStr)
-	if err != nil || length > c.maxSize {
-		// 超过最大大小，跳过
+	length, err := strconv.Atoi(open.Header.Get("Content-Length"))
+	if err != nil {
 		return open.Body, err
+	}
+	if length > c.maxSize {
+		// 超过最大大小，跳过
+		return &utils.SizeReadCloser{
+			ReadCloser: open.Body,
+			Size:       length,
+		}, err
 	}
 	defer open.Body.Close()
 	allBytes, err := io.ReadAll(open.Body)
@@ -162,7 +164,7 @@ func (c *CacheBackendBlobReader) Open(owner, repo, commit, path string) (io.Read
 		return nil, err
 	}
 	if err = c.cache.Put(key, bytes.NewBuffer(allBytes)); err != nil {
-		zap.S().Warn("缓存归档失败", zap.Error(err))
+		zap.L().Warn("缓存归档失败", zap.Error(err), zap.Int("Size", len(allBytes)), zap.Int("MaxSize", c.maxSize))
 	}
 	return &utils.CacheContent{
 		ReadSeekCloser: utils.NopCloser{

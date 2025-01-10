@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+{{ if eq .code 404 }}<title>404 Not Found</title>{{ else }}<title>500 Unknown Error</title>{{ end }}
+</head>
+<Body>
+<div style="text-align: center;">
+    {{ if eq .code 404 }}<h1>404 Not Found</h1>{{ else }}<h1>500 Unknown Error</h1>{{ end }}
+</div>
+<hr>
+<div style="text-align: center;">Gitea Pages</div>
+</Body>
+</html>

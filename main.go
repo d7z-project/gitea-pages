@@ -13,14 +13,11 @@ import (
 
 	"code.d7z.net/d7z-project/gitea-pages/pkg"
 	"code.d7z.net/d7z-project/gitea-pages/pkg/providers"
-
-	"gopkg.in/yaml.v3"
 )
 
 var (
 	configPath = "config-local.yaml"
 	debug      = false
-	config     = &Config{}
 )
 
 func init() {
@@ -32,12 +29,19 @@ func main() {
 	flag.Parse()
 	call := logInject()
 	defer call()
-	loadConf()
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("fail to load config file: %v", err)
+	}
+	options, err := config.NewPageServerOptions()
+	if err != nil {
+		log.Fatalf("fail to create page server: %v", err)
+	}
 	gitea, err := providers.NewGitea(config.Auth.Server, config.Auth.Token)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	giteaServer := pkg.NewPageServer(gitea, pkg.DefaultOptions(config.Domain))
+	giteaServer := pkg.NewPageServer(gitea, *options)
 	defer giteaServer.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
@@ -66,15 +70,4 @@ func logInject() func() error {
 	zap.ReplaceGlobals(logger)
 	zap.L().Debug("debug enabled")
 	return logger.Sync
-}
-
-func loadConf() {
-	file, err := os.ReadFile(configPath)
-	if err != nil {
-		log.Fatalf("read config file failed: %v", err)
-	}
-	err = yaml.Unmarshal(file, &config)
-	if err != nil {
-		log.Fatalf("parse config file failed: %v", err)
-	}
 }
