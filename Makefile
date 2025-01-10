@@ -3,7 +3,7 @@ fmt:
 	"$(GOPATH)/bin/gofumpt" -l -w .
 
 gitea-pages: $(shell find . -type f -name "*.go" ) go.mod go.sum
-	@CGO_ENABLED=0 go build -o $@ .
+	@CGO_ENABLED=0 go build -ldflags="-s -w" -o $@ .
 
 .PHONY: debug
 
