@@ -1,0 +1,25 @@
+# 服务器绑定地址
+bind: 127.0.0.1:18080
+# 基础域名
+domain: example.com
+auth:
+  server: https://gitea.com
+  # 需要 user , org , repo 的 read 全新
+  token: token
+cache:
+  # 配置存储
+  storage: /path/to/config.json
+  # 配置缓存时长
+  ttl: 10m
+
+  # 单个文件最大缓存大小
+  size: 10MB
+  # 总缓存大小
+  max: 1GB
+page:
+  # 默认页面分支
+  default_branch: gh-pages
+  # 默认 404 页面模板
+  404: /path/to/html.gotmpl
+  # 默认 500 页面模板
+  500: /path/to/html.gotmpl
