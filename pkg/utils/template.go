@@ -1,10 +1,11 @@
 package utils
 
 import (
-	sprig "github.com/go-task/slim-sprig/v3"
 	"net/http"
 	"strings"
 	"text/template"
+
+	sprig "github.com/go-task/slim-sprig/v3"
 )
 
 func NewTemplateInject(r *http.Request, def map[string]any) map[string]any {
