@@ -52,13 +52,13 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 	if c.Page.DefaultBranch == "" {
 		c.Page.DefaultBranch = "gh-pages"
 	}
-	defaultErr := utils.NewTemplate(defaultErrPage)
+	defaultErr := utils.MustTemplate(defaultErrPage)
 	if c.Page.ErrUnknownPage != "" {
 		data, err := os.ReadFile(c.Page.ErrUnknownPage)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to read file %s", string(data))
 		}
-		c.pageErrUnknown = utils.NewTemplate(c.Page.ErrUnknownPage)
+		c.pageErrUnknown = utils.MustTemplate(string(data))
 	} else {
 		c.pageErrUnknown = defaultErr
 	}
@@ -67,7 +67,7 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to read file %s", c.Page.ErrNotFoundPage)
 		}
-		c.pageErrNotFound = utils.NewTemplate(string(data))
+		c.pageErrNotFound = utils.MustTemplate(string(data))
 	} else {
 		c.pageErrNotFound = defaultErr
 	}
@@ -97,6 +97,7 @@ func (c *Config) ErrorHandler(w http.ResponseWriter, r *http.Request, err error)
 	if errors.Is(err, os.ErrNotExist) {
 		w.WriteHeader(http.StatusNotFound)
 		if err = c.pageErrNotFound.Execute(w, utils.NewTemplateInject(r, map[string]any{
+			"UUID":  r.Header.Get("Session-ID"),
 			"Error": err,
 			"Path":  r.URL.Path,
 			"Code":  404,
@@ -106,6 +107,7 @@ func (c *Config) ErrorHandler(w http.ResponseWriter, r *http.Request, err error)
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 		if err = c.pageErrUnknown.Execute(w, utils.NewTemplateInject(r, map[string]any{
+			"UUID":  r.Header.Get("Session-ID"),
 			"Error": err,
 			"Path":  r.URL.Path,
 			"Code":  500,

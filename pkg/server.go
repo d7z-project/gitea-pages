@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -69,9 +71,11 @@ func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	sessionId, _ := uuid.NewRandom()
+	request.Header.Set("Session-ID", sessionId.String())
 	defer func() {
 		if e := recover(); e != nil {
-			zap.L().Error("panic!", zap.Any("error", e))
+			zap.L().Error("panic!", zap.Any("error", e), zap.Any("id", sessionId))
 			if err, ok := e.(error); ok {
 				s.options.DefaultErrorHandler(writer, request, err)
 			}
@@ -79,7 +83,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}()
 	err := s.Serve(writer, request)
 	if err != nil {
-		zap.L().Debug("错误请求", zap.Error(err), zap.Any("request", request.RequestURI))
+		zap.L().Debug("错误请求", zap.Error(err), zap.Any("request", request.RequestURI), zap.Any("id", sessionId))
 		s.options.DefaultErrorHandler(writer, request, err)
 	}
 }

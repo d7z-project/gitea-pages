@@ -4,11 +4,8 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"text/template"
 
 	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
-
-	sprig "github.com/go-task/slim-sprig/v3"
 )
 
 type GoTemplate struct{}
@@ -23,7 +20,8 @@ func (g GoTemplate) Render(w http.ResponseWriter, r *http.Request, input io.Read
 		return err
 	}
 	out := &bytes.Buffer{}
-	parse, err := template.New("tmpl").Funcs(sprig.FuncMap()).Option("missingkey=error").Parse(string(dataB))
+
+	parse, err := utils.NewTemplate(string(dataB))
 	if err != nil {
 		return err
 	}
