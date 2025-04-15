@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
+	sprig "github.com/go-task/slim-sprig/v3"
+
 	"github.com/alecthomas/units"
 
 	"code.d7z.net/d7z-project/gitea-pages/pkg"
@@ -52,13 +54,13 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 	if c.Page.DefaultBranch == "" {
 		c.Page.DefaultBranch = "gh-pages"
 	}
-	defaultErr := template.Must(template.New("err").Parse(defaultErrPage))
+	defaultErr := template.Must(template.New("err").Funcs(sprig.FuncMap()).Parse(defaultErrPage))
 	if c.Page.ErrUnknownPage != "" {
 		data, err := os.ReadFile(c.Page.ErrUnknownPage)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to read file %s", string(data))
 		}
-		c.pageErrUnknown = template.Must(template.New("err").Parse(c.Page.ErrUnknownPage))
+		c.pageErrUnknown = template.Must(template.New("err").Funcs(sprig.FuncMap()).Parse(c.Page.ErrUnknownPage))
 	} else {
 		c.pageErrUnknown = defaultErr
 	}
@@ -67,7 +69,7 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to read file %s", c.Page.ErrNotFoundPage)
 		}
-		c.pageErrNotFound = template.Must(template.New("err").Parse(string(data)))
+		c.pageErrNotFound = template.Must(template.New("err").Funcs(sprig.FuncMap()).Parse(string(data)))
 	} else {
 		c.pageErrNotFound = defaultErr
 	}
@@ -96,20 +98,18 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 func (c *Config) ErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, os.ErrNotExist) {
 		w.WriteHeader(http.StatusNotFound)
-		if err = c.pageErrNotFound.Execute(w, map[string]any{
-			"err":  err,
-			"req":  r,
-			"code": 404,
-		}); err != nil {
+		if err = c.pageErrNotFound.Execute(w, utils.NewTemplateInject(r, map[string]any{
+			"Error": err,
+			"Code":  404,
+		})); err != nil {
 			zap.L().Error("failed to render error page", zap.Error(err))
 		}
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
-		if err = c.pageErrUnknown.Execute(w, map[string]any{
-			"err":  err,
-			"req":  r,
-			"code": 500,
-		}); err != nil {
+		if err = c.pageErrUnknown.Execute(w, utils.NewTemplateInject(r, map[string]any{
+			"Error": err,
+			"Code":  500,
+		})); err != nil {
 			zap.L().Error("failed to render error page", zap.Error(err))
 		}
 	}
