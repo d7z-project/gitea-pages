@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -98,6 +99,11 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	}
 	zap.L().Debug("获取请求", zap.Any("request", meta.Path))
 	// todo(feat) : 支持 http range
+	if meta.Domain != "" && meta.Domain != request.Host {
+		zap.L().Debug("重定向地址", zap.Any("src", request.Host), zap.Any("dst", meta.Domain))
+		http.Redirect(writer, request, fmt.Sprintf("https://%s/%s", meta.Domain, meta.Path), http.StatusFound)
+		return nil
+	}
 	result, err := s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	if err != nil {
 		if meta.HistoryRouteMode && errors.Is(err, os.ErrNotExist) {

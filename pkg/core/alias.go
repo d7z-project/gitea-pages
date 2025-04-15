@@ -21,7 +21,7 @@ func NewDomainAlias(config utils.Config) *DomainAlias {
 }
 
 func (a *DomainAlias) Query(domain string) (*Alias, error) {
-	get, err := a.config.Get("alias/" + domain)
+	get, err := a.config.Get("domain/alias/" + domain)
 	if err != nil {
 		return nil, err
 	}
@@ -42,9 +42,9 @@ func (a *DomainAlias) Bind(domain, owner, repo, branch string) error {
 	if err != nil {
 		return err
 	}
-	return a.config.Put("domain/"+domain, string(saveB), utils.TtlKeep)
+	return a.config.Put("domain/alias/"+domain, string(saveB), utils.TtlKeep)
 }
 
 func (a *DomainAlias) Unbind(domain string) error {
-	return a.config.Delete("domain/" + domain)
+	return a.config.Delete("domain/alias/" + domain)
 }

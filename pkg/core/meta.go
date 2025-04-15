@@ -71,7 +71,7 @@ func NewServerMeta(client *http.Client, backend Backend, config utils.Config, tt
 	return &ServerMeta{backend, client, config, ttl, utils.NewLocker()}
 }
 
-func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, error) {
+func (s *ServerMeta) GetMeta(baseDomain, owner, repo, branch string) (*PageMetaContent, error) {
 	rel := &PageMetaContent{
 		IsPage:  false,
 		Renders: make(map[string]string),
@@ -136,7 +136,7 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 	}
 	if cname, err := s.ReadString(owner, repo, rel.CommitID, "CNAME"); err == nil {
 		cname = strings.TrimSpace(cname)
-		if regexpHostname.MatchString(cname) {
+		if regexpHostname.MatchString(cname) && !strings.HasSuffix(strings.ToLower(cname), strings.ToLower(baseDomain)) {
 			rel.Domain = cname
 		} else {
 			zap.L().Debug("指定的 CNAME 不合法", zap.String("cname", cname))

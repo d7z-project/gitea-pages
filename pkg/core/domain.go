@@ -66,7 +66,7 @@ func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainCo
 	if !strings.HasSuffix(domain, "."+p.baseDomain) {
 		alias, err := p.alias.Query(domain)
 		if err != nil {
-			zap.L().Warn("未知域名", zap.String("base", p.baseDomain), zap.String("domain", domain))
+			zap.L().Warn("未知域名", zap.String("base", p.baseDomain), zap.String("domain", domain), zap.Error(err))
 			return nil, os.ErrNotExist
 		}
 		zap.L().Debug("命中别名", zap.String("domain", domain), zap.Any("alias", alias))
@@ -91,7 +91,7 @@ func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainCo
 
 func (p *PageDomain) ReturnMeta(owner string, repo string, branch string, path []string) (*PageDomainContent, error) {
 	rel := &PageDomainContent{}
-	if meta, err := p.GetMeta(owner, repo, branch); err == nil {
+	if meta, err := p.GetMeta(p.baseDomain, owner, repo, branch); err == nil {
 		rel.PageMetaContent = meta
 		rel.Owner = owner
 		rel.Repo = repo
