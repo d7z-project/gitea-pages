@@ -3,6 +3,7 @@ package renders
 import (
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"text/template"
@@ -32,8 +33,10 @@ func (g GoTemplate) Render(w http.ResponseWriter, r *http.Request, input io.Read
 	}
 	err = parse.Execute(out, map[string]interface{}{
 		"Request": map[string]any{
-			"Method":  r.Method,
-			"Headers": headers,
+			"Headers":    headers,
+			"Request":    r.RequestURI,
+			"RemoteAddr": r.RemoteAddr,
+			"RemoteIP":   GetRemoteIP(r),
 		},
 	})
 	if err != nil {
@@ -41,4 +44,27 @@ func (g GoTemplate) Render(w http.ResponseWriter, r *http.Request, input io.Read
 	}
 	_, err = out.WriteTo(w)
 	return err
+}
+
+// 注意，相关 ip 获取未做反向代理安全判断，可能导致安全降级
+
+func GetRemoteIP(r *http.Request) string {
+	// 最先取 cloudflare 的头
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		return ip
+	}
+	if forwardedFor := r.Header.Get("X-Forwarded-For"); forwardedFor != "" {
+		ips := strings.Split(forwardedFor, ",")
+		if len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		return realIP
+	}
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
 }
