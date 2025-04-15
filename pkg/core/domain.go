@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 
+	"code.d7z.net/d7z-project/gitea-pages/pkg/renders"
+
 	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
 
 	"github.com/pkg/errors"
@@ -41,6 +43,17 @@ type PageDomainContent struct {
 
 func (m *PageDomainContent) CacheKey() string {
 	return fmt.Sprintf("%s/%s/%s/%s", m.Owner, m.Repo, m.CommitID, m.Path)
+}
+
+func (m *PageDomainContent) TryRender(path ...string) renders.Render {
+	for _, s := range path {
+		for _, compiler := range m.rendersL {
+			if compiler.regex.Match(s) {
+				return compiler.Render
+			}
+		}
+	}
+	return nil
 }
 
 func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainContent, error) {
@@ -93,6 +106,8 @@ func (p *PageDomain) ReturnMeta(owner string, repo string, branch string, path [
 			}
 		}
 		return rel, nil
+	} else {
+		zap.L().Debug("查询错误", zap.Error(err))
 	}
-	return nil, os.ErrNotExist
+	return nil, errors.Wrapf(os.ErrNotExist, strings.Join(path, "/"))
 }

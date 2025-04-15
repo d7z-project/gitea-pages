@@ -37,11 +37,10 @@ func (g *ProviderGitea) Repos(owner string) (map[string]string, error) {
 		ListOptions: gitea.ListOptions{
 			PageSize: GiteaMaxCount,
 		},
-	}); err != nil || (resp != nil && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound) {
+	}); err != nil {
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
-		return nil, err
 	} else {
 		if resp != nil {
 			_ = resp.Body.Close()
@@ -49,17 +48,17 @@ func (g *ProviderGitea) Repos(owner string) (map[string]string, error) {
 		for _, item := range repos {
 			result[item.Name] = item.DefaultBranch
 		}
+		return result, nil
 	}
 	if len(result) == 0 {
 		if repos, resp, err := g.gitea.ListUserRepos(owner, gitea.ListReposOptions{
 			ListOptions: gitea.ListOptions{
 				PageSize: GiteaMaxCount,
 			},
-		}); err != nil || (resp != nil && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound) {
+		}); err != nil {
 			if resp != nil {
 				_ = resp.Body.Close()
 			}
-			return nil, err
 		} else {
 			if resp != nil {
 				_ = resp.Body.Close()

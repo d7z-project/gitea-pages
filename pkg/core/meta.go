@@ -10,6 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"code.d7z.net/d7z-project/gitea-pages/pkg/renders"
+
+	"github.com/gobwas/glob"
+
 	"go.uber.org/zap"
 
 	"github.com/pkg/errors"
@@ -29,17 +33,33 @@ type ServerMeta struct {
 	locker *utils.Locker
 }
 
+type renderCompiler struct {
+	regex glob.Glob
+	renders.Render
+}
+
 type PageMetaContent struct {
-	CommitID         string    `json:"id"`               // 提交 COMMIT ID
-	IsPage           bool      `json:"pg"`               // 是否为 Page
-	Domain           string    `json:"domain"`           // 匹配的域名
-	HistoryRouteMode bool      `json:"historyRouteMode"` // 路由模式
-	CustomNotFound   bool      `json:"404"`              // 注册了自定义 404 页面
-	LastModified     time.Time `json:"up"`               // 上次更新时间
+	CommitID         string            `json:"id"`               // 提交 COMMIT ID
+	IsPage           bool              `json:"pg"`               // 是否为 Page
+	Domain           string            `json:"domain"`           // 匹配的域名
+	HistoryRouteMode bool              `json:"historyRouteMode"` // 路由模式
+	CustomNotFound   bool              `json:"404"`              // 注册了自定义 404 页面
+	LastModified     time.Time         `json:"up"`               // 上次更新时间
+	Renders          map[string]string `json:"renders"`          // 配置的渲染器
+
+	rendersL []*renderCompiler
 }
 
 func (m *PageMetaContent) From(data string) error {
-	return json.Unmarshal([]byte(data), m)
+	err := json.Unmarshal([]byte(data), m)
+	clear(m.rendersL)
+	for key, g := range m.Renders {
+		m.rendersL = append(m.rendersL, &renderCompiler{
+			regex:  glob.MustCompile(g),
+			Render: renders.GetRender(key),
+		})
+	}
+	return err
 }
 
 func (m *PageMetaContent) String() string {
@@ -53,7 +73,8 @@ func NewServerMeta(client *http.Client, backend Backend, config utils.Config, tt
 
 func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, error) {
 	rel := &PageMetaContent{
-		IsPage: false,
+		IsPage:  false,
+		Renders: make(map[string]string),
 	}
 	if repos, err := s.Repos(owner); err != nil {
 		return nil, err
@@ -111,16 +132,37 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 		rel.IsPage = true
 	}
 	if find, _ := s.FileExists(owner, repo, rel.CommitID, "404.html"); !find {
-		rel.CustomNotFound = true
+		rel.CustomNotFound = find
 	}
-	if cname, err := s.ReadString(owner, repo, rel.CommitID, "CNAME"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	} else {
+	if cname, err := s.ReadString(owner, repo, rel.CommitID, "CNAME"); err == nil {
 		cname = strings.TrimSpace(cname)
 		if regexpHostname.MatchString(cname) {
 			rel.Domain = cname
 		} else {
 			zap.L().Debug("指定的 CNAME 不合法", zap.String("cname", cname))
+		}
+	}
+	if r, err := s.ReadString(owner, repo, rel.CommitID, ".render"); err == nil {
+		for _, render := range strings.Split(r, "\n") {
+			render = strings.TrimSpace(render)
+			if strings.HasPrefix(render, "#") {
+				continue
+			}
+			before, after, found := strings.Cut(render, " ")
+			before = strings.TrimSpace(before)
+			after = strings.TrimSpace(after)
+			if found {
+				if r := renders.GetRender(before); r != nil {
+					if g, err := glob.Compile(after); err == nil {
+						rel.Renders[before] = after
+						rel.rendersL = append(rel.rendersL, &renderCompiler{
+							regex:  g,
+							Render: r,
+						})
+					}
+				}
+			}
+
 		}
 	}
 	if find, _ := s.FileExists(owner, repo, rel.CommitID, ".history"); find {

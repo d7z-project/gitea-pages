@@ -79,16 +79,20 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}()
 	err := s.Serve(writer, request)
 	if err != nil {
+		zap.L().Debug("错误请求", zap.Error(err), zap.Any("request", request.RequestURI))
 		s.options.DefaultErrorHandler(writer, request, err)
 	}
 }
 
 func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error {
+	if request.Method != "GET" {
+		return os.ErrNotExist
+	}
 	meta, err := s.meta.ParseDomainMeta(request.Host, request.URL.Path, request.URL.Query().Get("branch"))
 	if err != nil {
 		return err
 	}
-	zap.L().Debug("获取请求", zap.Any("meta", meta))
+	zap.L().Debug("获取请求", zap.Any("request", meta.Path))
 	// todo(feat) : 支持 http range
 	result, err := s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	if err != nil {
@@ -106,27 +110,48 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		}
 		writer.Header().Set("Content-Type", mime.TypeByExtension(".html"))
 		writer.WriteHeader(http.StatusNotFound)
-		_, _ = io.Copy(writer, result)
-		_ = result.Close()
+		if render := meta.TryRender(meta.Path, "/404.html"); render != nil {
+			defer result.Close()
+			if err = render.Render(writer, request, result); err != nil {
+				return err
+			}
+			return nil
+		} else {
+			_, _ = io.Copy(writer, result)
+			_ = result.Close()
+		}
 		return nil
 	}
 	fileName := filepath.Base(meta.Path)
+	render := meta.TryRender(meta.Path)
+	defer result.Close()
 	if reader, ok := result.(*utils.CacheContent); ok {
 		writer.Header().Add("X-Cache", "HIT")
+		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(fileName)))
 		writer.Header().Add("Cache-Control", "public, max-age=86400")
-		http.ServeContent(writer, request, fileName, reader.LastModified, reader)
-		_ = reader.Close()
+		if render != nil {
+			if err = render.Render(writer, request, reader); err != nil {
+				return err
+			}
+		} else {
+			http.ServeContent(writer, request, fileName, reader.LastModified, reader)
+		}
 	} else {
-		if reader, ok := result.(*utils.SizeReadCloser); ok {
+		if reader, ok := result.(*utils.SizeReadCloser); ok && render == nil {
 			writer.Header().Add("Content-Length", strconv.Itoa(reader.Size))
 		}
 		// todo(bug) : 直连模式下告知数据长度
 		writer.Header().Add("X-Cache", "MISS")
 		writer.Header().Add("Cache-Control", "public, max-age=86400")
-		writer.Header().Set("Content-Type", mime.TypeByExtension(meta.Path))
+		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(fileName)))
 		writer.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(writer, result)
-		_ = result.Close()
+		if render != nil {
+			if err = render.Render(writer, request, reader); err != nil {
+				return err
+			}
+		} else {
+			_, _ = io.Copy(writer, result)
+		}
 	}
 	return nil
 }
