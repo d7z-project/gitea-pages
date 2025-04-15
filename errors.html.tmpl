@@ -12,6 +12,6 @@
     {{ if eq .Code 404 }}<h1>404 Not Found</h1>{{ else }}<h1>500 Unknown Error</h1>{{ end }}
 </div>
 <hr>
-<div style="text-align: center;">Gitea Pages/{{ .UUID }}</div>
+<div style="text-align: center;">Gitea Pages({{.Request.Host}})/{{ .UUID }}</div>
 </Body>
 </html>
