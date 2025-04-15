@@ -1,8 +1,10 @@
 package utils
 
 import (
+	sprig "github.com/go-task/slim-sprig/v3"
 	"net/http"
 	"strings"
+	"text/template"
 )
 
 func NewTemplateInject(r *http.Request, def map[string]any) map[string]any {
@@ -22,4 +24,8 @@ func NewTemplateInject(r *http.Request, def map[string]any) map[string]any {
 		"RemoteIP":   GetRemoteIP(r),
 	}
 	return def
+}
+
+func NewTemplate(data string) *template.Template {
+	return template.Must(template.New("err").Funcs(sprig.FuncMap()).Parse(data))
 }
