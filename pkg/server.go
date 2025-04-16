@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -109,10 +110,13 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		if errors.Is(err, os.ErrNotExist) {
 			if meta.HistoryRouteMode {
 				result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "index.html")
+				if err == nil {
+					meta.Path = "index.html"
+				}
 			} else {
 				result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path+"/index.html")
-				if err != nil {
-					return err
+				if err == nil {
+					meta.Path = strings.Trim(meta.Path+"/index.html", "/")
 				}
 			}
 		} else {
