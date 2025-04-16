@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"

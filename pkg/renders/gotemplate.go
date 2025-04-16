@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
 type GoTemplate struct{}

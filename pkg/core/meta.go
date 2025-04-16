@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"code.d7z.net/d7z-project/gitea-pages/pkg/renders"
+	"gopkg.d7z.net/gitea-pages/pkg/renders"
 
 	"github.com/gobwas/glob"
 
@@ -18,7 +18,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
 var regexpHostname = regexp.MustCompile(`^(?:([a-z0-9-]+|\*)\.)?([a-z0-9-]{1,61})\.([a-z0-9]{2,7})$`)

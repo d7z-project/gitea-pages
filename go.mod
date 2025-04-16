@@ -1,4 +1,4 @@
-module code.d7z.net/d7z-project/gitea-pages
+module gopkg.d7z.net/gitea-pages
 
 go 1.24.2
 

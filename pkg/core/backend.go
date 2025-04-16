@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
 type BranchInfo struct {

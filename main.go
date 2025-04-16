@@ -11,8 +11,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"code.d7z.net/d7z-project/gitea-pages/pkg"
-	"code.d7z.net/d7z-project/gitea-pages/pkg/providers"
+	"gopkg.d7z.net/gitea-pages/pkg"
+	"gopkg.d7z.net/gitea-pages/pkg/providers"
 )
 
 var (

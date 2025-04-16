@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"os"
 
-	"code.d7z.net/d7z-project/gitea-pages/pkg/core"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 
 	"code.gitea.io/sdk/gitea"
 )

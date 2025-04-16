@@ -10,10 +10,10 @@ import (
 
 	"github.com/alecthomas/units"
 
-	"code.d7z.net/d7z-project/gitea-pages/pkg"
-	"code.d7z.net/d7z-project/gitea-pages/pkg/utils"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"gopkg.d7z.net/gitea-pages/pkg"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.in/yaml.v3"
 )
 
