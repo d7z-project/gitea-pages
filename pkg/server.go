@@ -106,8 +106,15 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	}
 	result, err := s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	if err != nil {
-		if meta.HistoryRouteMode && errors.Is(err, os.ErrNotExist) {
-			result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "index.html")
+		if errors.Is(err, os.ErrNotExist) {
+			if meta.HistoryRouteMode {
+				result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "index.html")
+			} else {
+				result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path+"/index.html")
+				if err != nil {
+					return err
+				}
+			}
 		} else {
 			return err
 		}
