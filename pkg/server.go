@@ -109,11 +109,13 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if meta.HistoryRouteMode {
+				// 回退 abc => index.html
 				result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "index.html")
 				if err == nil {
 					meta.Path = "index.html"
 				}
 			} else {
+				// 回退 abc => abc/ => abc/index.html
 				result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path+"/index.html")
 				if err == nil {
 					meta.Path = strings.Trim(meta.Path+"/index.html", "/")
@@ -123,25 +125,30 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 			return err
 		}
 	}
-	if err != nil && meta.CustomNotFound && errors.Is(err, os.ErrNotExist) {
-		// 存在 404 页面的情况
-		result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "404.html")
-		if err != nil {
-			return err
-		}
-		writer.Header().Set("Content-Type", mime.TypeByExtension(".html"))
-		writer.WriteHeader(http.StatusNotFound)
-		if render := meta.TryRender(meta.Path, "/404.html"); render != nil {
-			defer result.Close()
-			if err = render.Render(writer, request, result); err != nil {
+	// 处理请求错误
+	if err != nil {
+		if meta.CustomNotFound && errors.Is(err, os.ErrNotExist) {
+			// 存在 404 页面的情况
+			result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "404.html")
+			if err != nil {
 				return err
+			}
+			writer.Header().Set("Content-Type", mime.TypeByExtension(".html"))
+			writer.WriteHeader(http.StatusNotFound)
+			if render := meta.TryRender(meta.Path, "/404.html"); render != nil {
+				defer result.Close()
+				if err = render.Render(writer, request, result); err != nil {
+					return err
+				}
+				return nil
+			} else {
+				_, _ = io.Copy(writer, result)
+				_ = result.Close()
 			}
 			return nil
 		} else {
-			_, _ = io.Copy(writer, result)
-			_ = result.Close()
+			return err
 		}
-		return nil
 	}
 	fileName := filepath.Base(meta.Path)
 	render := meta.TryRender(meta.Path)
