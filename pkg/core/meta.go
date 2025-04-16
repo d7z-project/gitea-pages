@@ -39,13 +39,13 @@ type renderCompiler struct {
 }
 
 type PageMetaContent struct {
-	CommitID         string            `json:"id"`               // 提交 COMMIT ID
-	IsPage           bool              `json:"pg"`               // 是否为 Page
-	Domain           string            `json:"domain"`           // 匹配的域名
-	HistoryRouteMode bool              `json:"historyRouteMode"` // 路由模式
-	CustomNotFound   bool              `json:"404"`              // 注册了自定义 404 页面
-	LastModified     time.Time         `json:"up"`               // 上次更新时间
-	Renders          map[string]string `json:"renders"`          // 配置的渲染器
+	CommitID         string              `json:"id"`               // 提交 COMMIT ID
+	IsPage           bool                `json:"pg"`               // 是否为 Page
+	Domain           string              `json:"domain"`           // 匹配的域名
+	HistoryRouteMode bool                `json:"historyRouteMode"` // 路由模式
+	CustomNotFound   bool                `json:"404"`              // 注册了自定义 404 页面
+	LastModified     time.Time           `json:"up"`               // 上次更新时间
+	Renders          map[string][]string `json:"renders"`          // 配置的渲染器
 
 	rendersL []*renderCompiler
 }
@@ -53,13 +53,26 @@ type PageMetaContent struct {
 func (m *PageMetaContent) From(data string) error {
 	err := json.Unmarshal([]byte(data), m)
 	clear(m.rendersL)
-	for key, g := range m.Renders {
-		m.rendersL = append(m.rendersL, &renderCompiler{
-			regex:  glob.MustCompile(g),
-			Render: renders.GetRender(key),
-		})
+	for key, gs := range m.Renders {
+		for _, g := range gs {
+			m.rendersL = append(m.rendersL, &renderCompiler{
+				regex:  glob.MustCompile(g),
+				Render: renders.GetRender(key),
+			})
+		}
 	}
 	return err
+}
+
+func (m *PageMetaContent) TryRender(path ...string) renders.Render {
+	for _, s := range path {
+		for _, compiler := range m.rendersL {
+			if compiler.regex.Match(s) {
+				return compiler.Render
+			}
+		}
+	}
+	return nil
 }
 
 func (m *PageMetaContent) String() string {
@@ -74,7 +87,7 @@ func NewServerMeta(client *http.Client, backend Backend, config utils.Config, tt
 func (s *ServerMeta) GetMeta(baseDomain, owner, repo, branch string) (*PageMetaContent, error) {
 	rel := &PageMetaContent{
 		IsPage:  false,
-		Renders: make(map[string]string),
+		Renders: make(map[string][]string),
 	}
 	if repos, err := s.Repos(owner); err != nil {
 		return nil, err
@@ -154,7 +167,7 @@ func (s *ServerMeta) GetMeta(baseDomain, owner, repo, branch string) (*PageMetaC
 			if found {
 				if r := renders.GetRender(before); r != nil {
 					if g, err := glob.Compile(after); err == nil {
-						rel.Renders[before] = after
+						rel.Renders[before] = append(rel.Renders[before], after)
 						rel.rendersL = append(rel.rendersL, &renderCompiler{
 							regex:  g,
 							Render: r,
