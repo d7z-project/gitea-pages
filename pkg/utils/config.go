@@ -31,13 +31,14 @@ func NewConfigMemory(store string) (Config, error) {
 		data:  sync.Map{},
 	}
 	if store != "" {
-		item := make(map[string]configContent)
+		item := make(map[string]ConfigContent)
 		data, err := os.ReadFile(store)
-		if err == nil && os.IsNotExist(err) {
-			err := json.Unmarshal(data, &item)
-			if err != nil {
-				return nil, err
-			}
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		err = json.Unmarshal(data, &item)
+		if err != nil {
+			return nil, err
 		}
 		for key, content := range item {
 			if content.Ttl == nil || time.Now().Before(*content.Ttl) {
@@ -49,7 +50,7 @@ func NewConfigMemory(store string) (Config, error) {
 	return ret, nil
 }
 
-type configContent struct {
+type ConfigContent struct {
 	Data string     `json:"data"`
 	Ttl  *time.Time `json:"ttl,omitempty"`
 }
@@ -60,7 +61,7 @@ func (m *ConfigMemory) Put(key string, value string, ttl time.Duration) error {
 	if ttl == -1 {
 		td = nil
 	}
-	m.data.Store(key, configContent{
+	m.data.Store(key, ConfigContent{
 		Data: value,
 		Ttl:  td,
 	})
@@ -69,7 +70,7 @@ func (m *ConfigMemory) Put(key string, value string, ttl time.Duration) error {
 
 func (m *ConfigMemory) Get(key string) (string, error) {
 	if value, ok := m.data.Load(key); ok {
-		content := value.(configContent)
+		content := value.(ConfigContent)
 		if content.Ttl != nil && time.Now().After(*content.Ttl) {
 			return "", os.ErrNotExist
 		}
@@ -86,11 +87,11 @@ func (m *ConfigMemory) Delete(key string) error {
 func (m *ConfigMemory) Close() error {
 	defer m.data.Clear()
 	if m.store != "" {
-		item := make(map[string]configContent)
+		item := make(map[string]ConfigContent)
 		now := time.Now()
 		m.data.Range(
 			func(key, value interface{}) bool {
-				content := value.(configContent)
+				content := value.(ConfigContent)
 				if content.Ttl == nil || now.Before(*content.Ttl) {
 					item[key.(string)] = content
 				}
