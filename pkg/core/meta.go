@@ -144,9 +144,7 @@ func (s *ServerMeta) GetMeta(baseDomain, owner, repo, branch string) (*PageMetaC
 	} else {
 		rel.IsPage = true
 	}
-	if find, _ := s.FileExists(owner, repo, rel.CommitID, "404.html"); !find {
-		rel.CustomNotFound = find
-	}
+	rel.CustomNotFound, _ = s.FileExists(owner, repo, rel.CommitID, "404.html")
 	if cname, err := s.ReadString(owner, repo, rel.CommitID, "CNAME"); err == nil {
 		cname = strings.TrimSpace(cname)
 		if regexpHostname.MatchString(cname) && !strings.HasSuffix(strings.ToLower(cname), strings.ToLower(baseDomain)) {
