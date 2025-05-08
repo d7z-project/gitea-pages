@@ -12,7 +12,7 @@ import (
 
 const TtlKeep = -1
 
-type Config interface {
+type KVConfig interface {
 	Put(key string, value string, ttl time.Duration) error
 	Get(key string) (string, error)
 	Delete(key string) error
@@ -25,7 +25,7 @@ type ConfigMemory struct {
 	store string
 }
 
-func NewConfigMemory(store string) (Config, error) {
+func NewConfigMemory(store string) (KVConfig, error) {
 	ret := &ConfigMemory{
 		store: store,
 		data:  sync.Map{},
@@ -36,9 +36,11 @@ func NewConfigMemory(store string) (Config, error) {
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
-		err = json.Unmarshal(data, &item)
-		if err != nil {
-			return nil, err
+		if err == nil {
+			err = json.Unmarshal(data, &item)
+			if err != nil {
+				return nil, err
+			}
 		}
 		for key, content := range item {
 			if content.Ttl == nil || time.Now().Before(*content.Ttl) {

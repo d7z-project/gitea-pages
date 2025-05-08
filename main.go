@@ -35,7 +35,7 @@ func main() {
 	}
 	options, err := config.NewPageServerOptions()
 	if err != nil {
-		log.Fatalf("fail to create page server: %v", err)
+		zap.L().Fatal("fail to load options", zap.Error(err))
 	}
 	gitea, err := providers.NewGitea(config.Auth.Server, config.Auth.Token)
 	if err != nil {

@@ -28,6 +28,9 @@ type Config struct {
 	Cache ConfigCache `yaml:"cache"` // 缓存配置
 	Page  ConfigPage  `yaml:"page"`  // 页面配置
 
+	Render ConfigRender `yaml:"render"` // 渲染配置
+	Proxy  ConfigProxy  `yaml:"proxy"`  // 反向代理配置
+
 	pageErrNotFound, pageErrUnknown *template.Template
 }
 
@@ -77,6 +80,7 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		DefaultBranch:       c.Page.DefaultBranch,
 		MaxCacheSize:        int(cacheSize),
 		HttpClient:          http.DefaultClient,
+		MetaTTL:             time.Minute,
 		DefaultErrorHandler: c.ErrorHandler,
 		Cache:               utils.NewCacheMemory(int(cacheMaxSize), int(cacheMaxSize)),
 	}
@@ -87,9 +91,9 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 	}
 	memory, err := utils.NewConfigMemory(c.Cache.Storage)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "failed to init config memory")
 	}
-	rel.Config = memory
+	rel.KVConfig = memory
 	return &rel, nil
 }
 
@@ -128,6 +132,15 @@ type ConfigPage struct {
 	DefaultBranch   string `yaml:"default_branch"`
 	ErrNotFoundPage string `yaml:"404"`
 	ErrUnknownPage  string `yaml:"500"`
+}
+
+type ConfigProxy struct {
+	Enable   bool     `yaml:"enable"` // 是否允许反向代理模型
+	DenyList []string `yaml:"deny"`   // 反向代理黑名单
+}
+
+type ConfigRender struct {
+	Enable bool `yaml:"enable"` // 开启渲染器
 }
 
 type ConfigCache struct {

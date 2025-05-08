@@ -5,8 +5,12 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,18 +23,24 @@ import (
 	"github.com/pbnjay/memory"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
+
+	_ "gopkg.d7z.net/gitea-pages/pkg/renders"
 )
+
+var portExp = regexp.MustCompile(`:\d+$`)
 
 type ServerOptions struct {
 	Domain        string
 	DefaultBranch string
 
-	Config utils.Config
-	Cache  utils.Cache
+	KVConfig utils.KVConfig
+	Cache    utils.Cache
 
 	MaxCacheSize int
 
 	HttpClient *http.Client
+
+	MetaTTL time.Duration
 
 	DefaultErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
@@ -40,10 +50,11 @@ func DefaultOptions(domain string) ServerOptions {
 	return ServerOptions{
 		Domain:        domain,
 		DefaultBranch: "gh-pages",
-		Config:        configMemory,
+		KVConfig:      configMemory,
 		Cache:         utils.NewCacheMemory(1024*1024*10, int(memory.FreeMemory()/3*2)),
 		MaxCacheSize:  1024 * 1024 * 10,
 		HttpClient:    http.DefaultClient,
+		MetaTTL:       time.Minute,
 		DefaultErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, "page not found.", http.StatusNotFound)
@@ -58,14 +69,16 @@ type Server struct {
 	options *ServerOptions
 	meta    *core.PageDomain
 	reader  *core.CacheBackendBlobReader
+	backend core.Backend
 }
 
 func NewPageServer(backend core.Backend, options ServerOptions) *Server {
-	backend = core.NewCacheBackend(backend, options.Config, time.Minute)
-	svcMeta := core.NewServerMeta(options.HttpClient, backend, options.Config, time.Minute)
-	pageMeta := core.NewPageDomain(svcMeta, options.Config, options.Domain, options.DefaultBranch)
+	backend = core.NewCacheBackend(backend, options.KVConfig, options.MetaTTL)
+	svcMeta := core.NewServerMeta(options.HttpClient, backend, options.KVConfig, options.Domain, options.MetaTTL)
+	pageMeta := core.NewPageDomain(svcMeta, options.KVConfig, options.Domain, options.DefaultBranch)
 	reader := core.NewCacheBackendBlobReader(options.HttpClient, backend, options.Cache, options.MaxCacheSize)
 	return &Server{
+		backend: backend,
 		options: &options,
 		meta:    pageMeta,
 		reader:  reader,
@@ -91,24 +104,43 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error {
-	if request.Method != "GET" {
-		return os.ErrNotExist
-	}
-	meta, err := s.meta.ParseDomainMeta(request.Host, request.URL.Path, request.URL.Query().Get("branch"))
+	domainHost := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
+	meta, err := s.meta.ParseDomainMeta(
+		domainHost,
+		request.URL.Path,
+		request.URL.Query().Get("branch"))
 	if err != nil {
 		return err
 	}
 	zap.L().Debug("获取请求", zap.Any("request", meta.Path))
-	// todo(feat) : 支持 http range
-	if meta.Domain != "" && meta.Domain != request.Host {
-		zap.L().Debug("重定向地址", zap.Any("src", request.Host), zap.Any("dst", meta.Domain))
-		http.Redirect(writer, request, fmt.Sprintf("https://%s/%s", meta.Domain, meta.Path), http.StatusFound)
+	if len(meta.Alias) > 0 && !slices.Contains(meta.Alias, domainHost) {
+		zap.L().Debug("重定向地址", zap.Any("src", request.Host), zap.Any("dst", meta.Alias[0]))
+		http.Redirect(writer, request, fmt.Sprintf("https://%s/%s", meta.Alias[0], meta.Path), http.StatusFound)
 		return nil
+	}
+	for prefix, backend := range meta.Proxy {
+		if strings.HasPrefix(meta.Path, prefix) {
+			targetPath := strings.TrimPrefix(meta.Path, prefix)
+			if !strings.HasPrefix(targetPath, "/") {
+				targetPath = "/" + targetPath
+			}
+			zap.L().Debug("命中反向代理", zap.Any("prefix", prefix), zap.Any("backend", backend),
+				zap.Any("path", meta.Path), zap.Any("target", targetPath))
+			request.URL.Path = targetPath
+			request.RequestURI = request.URL.RequestURI()
+			u, _ := url.Parse(backend)
+			httputil.NewSingleHostReverseProxy(u).ServeHTTP(writer, request)
+			return nil
+		}
+	}
+	// 如果不是反向代理路由则跳过任何配置
+	if request.Method != "GET" {
+		return os.ErrNotExist
 	}
 	result, err := s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if meta.HistoryRouteMode {
+			if meta.VRoute {
 				// 回退 abc => index.html
 				result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "index.html")
 				if err == nil {
@@ -127,8 +159,7 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	}
 	// 处理请求错误
 	if err != nil {
-		if meta.CustomNotFound && errors.Is(err, os.ErrNotExist) {
-			// 存在 404 页面的情况
+		if errors.Is(err, os.ErrNotExist) {
 			result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "404.html")
 			if err != nil {
 				return err
@@ -185,11 +216,12 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 }
 
 func (s *Server) Close() error {
-	if err := s.options.Config.Close(); err != nil {
+	if err := s.options.KVConfig.Close(); err != nil {
 		return err
 	}
 	if err := s.options.Cache.Close(); err != nil {
 		return err
 	}
+
 	return nil
 }

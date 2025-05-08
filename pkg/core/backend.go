@@ -23,6 +23,7 @@ type BranchInfo struct {
 }
 
 type Backend interface {
+	Close() error
 	// Repos return repo name + default branch
 	Repos(owner string) (map[string]string, error)
 	// Branches return branch + commit id
@@ -33,11 +34,15 @@ type Backend interface {
 
 type CacheBackend struct {
 	backend Backend
-	config  utils.Config
+	config  utils.KVConfig
 	ttl     time.Duration
 }
 
-func NewCacheBackend(backend Backend, config utils.Config, ttl time.Duration) *CacheBackend {
+func (c *CacheBackend) Close() error {
+	return c.backend.Close()
+}
+
+func NewCacheBackend(backend Backend, config utils.KVConfig, ttl time.Duration) *CacheBackend {
 	return &CacheBackend{backend: backend, config: config, ttl: ttl}
 }
 

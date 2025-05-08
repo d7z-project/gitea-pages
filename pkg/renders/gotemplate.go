@@ -5,13 +5,15 @@ import (
 	"io"
 	"net/http"
 
+	"gopkg.d7z.net/gitea-pages/pkg/core"
+
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
 type GoTemplate struct{}
 
 func init() {
-	RegisterRender("gotemplate", &GoTemplate{})
+	core.RegisterRender("gotemplate", &GoTemplate{})
 }
 
 func (g GoTemplate) Render(w http.ResponseWriter, r *http.Request, input io.Reader) error {

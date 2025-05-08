@@ -1,4 +1,4 @@
-package renders
+package core
 
 import (
 	"io"

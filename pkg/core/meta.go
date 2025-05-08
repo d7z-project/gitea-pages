@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
 	"time"
 
-	"gopkg.d7z.net/gitea-pages/pkg/renders"
+	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 
 	"github.com/gobwas/glob"
-
-	"go.uber.org/zap"
 
 	"github.com/pkg/errors"
 
@@ -26,8 +26,10 @@ var regexpHostname = regexp.MustCompile(`^(?:([a-z0-9-]+|\*)\.)?([a-z0-9-]{1,61}
 type ServerMeta struct {
 	Backend
 
+	Domain string
+
 	client *http.Client
-	cache  utils.Config
+	cache  utils.KVConfig
 	ttl    time.Duration
 
 	locker *utils.Locker
@@ -35,17 +37,28 @@ type ServerMeta struct {
 
 type renderCompiler struct {
 	regex glob.Glob
-	renders.Render
+	Render
+}
+
+// PageConfig 配置
+type PageConfig struct {
+	Alias   []string          `yaml:"required"`  // 重定向地址
+	Renders map[string]string `yaml:"templates"` // 渲染器地址
+
+	VirtualRoute bool              `yaml:"v-route"` // 是否使用虚拟路由（任何路径均使用 /index.html 返回 200 响应）
+	ReverseProxy map[string]string `yaml:"proxy"`   // 反向代理路由
 }
 
 type PageMetaContent struct {
-	CommitID         string              `json:"id"`               // 提交 COMMIT ID
-	IsPage           bool                `json:"pg"`               // 是否为 Page
-	Domain           string              `json:"domain"`           // 匹配的域名
-	HistoryRouteMode bool                `json:"historyRouteMode"` // 路由模式
-	CustomNotFound   bool                `json:"404"`              // 注册了自定义 404 页面
-	LastModified     time.Time           `json:"up"`               // 上次更新时间
-	Renders          map[string][]string `json:"renders"`          // 配置的渲染器
+	CommitID     string    `json:"commit-id"`     // 提交 COMMIT ID
+	LastModified time.Time `json:"last-modified"` // 上次更新时间
+	IsPage       bool      `json:"is-page"`       // 是否为 Page
+	ErrorMsg     string    `json:"error"`         // 错误消息
+
+	VRoute  bool                `yaml:"v-route"` // 虚拟路由
+	Alias   []string            `yaml:"aliases"` // 重定向
+	Proxy   map[string]string   `yaml:"proxy"`   // 反向代理
+	Renders map[string][]string `json:"renders"` // 配置的渲染器
 
 	rendersL []*renderCompiler
 }
@@ -57,14 +70,14 @@ func (m *PageMetaContent) From(data string) error {
 		for _, g := range gs {
 			m.rendersL = append(m.rendersL, &renderCompiler{
 				regex:  glob.MustCompile(g),
-				Render: renders.GetRender(key),
+				Render: GetRender(key),
 			})
 		}
 	}
 	return err
 }
 
-func (m *PageMetaContent) TryRender(path ...string) renders.Render {
+func (m *PageMetaContent) TryRender(path ...string) Render {
 	for _, s := range path {
 		for _, compiler := range m.rendersL {
 			if compiler.regex.Match(s) {
@@ -80,13 +93,15 @@ func (m *PageMetaContent) String() string {
 	return string(marshal)
 }
 
-func NewServerMeta(client *http.Client, backend Backend, config utils.Config, ttl time.Duration) *ServerMeta {
-	return &ServerMeta{backend, client, config, ttl, utils.NewLocker()}
+func NewServerMeta(client *http.Client, backend Backend, kv utils.KVConfig, domain string, ttl time.Duration) *ServerMeta {
+	return &ServerMeta{backend, domain, client, kv, ttl, utils.NewLocker()}
 }
 
-func (s *ServerMeta) GetMeta(baseDomain, owner, repo, branch string) (*PageMetaContent, error) {
+func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, error) {
 	rel := &PageMetaContent{
 		IsPage:  false,
+		Proxy:   make(map[string]string),
+		Alias:   make([]string, 0),
 		Renders: make(map[string][]string),
 	}
 	if repos, err := s.Repos(owner); err != nil {
@@ -144,41 +159,67 @@ func (s *ServerMeta) GetMeta(baseDomain, owner, repo, branch string) (*PageMetaC
 	} else {
 		rel.IsPage = true
 	}
-	rel.CustomNotFound, _ = s.FileExists(owner, repo, rel.CommitID, "404.html")
-	if cname, err := s.ReadString(owner, repo, rel.CommitID, "CNAME"); err == nil {
-		cname = strings.TrimSpace(cname)
-		if regexpHostname.MatchString(cname) && !strings.HasSuffix(strings.ToLower(cname), strings.ToLower(baseDomain)) {
-			rel.Domain = cname
-		} else {
-			zap.L().Debug("指定的 CNAME 不合法", zap.String("cname", cname))
-		}
+	errFunc := func(err error) (*PageMetaContent, error) {
+		rel.IsPage = false
+		rel.ErrorMsg = err.Error()
+		_ = s.cache.Put(key, rel.String(), s.ttl)
+		return nil, err
 	}
-	if r, err := s.ReadString(owner, repo, rel.CommitID, ".render"); err == nil {
-		for _, render := range strings.Split(r, "\n") {
-			render = strings.TrimSpace(render)
-			if strings.HasPrefix(render, "#") {
-				continue
+
+	if data, err := s.ReadString(owner, repo, rel.CommitID, ".pages.yaml"); err == nil {
+		cfg := new(PageConfig)
+		if err = yaml.Unmarshal([]byte(data), cfg); err != nil {
+			return errFunc(err)
+		}
+		rel.Alias = cfg.Alias
+		rel.VRoute = cfg.VirtualRoute
+		for _, cname := range cfg.Alias {
+			cname = strings.TrimSpace(cname)
+			if regexpHostname.MatchString(cname) && !strings.HasSuffix(strings.ToLower(cname), strings.ToLower(s.Domain)) {
+				rel.Alias = append(rel.Alias, cname)
+			} else {
+				return errFunc(errors.New("invalid alias name " + cname))
 			}
-			before, after, found := strings.Cut(render, " ")
-			before = strings.TrimSpace(before)
-			after = strings.TrimSpace(after)
-			if found {
-				if r := renders.GetRender(before); r != nil {
-					if g, err := glob.Compile(after); err == nil {
-						rel.Renders[before] = append(rel.Renders[before], after)
+		}
+		for sType, patterns := range cfg.Renders {
+			if r := GetRender(sType); r != nil {
+				for _, pattern := range strings.Split(patterns, ",") {
+					rel.Renders[sType] = append(rel.Renders[sType], pattern)
+					if g, err := glob.Compile(strings.TrimSpace(pattern)); err == nil {
 						rel.rendersL = append(rel.rendersL, &renderCompiler{
 							regex:  g,
 							Render: r,
 						})
+					} else {
+						return errFunc(err)
 					}
 				}
 			}
-
 		}
+		for path, backend := range cfg.ReverseProxy {
+			path = strings.TrimSpace(path)
+			path = strings.ReplaceAll(path, "//", "/")
+			path = strings.ReplaceAll(path, "//", "/")
+			if !strings.HasPrefix(path, "/") {
+				path = "/" + path
+			}
+			if strings.HasSuffix(path, "/") {
+				path = path[:len(path)-1]
+			}
+			var rUrl *url.URL
+			if rUrl, err = url.Parse(backend); err != nil {
+				return errFunc(err)
+			}
+			if rUrl.Scheme != "http" && rUrl.Scheme != "https" {
+				return errFunc(errors.New("invalid backend url " + backend))
+			}
+			rel.Proxy[path] = rUrl.String()
+		}
+	} else {
+		// 不存在配置，但也可以重定向
+		zap.L().Debug("failed to read meta data", zap.String("error", err.Error()))
 	}
-	if find, _ := s.FileExists(owner, repo, rel.CommitID, ".history"); find {
-		rel.HistoryRouteMode = true
-	}
+
 	_ = s.cache.Put(key, rel.String(), s.ttl)
 	return rel, nil
 }

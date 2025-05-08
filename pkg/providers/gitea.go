@@ -122,3 +122,7 @@ func (g *ProviderGitea) Open(client *http.Client, owner, repo, commit, path stri
 	req.Header.Add("Authorization", "token "+g.Token)
 	return client.Do(req)
 }
+
+func (g *ProviderGitea) Close() error {
+	return nil
+}

@@ -24,6 +24,23 @@ make gitea-pages
 
 具体配置可查看 [`config.yaml`](./config.yaml)。
 
+
+### Page Config
+
+在项目的默认分支创建 `.pages.yaml`,填入如下内容
+
+```yaml
+v-route: true
+alias:
+  - "example.com"
+  - "example2.com"
+renders:
+  gotemplate: '**/*.tmpl,**/index.html'
+proxy:
+  /api: https://github.com/api 
+
+```
+
 ### Render
 
 说明: **不会**将文件系统 引入到渲染器中，复杂的渲染流程应该采用更加灵活轻便的方案
@@ -40,6 +57,10 @@ gotemplate     **/*.tmpl
 
 - [x] 内容缓存
 - [x] CNAME 自定义域名
+- [x] 模板渲染
+- [ ] 反向代理请求
+  - [ ] HTTP
+  - [ ] Websocket
 - [ ] OAuth2 授权访问私有页面
 - [ ] ~~http01 自动签发证书~~: 交由 Caddy 完成
 - [ ] ~~Web 钩子触发更新~~: 对实时性需求不大
