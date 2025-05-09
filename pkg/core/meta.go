@@ -103,7 +103,10 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 		_ = s.cache.Put(key, rel.String(), s.ttl)
 		return nil, err
 	}
-
+	// 添加默认跳过的内容
+	for _, defIgnore := range rel.Ignore {
+		rel.ignoreL = append(rel.ignoreL, glob.MustCompile(defIgnore))
+	}
 	// 解析配置
 	if data, err := s.ReadString(owner, repo, rel.CommitID, ".pages.yaml"); err == nil {
 		cfg := new(PageConfig)
