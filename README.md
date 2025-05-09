@@ -26,7 +26,7 @@ For specific configurations, check [`config.yaml`](./config.yaml).
 
 ### Page Config
 
-Create `.pages.yaml` in the project's default branch and fill in the following content:
+Create `.pages.yaml` in the project's `gh-pages` branch and fill in the following content:
 
 ```yaml
 v-route: true # Virtual routing

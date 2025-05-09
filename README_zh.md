@@ -27,7 +27,7 @@ make gitea-pages
 
 ### Page Config
 
-在项目的默认分支创建 `.pages.yaml`,填入如下内容
+在项目的 `gh-pages` 分支创建 `.pages.yaml`,填入如下内容
 
 ```yaml
 v-route: true # 虚拟路由
