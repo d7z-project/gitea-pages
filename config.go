@@ -81,6 +81,8 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		MaxCacheSize:        int(cacheSize),
 		HttpClient:          http.DefaultClient,
 		MetaTTL:             time.Minute,
+		EnableRender:        c.Render.Enable,
+		EnableProxy:         c.Proxy.Enable,
 		DefaultErrorHandler: c.ErrorHandler,
 		Cache:               utils.NewCacheMemory(int(cacheMaxSize), int(cacheMaxSize)),
 	}
@@ -135,12 +137,11 @@ type ConfigPage struct {
 }
 
 type ConfigProxy struct {
-	Enable   bool     `yaml:"enable"` // 是否允许反向代理模型
-	DenyList []string `yaml:"deny"`   // 反向代理黑名单
+	Enable bool `yaml:"enable"` // 是否允许反向代理
 }
 
 type ConfigRender struct {
-	Enable bool `yaml:"enable"` // 开启渲染器
+	Enable bool `yaml:"enable"` // 是否开启渲染器
 }
 
 type ConfigCache struct {

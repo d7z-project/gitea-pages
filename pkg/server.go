@@ -42,6 +42,9 @@ type ServerOptions struct {
 
 	MetaTTL time.Duration
 
+	EnableRender bool
+	EnableProxy  bool
+
 	DefaultErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -55,6 +58,8 @@ func DefaultOptions(domain string) ServerOptions {
 		MaxCacheSize:  1024 * 1024 * 10,
 		HttpClient:    http.DefaultClient,
 		MetaTTL:       time.Minute,
+		EnableRender:  true,
+		EnableProxy:   true,
 		DefaultErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, "page not found.", http.StatusNotFound)
@@ -119,22 +124,24 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		return nil
 	}
 
-	for prefix, backend := range meta.Proxy {
-		proxyPath := "/" + meta.Path
-		if strings.HasPrefix(proxyPath, prefix) {
-			targetPath := strings.TrimPrefix(proxyPath, prefix)
-			if !strings.HasPrefix(targetPath, "/") {
-				targetPath = "/" + targetPath
+	if s.options.EnableProxy {
+		for prefix, backend := range meta.Proxy {
+			proxyPath := "/" + meta.Path
+			if strings.HasPrefix(proxyPath, prefix) {
+				targetPath := strings.TrimPrefix(proxyPath, prefix)
+				if !strings.HasPrefix(targetPath, "/") {
+					targetPath = "/" + targetPath
+				}
+				u, _ := url.Parse(backend)
+				request.URL.Path = targetPath
+				request.RequestURI = request.URL.RequestURI()
+				proxy := httputil.NewSingleHostReverseProxy(u)
+				proxy.Transport = s.options.HttpClient.Transport
+				zap.L().Debug("命中反向代理", zap.Any("prefix", prefix), zap.Any("backend", backend),
+					zap.Any("path", proxyPath), zap.Any("target", fmt.Sprintf("%s%s", u, targetPath)))
+				proxy.ServeHTTP(writer, request)
+				return nil
 			}
-			u, _ := url.Parse(backend)
-			request.URL.Path = targetPath
-			request.RequestURI = request.URL.RequestURI()
-			proxy := httputil.NewSingleHostReverseProxy(u)
-			proxy.Transport = s.options.HttpClient.Transport
-			zap.L().Debug("命中反向代理", zap.Any("prefix", prefix), zap.Any("backend", backend),
-				zap.Any("path", proxyPath), zap.Any("target", fmt.Sprintf("%s%s", u, targetPath)))
-			proxy.ServeHTTP(writer, request)
-			return nil
 		}
 	}
 	// 如果不是反向代理路由则跳过任何配置
@@ -174,7 +181,7 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 			}
 			writer.Header().Set("Content-Type", mime.TypeByExtension(".html"))
 			writer.WriteHeader(http.StatusNotFound)
-			if render := meta.TryRender(meta.Path, "/404.html"); render != nil {
+			if render := meta.TryRender(meta.Path, "/404.html"); render != nil && s.options.EnableRender {
 				defer result.Close()
 				if err = render.Render(writer, request, result); err != nil {
 					return err
@@ -191,6 +198,9 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	}
 	fileName := filepath.Base(meta.Path)
 	render := meta.TryRender(meta.Path)
+	if !s.options.EnableRender {
+		render = nil
+	}
 	defer result.Close()
 	if reader, ok := result.(*utils.CacheContent); ok {
 		writer.Header().Add("X-Cache", "HIT")
