@@ -23,3 +23,10 @@ page:
   404: /path/to/html.gotmpl
   # 默认 500 页面模板
   500: /path/to/html.gotmpl
+
+# 渲染器配置
+render:
+  enable: false
+# 反向代理配置
+proxy:
+  enable: false
