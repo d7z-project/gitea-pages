@@ -148,11 +148,13 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	if request.Method != "GET" {
 		return os.ErrNotExist
 	}
-	if meta.IsIgnore(meta.Path) {
+	var result io.ReadCloser
+	if meta.IgnorePath(meta.Path) {
 		zap.L().Debug("ignore path", zap.Any("request", request.RequestURI), zap.Any("meta.path", meta.Path))
-		return os.ErrNotExist
+		err = os.ErrNotExist
+	} else {
+		result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	}
-	result, err := s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if meta.VRoute {

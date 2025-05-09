@@ -59,7 +59,7 @@ func (m *PageMetaContent) From(data string) error {
 	return err
 }
 
-func (m *PageMetaContent) IsIgnore(path string) bool {
+func (m *PageMetaContent) IgnorePath(path string) bool {
 	for _, g := range m.ignoreL {
 		if g.Match(path) {
 			return true
