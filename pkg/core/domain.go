@@ -4,9 +4,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/pkg/errors"
+
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -83,6 +84,10 @@ func (p *PageDomain) ReturnMeta(owner string, repo string, branch string, path [
 		return rel, nil
 	} else {
 		zap.L().Debug("查询错误", zap.Error(err))
+		if meta != nil {
+			// 解析错误汇报
+			return nil, errors.New(meta.ErrorMsg)
+		}
 	}
-	return nil, errors.Wrapf(os.ErrNotExist, strings.Join(path, "/"))
+	return nil, errors.Wrap(os.ErrNotExist, strings.Join(path, "/"))
 }

@@ -30,37 +30,24 @@ make gitea-pages
 在项目的默认分支创建 `.pages.yaml`,填入如下内容
 
 ```yaml
-v-route: true
-alias:
+v-route: true # 虚拟路由
+alias: # CNAME
   - "example.com"
   - "example2.com"
-renders:
+renders: # 渲染器
   gotemplate: '**/*.tmpl,**/index.html'
 proxy:
-  /api: https://github.com/api 
+  /api: https://github.com/api
+ignore: .git/**,.pages.yaml
 
 ```
-
-### Render
-
-说明: **不会**将文件系统 引入到渲染器中，复杂的渲染流程应该采用更加灵活轻便的方案
-
-在项目的根目录创建 `.render` 文件，填入如下内容:
-
-```sh
-#  parser       match
-gotemplate     **/*.tmpl
-```
-其中，`gotemplate` 为解析器类型，`**/*.tmpl` 为匹配的路径，使用 `github.com/gobwas/glob`
 
 ## TODO
 
 - [x] 内容缓存
 - [x] CNAME 自定义域名
 - [x] 模板渲染
-- [ ] 反向代理请求
-  - [ ] HTTP
-  - [ ] Websocket
+- [x] 反向代理请求
 - [ ] OAuth2 授权访问私有页面
 - [ ] ~~http01 自动签发证书~~: 交由 Caddy 完成
 - [ ] ~~Web 钩子触发更新~~: 对实时性需求不大

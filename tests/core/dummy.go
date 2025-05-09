@@ -19,7 +19,7 @@ type ProviderDummy struct {
 }
 
 func NewDummy() (*ProviderDummy, error) {
-	temp, err := os.MkdirTemp("", "dummy")
+	temp, err := os.MkdirTemp("", "dummy-*")
 	if err != nil {
 		return nil, err
 	}

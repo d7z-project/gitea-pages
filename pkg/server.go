@@ -118,23 +118,31 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		http.Redirect(writer, request, fmt.Sprintf("https://%s/%s", meta.Alias[0], meta.Path), http.StatusFound)
 		return nil
 	}
+
 	for prefix, backend := range meta.Proxy {
-		if strings.HasPrefix(meta.Path, prefix) {
-			targetPath := strings.TrimPrefix(meta.Path, prefix)
+		proxyPath := "/" + meta.Path
+		if strings.HasPrefix(proxyPath, prefix) {
+			targetPath := strings.TrimPrefix(proxyPath, prefix)
 			if !strings.HasPrefix(targetPath, "/") {
 				targetPath = "/" + targetPath
 			}
-			zap.L().Debug("命中反向代理", zap.Any("prefix", prefix), zap.Any("backend", backend),
-				zap.Any("path", meta.Path), zap.Any("target", targetPath))
+			u, _ := url.Parse(backend)
 			request.URL.Path = targetPath
 			request.RequestURI = request.URL.RequestURI()
-			u, _ := url.Parse(backend)
-			httputil.NewSingleHostReverseProxy(u).ServeHTTP(writer, request)
+			proxy := httputil.NewSingleHostReverseProxy(u)
+			proxy.Transport = s.options.HttpClient.Transport
+			zap.L().Debug("命中反向代理", zap.Any("prefix", prefix), zap.Any("backend", backend),
+				zap.Any("path", proxyPath), zap.Any("target", fmt.Sprintf("%s%s", u, targetPath)))
+			proxy.ServeHTTP(writer, request)
 			return nil
 		}
 	}
 	// 如果不是反向代理路由则跳过任何配置
 	if request.Method != "GET" {
+		return os.ErrNotExist
+	}
+	if meta.IsIgnore(meta.Path) {
+		zap.L().Debug("ignore path", zap.Any("request", request.RequestURI), zap.Any("meta.path", meta.Path))
 		return os.ErrNotExist
 	}
 	result, err := s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
@@ -222,6 +230,5 @@ func (s *Server) Close() error {
 	if err := s.options.Cache.Close(); err != nil {
 		return err
 	}
-
-	return nil
+	return s.backend.Close()
 }

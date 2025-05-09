@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
 )
@@ -20,7 +21,9 @@ type TestServer struct {
 type SvcOpts func(options *pkg.ServerOptions)
 
 func NewDefaultTestServer() *TestServer {
-	return NewTestServer("example.com")
+	return NewTestServer("example.com", func(options *pkg.ServerOptions) {
+		options.MetaTTL = 0
+	})
 }
 
 func NewTestServer(domain string, opts ...SvcOpts) *TestServer {
@@ -47,13 +50,13 @@ func NewTestServer(domain string, opts ...SvcOpts) *TestServer {
 	}
 }
 
-func (t *TestServer) AddFile(path, data string) {
+func (t *TestServer) AddFile(path, data string, args ...interface{}) {
 	join := filepath.Join(t.dummy.BaseDir, path)
 	err := os.MkdirAll(filepath.Dir(join), 0o755)
 	if err != nil {
 		panic(err)
 	}
-	err = os.WriteFile(join, []byte(data), 0o644)
+	err = os.WriteFile(join, []byte(fmt.Sprintf(data, args...)), 0o644)
 	if err != nil {
 		panic(err)
 	}
@@ -67,7 +70,7 @@ func (t *TestServer) OpenFile(url string) ([]byte, *http.Response, error) {
 		defer response.Body.Close()
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, response, fmt.Errorf(response.Status)
+		return nil, response, errors.New(response.Status)
 	}
 	all, _ := io.ReadAll(response.Body)
 	return all, response, nil

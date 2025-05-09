@@ -9,3 +9,7 @@ gitea-pages: $(shell find . -type f -name "*.go" ) go.mod go.sum
 
 debug: gitea-pages
 	@./gitea-pages -conf config-local.yaml -debug
+
+.PHONY: test
+test:
+	@go test -v ./...
