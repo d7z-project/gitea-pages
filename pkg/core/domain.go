@@ -52,19 +52,22 @@ func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainCo
 	}
 	owner := strings.TrimSuffix(domain, "."+p.baseDomain)
 	repo := pathArr[0]
+	var returnMeta *PageDomainContent
+	var err error
 	if repo == "" {
-		// 回退到默认仓库
-		repo = p.baseDomain
-		zap.L().Debug("fail back to default repo", zap.String("repo", repo))
+		// 回退到默认仓库 (路径未包含仓库)
+		zap.L().Debug("fail back to default repo", zap.String("repo", domain))
+		returnMeta, err = p.ReturnMeta(owner, domain, branch, pathArr)
+	} else {
+		returnMeta, err = p.ReturnMeta(owner, repo, branch, pathArr[1:])
 	}
-	returnMeta, err := p.ReturnMeta(owner, repo, branch, pathArr[1:])
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	} else if err == nil {
 		return returnMeta, nil
 	}
-	// 回退到默认页面
-	return p.ReturnMeta(owner, repo, domain, pathArr)
+	// 发现 repo 的情况下回退到默认页面
+	return p.ReturnMeta(owner, domain, branch, pathArr)
 }
 
 func (p *PageDomain) ReturnMeta(owner string, repo string, branch string, path []string) (*PageDomainContent, error) {

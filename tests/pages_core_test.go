@@ -54,6 +54,48 @@ alias:
 	assert.Equal(t, resp.Header.Get("Location"), "https://zzz.example.top/index.html")
 }
 
+func Test_fail_back(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		server := core.NewDefaultTestServer()
+		defer server.Close()
+		server.AddFile("org1/org1.example.com/gh-pages/index.html", "hello world")
+		data, _, err := server.OpenFile("https://org1.example.com/")
+		assert.NoError(t, err)
+		assert.Equal(t, "hello world", string(data))
+	})
+	t.Run("child_default", func(t *testing.T) {
+		server := core.NewDefaultTestServer()
+		defer server.Close()
+		server.AddFile("org1/org1.example.com/gh-pages/index.html", "hello world 1")
+		server.AddFile("org1/org1.example.com/gh-pages/child/index.html", "hello world 2")
+		data, _, err := server.OpenFile("https://org1.example.com/child/")
+		assert.NoError(t, err)
+		assert.Equal(t, "hello world 2", string(data))
+	})
+
+	t.Run("child_exist", func(t *testing.T) {
+		server := core.NewDefaultTestServer()
+		defer server.Close()
+		server.AddFile("org1/org1.example.com/gh-pages/index.html", "hello world 1")
+		server.AddFile("org1/org1.example.com/gh-pages/child/index.html", "hello world 2")
+		server.AddFile("org1/child/gh-pages/index.html", "hello world 3")
+		data, _, err := server.OpenFile("https://org1.example.com/child/")
+		assert.NoError(t, err)
+		assert.Equal(t, "hello world 3", string(data))
+	})
+
+	t.Run("child_exist_failback", func(t *testing.T) {
+		server := core.NewDefaultTestServer()
+		defer server.Close()
+		server.AddFile("org1/org1.example.com/gh-pages/index.html", "hello world 1")
+		server.AddFile("org1/org1.example.com/gh-pages/child/index.html", "hello world 2")
+		server.AddFile("org1/child/gh-pages/no.html", "hello world 3")
+		data, _, err := server.OpenFile("https://org1.example.com/child/")
+		assert.NoError(t, err)
+		assert.Equal(t, "hello world 2", string(data))
+	})
+}
+
 func Test_get_v_route(t *testing.T) {
 	server := core.NewDefaultTestServer()
 	defer server.Close()
