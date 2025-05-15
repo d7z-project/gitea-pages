@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -137,8 +138,16 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 				request.RequestURI = request.URL.RequestURI()
 				proxy := httputil.NewSingleHostReverseProxy(u)
 				proxy.Transport = s.options.HttpClient.Transport
+
+				if host, _, err := net.SplitHostPort(request.RemoteAddr); err == nil {
+					request.Header.Set("X-Real-IP", host)
+				}
+				request.Header.Set("X-Page-IP", utils.GetRemoteIP(request))
+				request.Header.Set("X-Page-Refer", fmt.Sprintf("%s/%s/%s", meta.Owner, meta.Repo, meta.Path))
+				request.Header.Set("X-Page-Host", request.Host)
 				zap.L().Debug("命中反向代理", zap.Any("prefix", prefix), zap.Any("backend", backend),
 					zap.Any("path", proxyPath), zap.Any("target", fmt.Sprintf("%s%s", u, targetPath)))
+				// todo(security): 处理 websocket
 				proxy.ServeHTTP(writer, request)
 				return nil
 			}
