@@ -23,6 +23,7 @@ func NewServer() *VServer {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		zap.L().Debug("ServeHTTP", zap.String("url", r.URL.String()))
+		http.Error(w, "", http.StatusNotFound)
 	})
 	go func() {
 		_ = http.Serve(listener, mux)

@@ -144,6 +144,11 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 			}
 		}
 	}
+	// 在非反向代理时处理目录访问
+	if strings.HasSuffix(meta.Path, "/") || meta.Path == "" {
+		meta.Path = meta.Path + "index.html"
+	}
+
 	// 如果不是反向代理路由则跳过任何配置
 	if request.Method != "GET" {
 		return os.ErrNotExist

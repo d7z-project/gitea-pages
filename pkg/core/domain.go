@@ -77,9 +77,6 @@ func (p *PageDomain) ReturnMeta(owner string, repo string, branch string, path [
 		rel.Owner = owner
 		rel.Repo = repo
 		rel.Path = strings.Join(path, "/")
-		if strings.HasSuffix(rel.Path, "/") || rel.Path == "" {
-			rel.Path = rel.Path + "index.html"
-		}
 		if err = p.alias.Bind(meta.Alias, rel.Owner, rel.Repo, branch); err != nil {
 			zap.L().Warn("别名绑定失败", zap.Error(err))
 			return nil, err
