@@ -50,7 +50,7 @@ type ServerOptions struct {
 }
 
 func DefaultOptions(domain string) ServerOptions {
-	configMemory, _ := utils.NewConfigMemory("")
+	configMemory, _ := utils.NewAutoConfig("")
 	return ServerOptions{
 		Domain:        domain,
 		DefaultBranch: "gh-pages",

@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"net/http"
 	"os"
-	"path/filepath"
 	"text/template"
 	"time"
 
@@ -86,16 +85,11 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		DefaultErrorHandler: c.ErrorHandler,
 		Cache:               utils.NewCacheMemory(int(cacheMaxSize), int(cacheMaxSize)),
 	}
-	if c.Cache.Storage != "" {
-		if err := os.MkdirAll(filepath.Dir(c.Cache.Storage), 0o755); err != nil && !os.IsExist(err) {
-			return nil, err
-		}
-	}
-	memory, err := utils.NewConfigMemory(c.Cache.Storage)
+	cfg, err := utils.NewAutoConfig(c.Cache.Storage)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to init config memory")
 	}
-	rel.KVConfig = memory
+	rel.KVConfig = cfg
 	return &rel, nil
 }
 
