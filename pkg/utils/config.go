@@ -40,7 +40,7 @@ func NewAutoConfig(src string) (KVConfig, error) {
 		if pass == "" {
 			pass = query.Get("password")
 		}
-		db := query.Get("db")
+		db := strings.TrimPrefix(parse.Path, "/")
 		if db == "" {
 			db = "0"
 		}

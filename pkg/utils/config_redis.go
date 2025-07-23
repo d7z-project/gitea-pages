@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -17,13 +19,20 @@ func NewConfigRedis(ctx context.Context, addr string, password string, db int) (
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
+	zap.L().Debug("connect redis", zap.String("addr", addr), zap.Int("db", db))
+	client := redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Password: password,
+		DB:       db,
+	})
+	_, err := client.Ping(ctx).Result()
+	if err != nil {
+		_ = client.Close()
+		return nil, err
+	}
 	return &ConfigRedis{
-		ctx: ctx,
-		client: redis.NewClient(&redis.Options{
-			Addr:     addr,
-			Password: password,
-			DB:       db,
-		}),
+		ctx:    ctx,
+		client: client,
 	}, nil
 }
 
