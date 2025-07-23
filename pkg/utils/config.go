@@ -36,14 +36,19 @@ func NewAutoConfig(src string) (KVConfig, error) {
 		return NewConfigMemory(parse.Path)
 	case "redis":
 		query := parse.Query()
-		addr := query.Get("addr")
 		pass := query.Get("pass")
+		if pass == "" {
+			pass = query.Get("password")
+		}
 		db := query.Get("db")
+		if db == "" {
+			db = "0"
+		}
 		dbi, err := strconv.Atoi(db)
 		if err != nil {
 			return nil, err
 		}
-		return NewConfigRedis(context.Background(), addr, pass, dbi)
+		return NewConfigRedis(context.Background(), parse.Host, pass, dbi)
 	default:
 		return nil, fmt.Errorf("unsupported scheme: %s", parse.Scheme)
 	}
