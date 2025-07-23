@@ -41,7 +41,7 @@ func (r *ConfigRedis) Put(key string, value string, ttl time.Duration) error {
 	if ttl != TtlKeep {
 		builder.Ex(ttl)
 	}
-	return r.client.Do(r.ctx, builder.Nx().Build()).Error()
+	return r.client.Do(r.ctx, builder.Build()).Error()
 }
 
 func (r *ConfigRedis) Get(key string) (string, error) {
@@ -53,7 +53,11 @@ func (r *ConfigRedis) Get(key string) (string, error) {
 }
 
 func (r *ConfigRedis) Delete(key string) error {
-	return r.client.Do(r.ctx, r.client.B().Decr().Key(key).Build()).Error()
+	err := r.client.Do(r.ctx, r.client.B().Del().Key(key).Build()).Error()
+	if err != nil && errors.Is(err, valkey.Nil) {
+		return os.ErrNotExist
+	}
+	return nil
 }
 
 func (r *ConfigRedis) Close() error {
