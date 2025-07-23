@@ -3,31 +3,31 @@ package utils
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/pkg/errors"
+	"github.com/valkey-io/valkey-go"
 
-	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 type ConfigRedis struct {
 	ctx    context.Context
-	client *redis.Client
+	client valkey.Client
 }
 
 func NewConfigRedis(ctx context.Context, addr string, password string, db int) (*ConfigRedis, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
-	zap.L().Debug("connect redis", zap.String("addr", addr), zap.Int("db", db))
-	client := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
+	zap.L().Debug("connect redis", zap.String("addr", addr))
+	client, err := valkey.NewClient(valkey.ClientOption{
+		InitAddress: []string{addr},
+		Password:    password,
+		SelectDB:    db,
 	})
-	_, err := client.Ping(ctx).Result()
 	if err != nil {
-		_ = client.Close()
 		return nil, err
 	}
 	return &ConfigRedis{
@@ -37,17 +37,26 @@ func NewConfigRedis(ctx context.Context, addr string, password string, db int) (
 }
 
 func (r *ConfigRedis) Put(key string, value string, ttl time.Duration) error {
-	return r.client.Set(r.ctx, key, value, ttl).Err()
+	builder := r.client.B().Set().Key(key).Value(value)
+	if ttl != TtlKeep {
+		builder.Ex(ttl)
+	}
+	return r.client.Do(r.ctx, builder.Nx().Build()).Error()
 }
 
 func (r *ConfigRedis) Get(key string) (string, error) {
-	return r.client.Get(r.ctx, key).Result()
+	v, err := r.client.Do(r.ctx, r.client.B().Get().Key(key).Build()).ToString()
+	if err != nil && errors.Is(err, valkey.Nil) {
+		return "", os.ErrNotExist
+	}
+	return v, err
 }
 
 func (r *ConfigRedis) Delete(key string) error {
-	return r.client.Del(r.ctx, key).Err()
+	return r.client.Do(r.ctx, r.client.B().Decr().Key(key).Build()).Error()
 }
 
 func (r *ConfigRedis) Close() error {
-	return r.client.Close()
+	r.client.Close()
+	return nil
 }
