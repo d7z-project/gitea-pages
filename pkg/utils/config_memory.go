@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -52,7 +53,7 @@ type ConfigContent struct {
 	Ttl  *time.Time `json:"ttl,omitempty"`
 }
 
-func (m *ConfigMemory) Put(key string, value string, ttl time.Duration) error {
+func (m *ConfigMemory) Put(ctx context.Context, key string, value string, ttl time.Duration) error {
 	d := time.Now().Add(ttl)
 	td := &d
 	if ttl == -1 {
@@ -65,7 +66,7 @@ func (m *ConfigMemory) Put(key string, value string, ttl time.Duration) error {
 	return nil
 }
 
-func (m *ConfigMemory) Get(key string) (string, error) {
+func (m *ConfigMemory) Get(ctx context.Context, key string) (string, error) {
 	if value, ok := m.data.Load(key); ok {
 		content := value.(ConfigContent)
 		if content.Ttl != nil && time.Now().After(*content.Ttl) {
@@ -76,7 +77,7 @@ func (m *ConfigMemory) Get(key string) (string, error) {
 	return "", os.ErrNotExist
 }
 
-func (m *ConfigMemory) Delete(key string) error {
+func (m *ConfigMemory) Delete(ctx context.Context, key string) error {
 	m.data.Delete(key)
 	return nil
 }

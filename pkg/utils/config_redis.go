@@ -13,11 +13,10 @@ import (
 )
 
 type ConfigRedis struct {
-	ctx    context.Context
 	client valkey.Client
 }
 
-func NewConfigRedis(ctx context.Context, addr string, password string, db int) (*ConfigRedis, error) {
+func NewConfigRedis(addr string, password string, db int) (*ConfigRedis, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
@@ -31,33 +30,28 @@ func NewConfigRedis(ctx context.Context, addr string, password string, db int) (
 		return nil, err
 	}
 	return &ConfigRedis{
-		ctx:    ctx,
 		client: client,
 	}, nil
 }
 
-func (r *ConfigRedis) Put(key string, value string, ttl time.Duration) error {
+func (r *ConfigRedis) Put(ctx context.Context, key string, value string, ttl time.Duration) error {
 	builder := r.client.B().Set().Key(key).Value(value)
 	if ttl != TtlKeep {
 		builder.Ex(ttl)
 	}
-	return r.client.Do(r.ctx, builder.Build()).Error()
+	return r.client.Do(ctx, builder.Build()).Error()
 }
 
-func (r *ConfigRedis) Get(key string) (string, error) {
-	v, err := r.client.Do(r.ctx, r.client.B().Get().Key(key).Build()).ToString()
+func (r *ConfigRedis) Get(ctx context.Context, key string) (string, error) {
+	v, err := r.client.Do(ctx, r.client.B().Get().Key(key).Build()).ToString()
 	if err != nil && errors.Is(err, valkey.Nil) {
 		return "", os.ErrNotExist
 	}
 	return v, err
 }
 
-func (r *ConfigRedis) Delete(key string) error {
-	err := r.client.Do(r.ctx, r.client.B().Del().Key(key).Build()).Error()
-	if err != nil && errors.Is(err, valkey.Nil) {
-		return os.ErrNotExist
-	}
-	return nil
+func (r *ConfigRedis) Delete(ctx context.Context, key string) error {
+	return r.client.Do(ctx, r.client.B().Del().Key(key).Build()).Error()
 }
 
 func (r *ConfigRedis) Close() error {

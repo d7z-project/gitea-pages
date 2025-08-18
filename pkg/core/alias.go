@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -21,8 +22,8 @@ func NewDomainAlias(config utils.KVConfig) *DomainAlias {
 	return &DomainAlias{config: config}
 }
 
-func (a *DomainAlias) Query(domain string) (*Alias, error) {
-	get, err := a.config.Get("domain/alias/" + domain)
+func (a *DomainAlias) Query(ctx context.Context, domain string) (*Alias, error) {
+	get, err := a.config.Get(ctx, "domain/alias/"+domain)
 	if err != nil {
 		return nil, err
 	}
@@ -33,14 +34,14 @@ func (a *DomainAlias) Query(domain string) (*Alias, error) {
 	return rel, nil
 }
 
-func (a *DomainAlias) Bind(domains []string, owner, repo, branch string) error {
+func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, branch string) error {
 	oldDomains := make([]string, 0)
 	rKey := fmt.Sprintf("domain/r-alias/%s/%s/%s", owner, repo, branch)
-	if oldStr, err := a.config.Get(rKey); err == nil {
+	if oldStr, err := a.config.Get(ctx, rKey); err == nil {
 		_ = json.Unmarshal([]byte(oldStr), &oldDomains)
 	}
 	for _, oldDomain := range oldDomains {
-		if err := a.Unbind(oldDomain); err != nil {
+		if err := a.Unbind(ctx, oldDomain); err != nil {
 			return err
 		}
 	}
@@ -54,15 +55,15 @@ func (a *DomainAlias) Bind(domains []string, owner, repo, branch string) error {
 	}
 	aliasMetaRaw, _ := json.Marshal(aliasMeta)
 	domainsRaw, _ := json.Marshal(domains)
-	_ = a.config.Put(rKey, string(domainsRaw), utils.TtlKeep)
+	_ = a.config.Put(ctx, rKey, string(domainsRaw), utils.TtlKeep)
 	for _, domain := range domains {
-		if err := a.config.Put("domain/alias/"+domain, string(aliasMetaRaw), utils.TtlKeep); err != nil {
+		if err := a.config.Put(ctx, "domain/alias/"+domain, string(aliasMetaRaw), utils.TtlKeep); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *DomainAlias) Unbind(domain string) error {
-	return a.config.Delete("domain/alias/" + domain)
+func (a *DomainAlias) Unbind(ctx context.Context, domain string) error {
+	return a.config.Delete(ctx, "domain/alias/"+domain)
 }

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,7 +32,7 @@ func NewGitea(url string, token string) (*ProviderGitea, error) {
 	}, nil
 }
 
-func (g *ProviderGitea) Repos(owner string) (map[string]string, error) {
+func (g *ProviderGitea) Repos(ctx context.Context, owner string) (map[string]string, error) {
 	result := make(map[string]string)
 	if repos, resp, err := g.gitea.ListOrgRepos(owner, gitea.ListOrgReposOptions{
 		ListOptions: gitea.ListOptions{
@@ -74,7 +75,7 @@ func (g *ProviderGitea) Repos(owner string) (map[string]string, error) {
 	return result, nil
 }
 
-func (g *ProviderGitea) Branches(owner, repo string) (map[string]*core.BranchInfo, error) {
+func (g *ProviderGitea) Branches(ctx context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
 	result := make(map[string]*core.BranchInfo)
 	if branches, resp, err := g.gitea.ListRepoBranches(owner, repo, gitea.ListRepoBranchesOptions{
 		ListOptions: gitea.ListOptions{
@@ -102,7 +103,7 @@ func (g *ProviderGitea) Branches(owner, repo string) (map[string]*core.BranchInf
 	return result, nil
 }
 
-func (g *ProviderGitea) Open(client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
+func (g *ProviderGitea) Open(ctx context.Context, client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
 	giteaURL, err := url.JoinPath(g.BaseUrl, "api/v1/repos", owner, repo, "media", path)
 	if err != nil {
 		return nil, err

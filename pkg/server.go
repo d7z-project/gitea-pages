@@ -110,8 +110,10 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error {
+	ctx := request.Context()
 	domainHost := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
 	meta, err := s.meta.ParseDomainMeta(
+		ctx,
 		domainHost,
 		request.URL.Path,
 		request.URL.Query().Get("branch"))
@@ -167,19 +169,19 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		zap.L().Debug("ignore path", zap.Any("request", request.RequestURI), zap.Any("meta.path", meta.Path))
 		err = os.ErrNotExist
 	} else {
-		result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path)
+		result, err = s.reader.Open(ctx, meta.Owner, meta.Repo, meta.CommitID, meta.Path)
 	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if meta.VRoute {
 				// 回退 abc => index.html
-				result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "index.html")
+				result, err = s.reader.Open(ctx, meta.Owner, meta.Repo, meta.CommitID, "index.html")
 				if err == nil {
 					meta.Path = "index.html"
 				}
 			} else {
 				// 回退 abc => abc/ => abc/index.html
-				result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, meta.Path+"/index.html")
+				result, err = s.reader.Open(ctx, meta.Owner, meta.Repo, meta.CommitID, meta.Path+"/index.html")
 				if err == nil {
 					meta.Path = strings.Trim(meta.Path+"/index.html", "/")
 				}
@@ -191,7 +193,7 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	// 处理请求错误
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			result, err = s.reader.Open(meta.Owner, meta.Repo, meta.CommitID, "404.html")
+			result, err = s.reader.Open(ctx, meta.Owner, meta.Repo, meta.CommitID, "404.html")
 			if err != nil {
 				return err
 			}

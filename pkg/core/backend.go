@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	stdErr "errors"
 	"fmt"
@@ -25,11 +26,11 @@ type BranchInfo struct {
 type Backend interface {
 	Close() error
 	// Repos return repo name + default branch
-	Repos(owner string) (map[string]string, error)
+	Repos(ctx context.Context, owner string) (map[string]string, error)
 	// Branches return branch + commit id
-	Branches(owner, repo string) (map[string]*BranchInfo, error)
+	Branches(ctx context.Context, owner, repo string) (map[string]*BranchInfo, error)
 	// Open return file or error (error)
-	Open(client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error)
+	Open(ctx context.Context, client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error)
 }
 
 type CacheBackend struct {
@@ -46,15 +47,15 @@ func NewCacheBackend(backend Backend, config utils.KVConfig, ttl time.Duration) 
 	return &CacheBackend{backend: backend, config: config, ttl: ttl}
 }
 
-func (c *CacheBackend) Repos(owner string) (map[string]string, error) {
+func (c *CacheBackend) Repos(ctx context.Context, owner string) (map[string]string, error) {
 	ret := make(map[string]string)
 	key := fmt.Sprintf("repos/%s", owner)
-	store, err := c.config.Get(key)
+	store, err := c.config.Get(ctx, key)
 	if err != nil {
-		ret, err = c.backend.Repos(owner)
+		ret, err = c.backend.Repos(ctx, owner)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				_ = c.config.Put(key, "{}", c.ttl)
+				_ = c.config.Put(ctx, key, "{}", c.ttl)
 			}
 			return nil, err
 		}
@@ -62,7 +63,7 @@ func (c *CacheBackend) Repos(owner string) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err = c.config.Put(key, string(storeBin), c.ttl); err != nil {
+		if err = c.config.Put(ctx, key, string(storeBin), c.ttl); err != nil {
 			return nil, err
 		}
 	} else {
@@ -76,15 +77,15 @@ func (c *CacheBackend) Repos(owner string) (map[string]string, error) {
 	return ret, nil
 }
 
-func (c *CacheBackend) Branches(owner, repo string) (map[string]*BranchInfo, error) {
+func (c *CacheBackend) Branches(ctx context.Context, owner, repo string) (map[string]*BranchInfo, error) {
 	ret := make(map[string]*BranchInfo)
 	key := fmt.Sprintf("branches/%s/%s", owner, repo)
-	data, err := c.config.Get(key)
+	data, err := c.config.Get(ctx, key)
 	if err != nil {
-		ret, err = c.backend.Branches(owner, repo)
+		ret, err = c.backend.Branches(ctx, owner, repo)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				_ = c.config.Put(key, "{}", c.ttl)
+				_ = c.config.Put(ctx, key, "{}", c.ttl)
 			}
 			return nil, err
 		}
@@ -92,7 +93,7 @@ func (c *CacheBackend) Branches(owner, repo string) (map[string]*BranchInfo, err
 		if err != nil {
 			return nil, err
 		}
-		if err = c.config.Put(key, string(data), c.ttl); err != nil {
+		if err = c.config.Put(ctx, key, string(data), c.ttl); err != nil {
 			return nil, err
 		}
 	} else {
@@ -106,8 +107,8 @@ func (c *CacheBackend) Branches(owner, repo string) (map[string]*BranchInfo, err
 	return ret, nil
 }
 
-func (c *CacheBackend) Open(client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
-	return c.backend.Open(client, owner, repo, commit, path, headers)
+func (c *CacheBackend) Open(ctx context.Context, client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
+	return c.backend.Open(ctx, client, owner, repo, commit, path, headers)
 }
 
 type CacheBackendBlobReader struct {
@@ -121,7 +122,7 @@ func NewCacheBackendBlobReader(client *http.Client, base Backend, cache utils.Ca
 	return &CacheBackendBlobReader{client: client, base: base, cache: cache, maxSize: maxCacheSize}
 }
 
-func (c *CacheBackendBlobReader) Open(owner, repo, commit, path string) (io.ReadCloser, error) {
+func (c *CacheBackendBlobReader) Open(ctx context.Context, owner, repo, commit, path string) (io.ReadCloser, error) {
 	key := fmt.Sprintf("%s/%s/%s/%s", owner, repo, commit, path)
 	lastCache, err := c.cache.Get(key)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -132,7 +133,7 @@ func (c *CacheBackendBlobReader) Open(owner, repo, commit, path string) (io.Read
 	} else if lastCache != nil {
 		return lastCache, nil
 	}
-	open, err := c.base.Open(c.client, owner, repo, commit, path, http.Header{})
+	open, err := c.base.Open(ctx, c.client, owner, repo, commit, path, http.Header{})
 	if err != nil || open == nil {
 		if open != nil {
 			_ = open.Body.Close()

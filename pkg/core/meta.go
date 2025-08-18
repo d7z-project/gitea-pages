@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,9 +40,9 @@ func NewServerMeta(client *http.Client, backend Backend, kv utils.KVConfig, doma
 	return &ServerMeta{backend, domain, client, kv, ttl, utils.NewLocker()}
 }
 
-func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, error) {
+func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*PageMetaContent, error) {
 	rel := NewPageMetaContent()
-	if repos, err := s.Repos(owner); err != nil {
+	if repos, err := s.Repos(ctx, owner); err != nil {
 		return nil, err
 	} else {
 		defBranch := repos[repo]
@@ -52,7 +53,7 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 			branch = defBranch
 		}
 	}
-	if branches, err := s.Branches(owner, repo); err != nil {
+	if branches, err := s.Branches(ctx, owner, repo); err != nil {
 		return nil, err
 	} else {
 		info := branches[branch]
@@ -64,7 +65,7 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 	}
 
 	key := fmt.Sprintf("meta/%s/%s/%s", owner, repo, branch)
-	cache, err := s.cache.Get(key)
+	cache, err := s.cache.Get(ctx, key)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
@@ -79,7 +80,7 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 	mux := s.locker.Open(key)
 	mux.Lock()
 	defer mux.Unlock()
-	cache, err = s.cache.Get(key)
+	cache, err = s.cache.Get(ctx, key)
 	if err == nil {
 		if err = rel.From(cache); err == nil {
 			if !rel.IsPage {
@@ -90,9 +91,9 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 	}
 
 	// 确定存在 index.html , 否则跳过
-	if find, _ := s.FileExists(owner, repo, rel.CommitID, "index.html"); !find {
+	if find, _ := s.FileExists(ctx, owner, repo, rel.CommitID, "index.html"); !find {
 		rel.IsPage = false
-		_ = s.cache.Put(key, rel.String(), s.ttl)
+		_ = s.cache.Put(ctx, key, rel.String(), s.ttl)
 		return nil, os.ErrNotExist
 	} else {
 		rel.IsPage = true
@@ -100,7 +101,7 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 	errFunc := func(err error) (*PageMetaContent, error) {
 		rel.IsPage = false
 		rel.ErrorMsg = err.Error()
-		_ = s.cache.Put(key, rel.String(), s.ttl)
+		_ = s.cache.Put(ctx, key, rel.String(), s.ttl)
 		return nil, err
 	}
 	// 添加默认跳过的内容
@@ -108,7 +109,7 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 		rel.ignoreL = append(rel.ignoreL, glob.MustCompile(defIgnore))
 	}
 	// 解析配置
-	if data, err := s.ReadString(owner, repo, rel.CommitID, ".pages.yaml"); err == nil {
+	if data, err := s.ReadString(ctx, owner, repo, rel.CommitID, ".pages.yaml"); err == nil {
 		cfg := new(PageConfig)
 		if err = yaml.Unmarshal([]byte(data), cfg); err != nil {
 			return errFunc(err)
@@ -172,7 +173,7 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 	}
 
 	// 兼容 github 的 CNAME 模式
-	if cname, err := s.ReadString(owner, repo, rel.CommitID, "CNAME"); err == nil {
+	if cname, err := s.ReadString(ctx, owner, repo, rel.CommitID, "CNAME"); err == nil {
 		cname = strings.TrimSpace(cname)
 		if regexpHostname.MatchString(cname) && !strings.HasSuffix(strings.ToLower(cname), strings.ToLower(s.Domain)) {
 			rel.Alias = append(rel.Alias, cname)
@@ -182,12 +183,12 @@ func (s *ServerMeta) GetMeta(owner, repo, branch string) (*PageMetaContent, erro
 	}
 	rel.Alias = utils.ClearDuplicates(rel.Alias)
 	rel.Ignore = utils.ClearDuplicates(rel.Ignore)
-	_ = s.cache.Put(key, rel.String(), s.ttl)
+	_ = s.cache.Put(ctx, key, rel.String(), s.ttl)
 	return rel, nil
 }
 
-func (s *ServerMeta) ReadString(owner, repo, branch, path string) (string, error) {
-	resp, err := s.Open(s.client, owner, repo, branch, path, nil)
+func (s *ServerMeta) ReadString(ctx context.Context, owner, repo, branch, path string) (string, error) {
+	resp, err := s.Open(ctx, s.client, owner, repo, branch, path, nil)
 	if resp != nil {
 		defer resp.Body.Close()
 	}
@@ -204,8 +205,8 @@ func (s *ServerMeta) ReadString(owner, repo, branch, path string) (string, error
 	return string(all), nil
 }
 
-func (s *ServerMeta) FileExists(owner, repo, branch, path string) (bool, error) {
-	resp, err := s.Open(s.client, owner, repo, branch, path, nil)
+func (s *ServerMeta) FileExists(ctx context.Context, owner, repo, branch, path string) (bool, error) {
+	resp, err := s.Open(ctx, s.client, owner, repo, branch, path, nil)
 	if resp != nil {
 		defer resp.Body.Close()
 	}

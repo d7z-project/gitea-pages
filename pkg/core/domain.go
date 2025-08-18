@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -36,19 +37,19 @@ type PageDomainContent struct {
 	Path  string
 }
 
-func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainContent, error) {
+func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch string) (*PageDomainContent, error) {
 	if branch == "" {
 		branch = p.defaultBranch
 	}
 	pathArr := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	if !strings.HasSuffix(domain, "."+p.baseDomain) {
-		alias, err := p.alias.Query(domain) // 确定 alias 是否存在内容
+		alias, err := p.alias.Query(ctx, domain) // 确定 alias 是否存在内容
 		if err != nil {
 			zap.L().Warn("未知域名", zap.String("base", p.baseDomain), zap.String("domain", domain), zap.Error(err))
 			return nil, os.ErrNotExist
 		}
 		zap.L().Debug("命中别名", zap.String("domain", domain), zap.Any("alias", alias))
-		return p.ReturnMeta(alias.Owner, alias.Repo, alias.Branch, pathArr)
+		return p.ReturnMeta(ctx, alias.Owner, alias.Repo, alias.Branch, pathArr)
 	}
 	owner := strings.TrimSuffix(domain, "."+p.baseDomain)
 	repo := pathArr[0]
@@ -57,9 +58,9 @@ func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainCo
 	if repo == "" {
 		// 回退到默认仓库 (路径未包含仓库)
 		zap.L().Debug("fail back to default repo", zap.String("repo", domain))
-		returnMeta, err = p.ReturnMeta(owner, domain, branch, pathArr)
+		returnMeta, err = p.ReturnMeta(ctx, owner, domain, branch, pathArr)
 	} else {
-		returnMeta, err = p.ReturnMeta(owner, repo, branch, pathArr[1:])
+		returnMeta, err = p.ReturnMeta(ctx, owner, repo, branch, pathArr[1:])
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -67,17 +68,17 @@ func (p *PageDomain) ParseDomainMeta(domain, path, branch string) (*PageDomainCo
 		return returnMeta, nil
 	}
 	// 发现 repo 的情况下回退到默认页面
-	return p.ReturnMeta(owner, domain, branch, pathArr)
+	return p.ReturnMeta(ctx, owner, domain, branch, pathArr)
 }
 
-func (p *PageDomain) ReturnMeta(owner string, repo string, branch string, path []string) (*PageDomainContent, error) {
+func (p *PageDomain) ReturnMeta(ctx context.Context, owner string, repo string, branch string, path []string) (*PageDomainContent, error) {
 	rel := &PageDomainContent{}
-	if meta, err := p.GetMeta(owner, repo, branch); err == nil {
+	if meta, err := p.GetMeta(ctx, owner, repo, branch); err == nil {
 		rel.PageMetaContent = meta
 		rel.Owner = owner
 		rel.Repo = repo
 		rel.Path = strings.Join(path, "/")
-		if err = p.alias.Bind(meta.Alias, rel.Owner, rel.Repo, branch); err != nil {
+		if err = p.alias.Bind(ctx, meta.Alias, rel.Owner, rel.Repo, branch); err != nil {
 			zap.L().Warn("别名绑定失败", zap.Error(err))
 			return nil, err
 		}

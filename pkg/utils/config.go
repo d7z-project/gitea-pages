@@ -13,9 +13,9 @@ import (
 const TtlKeep = -1
 
 type KVConfig interface {
-	Put(key string, value string, ttl time.Duration) error
-	Get(key string) (string, error)
-	Delete(key string) error
+	Put(ctx context.Context, key string, value string, ttl time.Duration) error
+	Get(ctx context.Context, key string) (string, error)
+	Delete(ctx context.Context, key string) error
 	io.Closer
 }
 
@@ -48,7 +48,7 @@ func NewAutoConfig(src string) (KVConfig, error) {
 		if err != nil {
 			return nil, err
 		}
-		return NewConfigRedis(context.Background(), parse.Host, pass, dbi)
+		return NewConfigRedis(parse.Host, pass, dbi)
 	default:
 		return nil, fmt.Errorf("unsupported scheme: %s", parse.Scheme)
 	}
