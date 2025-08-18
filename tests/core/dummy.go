@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"mime"
 	"net/http"
@@ -28,7 +29,7 @@ func NewDummy() (*ProviderDummy, error) {
 	}, nil
 }
 
-func (p *ProviderDummy) Repos(owner string) (map[string]string, error) {
+func (p *ProviderDummy) Repos(ctx context.Context, owner string) (map[string]string, error) {
 	dir, err := os.ReadDir(filepath.Join(p.BaseDir, owner))
 	if err != nil {
 		return nil, err
@@ -42,7 +43,7 @@ func (p *ProviderDummy) Repos(owner string) (map[string]string, error) {
 	return repos, nil
 }
 
-func (p *ProviderDummy) Branches(owner, repo string) (map[string]*core.BranchInfo, error) {
+func (p *ProviderDummy) Branches(ctx context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
 	dir, err := os.ReadDir(filepath.Join(p.BaseDir, owner, repo))
 	if err != nil {
 		return nil, err
@@ -59,7 +60,7 @@ func (p *ProviderDummy) Branches(owner, repo string) (map[string]*core.BranchInf
 	return branches, nil
 }
 
-func (p *ProviderDummy) Open(_ *http.Client, owner, repo, commit, path string, _ http.Header) (*http.Response, error) {
+func (p *ProviderDummy) Open(ctx context.Context, _ *http.Client, owner, repo, commit, path string, _ http.Header) (*http.Response, error) {
 	open, err := os.Open(filepath.Join(p.BaseDir, owner, repo, commit, path))
 	if err != nil {
 		return nil, err
