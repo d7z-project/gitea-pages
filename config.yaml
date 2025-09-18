@@ -30,3 +30,5 @@ render:
 # 反向代理配置
 proxy:
   enable: false
+# 静态资源路径,可供任意网站使用 /.well-known/page-server/ 路径拉取文件
+static: /path/to/dir/

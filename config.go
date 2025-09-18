@@ -30,6 +30,8 @@ type Config struct {
 	Render ConfigRender `yaml:"render"` // 渲染配置
 	Proxy  ConfigProxy  `yaml:"proxy"`  // 反向代理配置
 
+	StaticDir string `yaml:"static"` // 静态资源提供路径
+
 	pageErrNotFound, pageErrUnknown *template.Template
 }
 
@@ -44,6 +46,15 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		return nil, errors.Wrap(err, "parse cache size")
 	}
 
+	if c.StaticDir != "" {
+		stat, err := os.Stat(c.StaticDir)
+		if err != nil {
+			return nil, errors.Wrap(err, "static dir not exists")
+		}
+		if !stat.IsDir() {
+			return nil, errors.New("static dir is not a directory")
+		}
+	}
 	cacheMaxSize, err = units.ParseBase2Bytes(c.Cache.MaxSize)
 	if err != nil {
 		return nil, errors.Wrap(err, "parse cache max size")
@@ -83,6 +94,7 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		EnableRender:        c.Render.Enable,
 		EnableProxy:         c.Proxy.Enable,
 		DefaultErrorHandler: c.ErrorHandler,
+		StaticDir:           c.StaticDir,
 		Cache:               utils.NewCacheMemory(int(cacheMaxSize), int(cacheMaxSize)),
 	}
 	cfg, err := utils.NewAutoConfig(c.Cache.Storage)

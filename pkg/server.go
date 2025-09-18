@@ -46,6 +46,8 @@ type ServerOptions struct {
 	EnableRender bool
 	EnableProxy  bool
 
+	StaticDir string
+
 	DefaultErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -61,6 +63,7 @@ func DefaultOptions(domain string) ServerOptions {
 		MetaTTL:       time.Minute,
 		EnableRender:  true,
 		EnableProxy:   true,
+		StaticDir:     "",
 		DefaultErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, "page not found.", http.StatusNotFound)
@@ -76,24 +79,36 @@ type Server struct {
 	meta    *core.PageDomain
 	reader  *core.CacheBackendBlobReader
 	backend core.Backend
+	fs      http.Handler
 }
+
+var staticPrefix = "/.well-known/page-server/"
 
 func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 	backend = core.NewCacheBackend(backend, options.KVConfig, options.MetaTTL)
 	svcMeta := core.NewServerMeta(options.HttpClient, backend, options.KVConfig, options.Domain, options.MetaTTL)
 	pageMeta := core.NewPageDomain(svcMeta, options.KVConfig, options.Domain, options.DefaultBranch)
 	reader := core.NewCacheBackendBlobReader(options.HttpClient, backend, options.Cache, options.MaxCacheSize)
+	var fs http.Handler
+	if options.StaticDir != "" {
+		fs = http.StripPrefix(staticPrefix, http.FileServer(http.Dir(options.StaticDir)))
+	}
 	return &Server{
 		backend: backend,
 		options: &options,
 		meta:    pageMeta,
 		reader:  reader,
+		fs:      fs,
 	}
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	sessionId, _ := uuid.NewRandom()
 	request.Header.Set("Session-ID", sessionId.String())
+	if s.fs != nil && strings.HasPrefix(request.URL.Path, staticPrefix) {
+		s.fs.ServeHTTP(writer, request)
+		return
+	}
 	defer func() {
 		if e := recover(); e != nil {
 			zap.L().Error("panic!", zap.Any("error", e), zap.Any("id", sessionId))

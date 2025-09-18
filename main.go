@@ -45,6 +45,7 @@ func main() {
 	defer giteaServer.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
+
 	svc := http.Server{Addr: config.Bind, Handler: giteaServer}
 	go func() {
 		select {
