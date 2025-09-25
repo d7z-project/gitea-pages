@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/alecthomas/units"
+	"gopkg.d7z.net/gitea-pages/pkg/middleware/cache"
+	"gopkg.d7z.net/gitea-pages/pkg/middleware/config"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -95,9 +97,9 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		EnableProxy:         c.Proxy.Enable,
 		DefaultErrorHandler: c.ErrorHandler,
 		StaticDir:           c.StaticDir,
-		Cache:               utils.NewCacheMemory(int(cacheMaxSize), int(cacheMaxSize)),
+		Cache:               cache.NewCacheMemory(int(cacheMaxSize), int(cacheMaxSize)),
 	}
-	cfg, err := utils.NewAutoConfig(c.Cache.Storage)
+	cfg, err := config.NewAutoConfig(c.Cache.Storage)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to init config memory")
 	}

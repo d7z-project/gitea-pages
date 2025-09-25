@@ -14,6 +14,8 @@ import (
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"gopkg.d7z.net/gitea-pages/pkg/middleware/cache"
+	"gopkg.d7z.net/gitea-pages/pkg/middleware/config"
 
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
@@ -35,7 +37,7 @@ type Backend interface {
 
 type CacheBackend struct {
 	backend Backend
-	config  utils.KVConfig
+	config  config.KVConfig
 	ttl     time.Duration
 }
 
@@ -43,7 +45,7 @@ func (c *CacheBackend) Close() error {
 	return c.backend.Close()
 }
 
-func NewCacheBackend(backend Backend, config utils.KVConfig, ttl time.Duration) *CacheBackend {
+func NewCacheBackend(backend Backend, config config.KVConfig, ttl time.Duration) *CacheBackend {
 	return &CacheBackend{backend: backend, config: config, ttl: ttl}
 }
 
@@ -113,12 +115,12 @@ func (c *CacheBackend) Open(ctx context.Context, client *http.Client, owner, rep
 
 type CacheBackendBlobReader struct {
 	client  *http.Client
-	cache   utils.Cache
+	cache   cache.Cache
 	base    Backend
 	maxSize int
 }
 
-func NewCacheBackendBlobReader(client *http.Client, base Backend, cache utils.Cache, maxCacheSize int) *CacheBackendBlobReader {
+func NewCacheBackendBlobReader(client *http.Client, base Backend, cache cache.Cache, maxCacheSize int) *CacheBackendBlobReader {
 	return &CacheBackendBlobReader{client: client, base: base, cache: cache, maxSize: maxCacheSize}
 }
 
@@ -173,7 +175,7 @@ func (c *CacheBackendBlobReader) Open(ctx context.Context, owner, repo, commit, 
 	if err = c.cache.Put(key, bytes.NewBuffer(allBytes)); err != nil {
 		zap.L().Warn("缓存归档失败", zap.Error(err), zap.Int("Size", len(allBytes)), zap.Int("MaxSize", c.maxSize))
 	}
-	return &utils.CacheContent{
+	return &cache.CacheContent{
 		ReadSeekCloser: utils.NopCloser{
 			ReadSeeker: bytes.NewReader(allBytes),
 		},

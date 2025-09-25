@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.d7z.net/gitea-pages/pkg/middleware/cache"
+	"gopkg.d7z.net/gitea-pages/pkg/middleware/config"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -34,8 +36,8 @@ type ServerOptions struct {
 	Domain        string
 	DefaultBranch string
 
-	KVConfig utils.KVConfig
-	Cache    utils.Cache
+	KVConfig config.KVConfig
+	Cache    cache.Cache
 
 	MaxCacheSize int
 
@@ -52,12 +54,12 @@ type ServerOptions struct {
 }
 
 func DefaultOptions(domain string) ServerOptions {
-	configMemory, _ := utils.NewAutoConfig("")
+	configMemory, _ := config.NewAutoConfig("")
 	return ServerOptions{
 		Domain:        domain,
 		DefaultBranch: "gh-pages",
 		KVConfig:      configMemory,
-		Cache:         utils.NewCacheMemory(1024*1024*10, int(memory.FreeMemory()/3*2)),
+		Cache:         cache.NewCacheMemory(1024*1024*10, int(memory.FreeMemory()/3*2)),
 		MaxCacheSize:  1024 * 1024 * 10,
 		HttpClient:    http.DefaultClient,
 		MetaTTL:       time.Minute,
@@ -235,7 +237,7 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		render = nil
 	}
 	defer result.Close()
-	if reader, ok := result.(*utils.CacheContent); ok {
+	if reader, ok := result.(*cache.CacheContent); ok {
 		writer.Header().Add("X-Cache", "HIT")
 		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(fileName)))
 		writer.Header().Add("Cache-Control", "public, max-age=86400")

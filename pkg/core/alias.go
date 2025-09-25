@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"gopkg.d7z.net/gitea-pages/pkg/utils"
+	"gopkg.d7z.net/gitea-pages/pkg/middleware/config"
 )
 
 type Alias struct {
@@ -15,10 +15,10 @@ type Alias struct {
 }
 
 type DomainAlias struct {
-	config utils.KVConfig
+	config config.KVConfig
 }
 
-func NewDomainAlias(config utils.KVConfig) *DomainAlias {
+func NewDomainAlias(config config.KVConfig) *DomainAlias {
 	return &DomainAlias{config: config}
 }
 
@@ -55,9 +55,9 @@ func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, b
 	}
 	aliasMetaRaw, _ := json.Marshal(aliasMeta)
 	domainsRaw, _ := json.Marshal(domains)
-	_ = a.config.Put(ctx, rKey, string(domainsRaw), utils.TtlKeep)
+	_ = a.config.Put(ctx, rKey, string(domainsRaw), config.TtlKeep)
 	for _, domain := range domains {
-		if err := a.config.Put(ctx, "domain/alias/"+domain, string(aliasMetaRaw), utils.TtlKeep); err != nil {
+		if err := a.config.Put(ctx, "domain/alias/"+domain, string(aliasMetaRaw), config.TtlKeep); err != nil {
 			return err
 		}
 	}

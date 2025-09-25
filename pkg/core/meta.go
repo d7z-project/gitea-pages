@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"gopkg.d7z.net/gitea-pages/pkg/middleware/config"
 	"gopkg.in/yaml.v3"
 
 	"github.com/gobwas/glob"
@@ -30,13 +31,13 @@ type ServerMeta struct {
 	Domain string
 
 	client *http.Client
-	cache  utils.KVConfig
+	cache  config.KVConfig
 	ttl    time.Duration
 
 	locker *utils.Locker
 }
 
-func NewServerMeta(client *http.Client, backend Backend, kv utils.KVConfig, domain string, ttl time.Duration) *ServerMeta {
+func NewServerMeta(client *http.Client, backend Backend, kv config.KVConfig, domain string, ttl time.Duration) *ServerMeta {
 	return &ServerMeta{backend, domain, client, kv, ttl, utils.NewLocker()}
 }
 
