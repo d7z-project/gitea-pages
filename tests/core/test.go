@@ -22,7 +22,7 @@ type SvcOpts func(options *pkg.ServerOptions)
 
 func NewDefaultTestServer() *TestServer {
 	return NewTestServer("example.com", func(options *pkg.ServerOptions) {
-		options.MetaTTL = 0
+		options.CacheMetaTTL = 0
 	})
 }
 

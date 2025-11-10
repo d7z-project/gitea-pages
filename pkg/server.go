@@ -12,18 +12,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"gopkg.d7z.net/gitea-pages/pkg/middleware/cache"
-	"gopkg.d7z.net/gitea-pages/pkg/middleware/config"
+	"gopkg.d7z.net/middleware/cache"
+	"gopkg.d7z.net/middleware/kv"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	"github.com/pbnjay/memory"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 
@@ -33,39 +31,48 @@ import (
 var portExp = regexp.MustCompile(`:\d+$`)
 
 type ServerOptions struct {
-	Domain        string
-	DefaultBranch string
+	Domain        string //默认域名
+	DefaultBranch string // 默认分支
 
-	KVConfig config.KVConfig
-	Cache    cache.Cache
+	Alias kv.KV // 配置映射关系
 
-	MaxCacheSize int
+	CacheMeta    kv.KV         // 配置缓存
+	CacheMetaTTL time.Duration // 配置缓存时长
 
-	HttpClient *http.Client
+	CacheBlob      cache.Cache   // blob缓存
+	CacheBlobTTL   time.Duration // 配置缓存时长
+	CacheBlobLimit uint64        // blob最大缓存大小
 
-	MetaTTL time.Duration
+	HttpClient *http.Client //自定义客户端
 
-	EnableRender bool
-	EnableProxy  bool
+	EnableRender bool // 允许渲染
+	EnableProxy  bool // 允许代理
 
-	StaticDir string
+	StaticDir string // 静态文件位置
 
 	DefaultErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
 
 func DefaultOptions(domain string) ServerOptions {
-	configMemory, _ := config.NewAutoConfig("")
+	configMemory, _ := kv.NewMemory("")
+	cacheMemory, _ := cache.NewMemoryCache(cache.MemoryCacheConfig{MaxCapacity: 4096, CleanupInt: time.Hour})
 	return ServerOptions{
 		Domain:        domain,
 		DefaultBranch: "gh-pages",
-		KVConfig:      configMemory,
-		Cache:         cache.NewCacheMemory(1024*1024*10, int(memory.FreeMemory()/3*2)),
-		MaxCacheSize:  1024 * 1024 * 10,
-		HttpClient:    http.DefaultClient,
-		MetaTTL:       time.Minute,
-		EnableRender:  true,
-		EnableProxy:   true,
-		StaticDir:     "",
+
+		Alias:        configMemory,
+		CacheMeta:    configMemory,
+		CacheMetaTTL: time.Minute,
+
+		CacheBlob:      cacheMemory,
+		CacheBlobTTL:   time.Minute,
+		CacheBlobLimit: 1024 * 1024 * 10,
+
+		HttpClient: http.DefaultClient,
+
+		EnableRender: true,
+		EnableProxy:  true,
+		StaticDir:    "",
 		DefaultErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, "page not found.", http.StatusNotFound)
@@ -87,10 +94,10 @@ type Server struct {
 var staticPrefix = "/.well-known/page-server/"
 
 func NewPageServer(backend core.Backend, options ServerOptions) *Server {
-	backend = core.NewCacheBackend(backend, options.KVConfig, options.MetaTTL)
-	svcMeta := core.NewServerMeta(options.HttpClient, backend, options.KVConfig, options.Domain, options.MetaTTL)
-	pageMeta := core.NewPageDomain(svcMeta, options.KVConfig, options.Domain, options.DefaultBranch)
-	reader := core.NewCacheBackendBlobReader(options.HttpClient, backend, options.Cache, options.MaxCacheSize)
+	backend = core.NewCacheBackend(backend, options.CacheMeta, options.CacheMetaTTL)
+	svcMeta := core.NewServerMeta(options.HttpClient, backend, options.CacheMeta, options.Domain, options.CacheMetaTTL)
+	pageMeta := core.NewPageDomain(svcMeta, options.Alias, options.Domain, options.DefaultBranch)
+	reader := core.NewCacheBackendBlobReader(options.HttpClient, backend, options.CacheBlob, options.CacheBlobLimit)
 	var fs http.Handler
 	if options.StaticDir != "" {
 		fs = http.StripPrefix(staticPrefix, http.FileServer(http.Dir(options.StaticDir)))
@@ -237,10 +244,10 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		render = nil
 	}
 	defer result.Close()
-	if reader, ok := result.(*cache.CacheContent); ok {
-		writer.Header().Add("X-Cache", "HIT")
+	if reader, ok := result.(*cache.Content); ok {
+		writer.Header().Add("X-CacheBlob", "HIT")
 		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(fileName)))
-		writer.Header().Add("Cache-Control", "public, max-age=86400")
+		writer.Header().Add("CacheBlob-Control", "public, max-age=86400")
 		if render != nil {
 			if err = render.Render(writer, request, reader); err != nil {
 				return err
@@ -250,11 +257,11 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		}
 	} else {
 		if reader, ok := result.(*utils.SizeReadCloser); ok && render == nil {
-			writer.Header().Add("Content-Length", strconv.Itoa(reader.Size))
+			writer.Header().Add("Content-Length", fmt.Sprintf("%d", reader.Size))
 		}
 		// todo(bug) : 直连模式下告知数据长度
-		writer.Header().Add("X-Cache", "MISS")
-		writer.Header().Add("Cache-Control", "public, max-age=86400")
+		writer.Header().Add("X-CacheBlob", "MISS")
+		writer.Header().Add("CacheBlob-Control", "public, max-age=86400")
 		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(fileName)))
 		writer.WriteHeader(http.StatusOK)
 		if render != nil {
@@ -269,10 +276,10 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 }
 
 func (s *Server) Close() error {
-	if err := s.options.KVConfig.Close(); err != nil {
+	if err := s.options.Alias.Close(); err != nil {
 		return err
 	}
-	if err := s.options.Cache.Close(); err != nil {
+	if err := s.options.CacheBlob.Close(); err != nil {
 		return err
 	}
 	return s.backend.Close()

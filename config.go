@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/alecthomas/units"
-	"gopkg.d7z.net/gitea-pages/pkg/middleware/cache"
-	"gopkg.d7z.net/gitea-pages/pkg/middleware/config"
-
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
+	"gopkg.d7z.net/middleware/cache"
+	"gopkg.d7z.net/middleware/kv"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,9 +24,13 @@ type Config struct {
 	Bind   string `yaml:"bind"`   // HTTP 绑定
 	Domain string `yaml:"domain"` // 基础域名
 
-	Auth  ConfigAuth  `yaml:"auth"`  // 后端认证配置
+	Config string `yaml:"config"` // 配置
+
+	Auth ConfigAuth `yaml:"auth"` // 后端认证配置
+
 	Cache ConfigCache `yaml:"cache"` // 缓存配置
-	Page  ConfigPage  `yaml:"page"`  // 页面配置
+
+	Page ConfigPage `yaml:"page"` // 页面配置
 
 	Render ConfigRender `yaml:"render"` // 渲染配置
 	Proxy  ConfigProxy  `yaml:"proxy"`  // 反向代理配置
@@ -42,12 +45,10 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		return nil, errors.New("domain is required")
 	}
 	var err error
-	var cacheSize, cacheMaxSize units.Base2Bytes
-	cacheSize, err = units.ParseBase2Bytes(c.Cache.FileSize)
-	if err != nil {
-		return nil, errors.Wrap(err, "parse cache size")
-	}
 
+	if c.Config == "" {
+		return nil, errors.New("config is required")
+	}
 	if c.StaticDir != "" {
 		stat, err := os.Stat(c.StaticDir)
 		if err != nil {
@@ -56,13 +57,6 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		if !stat.IsDir() {
 			return nil, errors.New("static dir is not a directory")
 		}
-	}
-	cacheMaxSize, err = units.ParseBase2Bytes(c.Cache.MaxSize)
-	if err != nil {
-		return nil, errors.Wrap(err, "parse cache max size")
-	}
-	if cacheMaxSize <= cacheSize {
-		return nil, errors.New("cache max size must be greater than or equal to file max size")
 	}
 	if c.Page.DefaultBranch == "" {
 		c.Page.DefaultBranch = "gh-pages"
@@ -87,23 +81,36 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		c.pageErrNotFound = defaultErr
 	}
 
+	memoryCache, err := cache.NewMemoryCache(cache.MemoryCacheConfig{
+		MaxCapacity: 8102,
+		CleanupInt:  time.Hour,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "create cache")
+	}
+	alias, err := kv.NewKVFromURL(c.Config)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to init alias config")
+	}
+	cacheMeta, err := kv.NewKVFromURL(c.Cache.Meta)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to init cache meta")
+	}
 	rel := pkg.ServerOptions{
 		Domain:              c.Domain,
 		DefaultBranch:       c.Page.DefaultBranch,
-		MaxCacheSize:        int(cacheSize),
+		Alias:               alias,
+		CacheMeta:           cacheMeta,
+		CacheMetaTTL:        c.Cache.MetaTTL,
+		CacheBlob:           memoryCache,
+		CacheBlobTTL:        c.Cache.BlobTTL,
+		CacheBlobLimit:      uint64(c.Cache.BlobLimit),
 		HttpClient:          http.DefaultClient,
-		MetaTTL:             time.Minute,
 		EnableRender:        c.Render.Enable,
 		EnableProxy:         c.Proxy.Enable,
-		DefaultErrorHandler: c.ErrorHandler,
 		StaticDir:           c.StaticDir,
-		Cache:               cache.NewCacheMemory(int(cacheMaxSize), int(cacheMaxSize)),
+		DefaultErrorHandler: c.ErrorHandler,
 	}
-	cfg, err := config.NewAutoConfig(c.Cache.Storage)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to init config memory")
-	}
-	rel.KVConfig = cfg
 	return &rel, nil
 }
 
@@ -153,11 +160,12 @@ type ConfigRender struct {
 }
 
 type ConfigCache struct {
-	Storage string `yaml:"storage"` // 缓存归档位置
+	Meta    string        `yaml:"meta"`     // 元数据缓存
+	MetaTTL time.Duration `yaml:"meta_ttl"` // 缓存时间
 
-	Ttl      time.Duration `yaml:"ttl"`  // 缓存时间
-	FileSize string        `yaml:"size"` // 单个文件最大大小
-	MaxSize  string        `yaml:"max"`  // 最大文件大小
+	Blob      string           `yaml:"blob"`       // 缓存归档位置
+	BlobTTL   time.Duration    `yaml:"blob_ttl"`   // 缓存归档位置
+	BlobLimit units.Base2Bytes `yaml:"blob_limit"` // 单个文件最大大小
 }
 
 func LoadConfig(path string) (*Config, error) {

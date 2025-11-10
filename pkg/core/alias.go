@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"gopkg.d7z.net/gitea-pages/pkg/middleware/config"
+	"gopkg.d7z.net/middleware/kv"
 )
 
 type Alias struct {
@@ -15,10 +15,10 @@ type Alias struct {
 }
 
 type DomainAlias struct {
-	config config.KVConfig
+	config kv.KV
 }
 
-func NewDomainAlias(config config.KVConfig) *DomainAlias {
+func NewDomainAlias(config kv.KV) *DomainAlias {
 	return &DomainAlias{config: config}
 }
 
@@ -55,9 +55,9 @@ func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, b
 	}
 	aliasMetaRaw, _ := json.Marshal(aliasMeta)
 	domainsRaw, _ := json.Marshal(domains)
-	_ = a.config.Put(ctx, rKey, string(domainsRaw), config.TtlKeep)
+	_ = a.config.Put(ctx, rKey, string(domainsRaw), kv.TTLKeep)
 	for _, domain := range domains {
-		if err := a.config.Put(ctx, "domain/alias/"+domain, string(aliasMetaRaw), config.TtlKeep); err != nil {
+		if err := a.config.Put(ctx, "domain/alias/"+domain, string(aliasMetaRaw), kv.TTLKeep); err != nil {
 			return err
 		}
 	}
@@ -65,5 +65,6 @@ func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, b
 }
 
 func (a *DomainAlias) Unbind(ctx context.Context, domain string) error {
-	return a.config.Delete(ctx, "domain/alias/"+domain)
+	_, err := a.config.Delete(ctx, "domain/alias/"+domain)
+	return err
 }

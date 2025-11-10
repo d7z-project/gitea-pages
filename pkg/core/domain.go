@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"gopkg.d7z.net/gitea-pages/pkg/middleware/config"
+	"gopkg.d7z.net/middleware/kv"
 
 	"go.uber.org/zap"
 )
@@ -19,12 +19,12 @@ type PageDomain struct {
 	defaultBranch string
 }
 
-func NewPageDomain(meta *ServerMeta, config config.KVConfig, baseDomain, defaultBranch string) *PageDomain {
+func NewPageDomain(meta *ServerMeta, alias kv.KV, baseDomain, defaultBranch string) *PageDomain {
 	return &PageDomain{
 		baseDomain:    baseDomain,
 		defaultBranch: defaultBranch,
 		ServerMeta:    meta,
-		alias:         NewDomainAlias(config),
+		alias:         NewDomainAlias(alias),
 	}
 }
 

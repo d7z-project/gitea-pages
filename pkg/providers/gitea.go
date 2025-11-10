@@ -109,7 +109,7 @@ func (g *ProviderGitea) Open(ctx context.Context, client *http.Client, owner, re
 		return nil, err
 	}
 	giteaURL += "?ref=" + url.QueryEscape(commit)
-	req, err := http.NewRequest(http.MethodGet, giteaURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, giteaURL, nil)
 	if err != nil {
 		return nil, err
 	}
