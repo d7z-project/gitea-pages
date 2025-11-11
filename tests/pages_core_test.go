@@ -15,9 +15,9 @@ func Test_get_simple_html(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "hello world", string(data))
 
-	_, resp, err := server.OpenFile("https://org1.example.com/repo1/404")
+	_, resp, _ := server.OpenFile("https://org1.example.com/repo1/404")
 	assert.NotNil(t, resp)
-	assert.Equal(t, resp.StatusCode, 404)
+	assert.Equal(t, 404, resp.StatusCode)
 }
 
 func Test_get_alias(t *testing.T) {
@@ -28,13 +28,13 @@ func Test_get_alias(t *testing.T) {
 alias:
   - www.example.org
 `)
-	data, resp, err := server.OpenFile("https://www.example.org")
-	assert.Equal(t, resp.StatusCode, 404)
+	_, resp, _ := server.OpenFile("https://www.example.org")
+	assert.Equal(t, 404, resp.StatusCode)
 
-	data, resp, err = server.OpenFile("https://org1.example.com/repo1/")
-	assert.Equal(t, resp.StatusCode, 302)
-	assert.Equal(t, resp.Header.Get("Location"), "https://www.example.org/")
-	data, resp, err = server.OpenFile("https://www.example.org")
+	_, resp, _ = server.OpenFile("https://org1.example.com/repo1/")
+	assert.Equal(t, 302, resp.StatusCode)
+	assert.Equal(t, "https://www.example.org/", resp.Header.Get("Location"))
+	data, _, err := server.OpenFile("https://www.example.org")
 	assert.NoError(t, err)
 	assert.Equal(t, "hello world", string(data))
 
@@ -42,20 +42,20 @@ alias:
 alias:
   - zzz.example.top
 `)
-	data, resp, err = server.OpenFile("https://www.example.org")
-	assert.Equal(t, resp.StatusCode, 302)
-	assert.Equal(t, resp.Header.Get("Location"), "https://zzz.example.top/")
+	_, resp, _ = server.OpenFile("https://www.example.org")
+	assert.Equal(t, 302, resp.StatusCode)
+	assert.Equal(t, "https://zzz.example.top/", resp.Header.Get("Location"))
 
-	data, resp, err = server.OpenFile("https://www.example.org")
-	assert.Equal(t, resp.StatusCode, 404)
+	_, resp, _ = server.OpenFile("https://www.example.org")
+	assert.Equal(t, 404, resp.StatusCode)
 
-	data, resp, err = server.OpenFile("https://org1.example.com/repo1/")
-	assert.Equal(t, resp.StatusCode, 302)
-	assert.Equal(t, resp.Header.Get("Location"), "https://zzz.example.top/")
+	_, resp, _ = server.OpenFile("https://org1.example.com/repo1/")
+	assert.Equal(t, 302, resp.StatusCode)
+	assert.Equal(t, "https://zzz.example.top/", resp.Header.Get("Location"))
 
-	data, resp, err = server.OpenFile("https://org1.example.com/repo1/get/some")
-	assert.Equal(t, resp.StatusCode, 302)
-	assert.Equal(t, resp.Header.Get("Location"), "https://zzz.example.top/get/some")
+	_, resp, _ = server.OpenFile("https://org1.example.com/repo1/get/some")
+	assert.Equal(t, 302, resp.StatusCode)
+	assert.Equal(t, "https://zzz.example.top/get/some", resp.Header.Get("Location"))
 }
 
 func Test_fail_back(t *testing.T) {

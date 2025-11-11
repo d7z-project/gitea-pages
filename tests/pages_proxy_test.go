@@ -32,8 +32,8 @@ proxy:
 	assert.NoError(t, err)
 	assert.Equal(t, "hello data", string(data))
 
-	_, resp, err := server.OpenFile("https://org1.example.com/repo1/abi/data")
-	assert.Equal(t, resp.StatusCode, 404)
+	_, resp, _ := server.OpenFile("https://org1.example.com/repo1/abi/data")
+	assert.Equal(t, 404, resp.StatusCode)
 }
 
 func Test_cname_proxy(t *testing.T) {
@@ -50,18 +50,18 @@ alias:
 proxy:
   /api: %s/test
 `, hs.URL)
-	_, resp, err := server.OpenFile("https://org1.example.com/repo1/")
-	assert.Equal(t, resp.StatusCode, 302)
-	assert.Equal(t, resp.Header.Get("Location"), "https://www.example.org/")
-	data, resp, err := server.OpenFile("https://www.example.org")
+	_, resp, _ := server.OpenFile("https://org1.example.com/repo1/")
+	assert.Equal(t, 302, resp.StatusCode)
+	assert.Equal(t, "https://www.example.org/", resp.Header.Get("Location"))
+	data, _, err := server.OpenFile("https://www.example.org")
 	assert.NoError(t, err)
 	assert.Equal(t, "hello world", string(data))
 
-	_, resp, err = server.OpenFile("https://org1.example.com/repo1/api")
-	assert.Equal(t, resp.StatusCode, 302)
-	assert.Equal(t, resp.Header.Get("Location"), "https://www.example.org/api")
+	_, resp, _ = server.OpenFile("https://org1.example.com/repo1/api")
+	assert.Equal(t, 302, resp.StatusCode)
+	assert.Equal(t, "https://www.example.org/api", resp.Header.Get("Location"))
 
-	data, resp, err = server.OpenFile("https://www.example.org/api")
+	data, _, err = server.OpenFile("https://www.example.org/api")
 	assert.NoError(t, err)
 	assert.Equal(t, "hello proxy", string(data))
 }

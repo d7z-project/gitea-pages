@@ -57,7 +57,6 @@ func (c *CacheBackend) Repos(ctx context.Context, owner string) (map[string]stri
 }
 
 func (c *CacheBackend) Branches(ctx context.Context, owner, repo string) (map[string]*BranchInfo, error) {
-	ret := make(map[string]*BranchInfo)
 	key := fmt.Sprintf("%s/%s", owner, repo)
 	if load, b := c.cacheBranch.Load(ctx, key); b {
 		return load, nil

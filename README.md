@@ -10,7 +10,7 @@ This project focuses on functional implementation and does not consider any perf
 
 ## Get Started
 
-Install `go1.24` or later, along with the `Make` tool, and then execute the following command:
+Install `go1.25` or later, along with the `Make` tool, and then execute the following command:
 
 ```bash
 make gitea-pages

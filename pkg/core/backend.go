@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"time"
 )
@@ -12,7 +13,7 @@ type BranchInfo struct {
 }
 
 type Backend interface {
-	Close() error
+	io.Closer
 	// Repos return repo name + default branch
 	Repos(ctx context.Context, owner string) (map[string]string, error)
 	// Branches return branch + commit id

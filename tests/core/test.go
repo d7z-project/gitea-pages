@@ -64,7 +64,7 @@ func (t *TestServer) AddFile(path, data string, args ...interface{}) {
 
 func (t *TestServer) OpenFile(url string) ([]byte, *http.Response, error) {
 	recorder := httptest.NewRecorder()
-	t.server.ServeHTTP(recorder, httptest.NewRequest("GET", url, nil))
+	t.server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, url, nil))
 	response := recorder.Result()
 	if response.Body != nil {
 		defer response.Body.Close()

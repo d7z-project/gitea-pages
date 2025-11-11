@@ -24,7 +24,7 @@ type Config struct {
 	Bind   string `yaml:"bind"`   // HTTP 绑定
 	Domain string `yaml:"domain"` // 基础域名
 
-	Config string `yaml:"config"` // 配置
+	Database ConfigDatabase `yaml:"database"` // 配置
 
 	Auth ConfigAuth `yaml:"auth"` // 后端认证配置
 
@@ -46,7 +46,7 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 	}
 	var err error
 
-	if c.Config == "" {
+	if c.Database.URL == "" {
 		return nil, errors.New("config is required")
 	}
 	if c.StaticDir != "" {
@@ -88,7 +88,7 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "create cache")
 	}
-	alias, err := kv.NewKVFromURL(c.Config)
+	alias, err := kv.NewKVFromURL(c.Database.URL)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to init alias config")
 	}
@@ -105,7 +105,7 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 		CacheBlob:           memoryCache,
 		CacheBlobTTL:        c.Cache.BlobTTL,
 		CacheBlobLimit:      uint64(c.Cache.BlobLimit),
-		HttpClient:          http.DefaultClient,
+		HTTPClient:          http.DefaultClient,
 		EnableRender:        c.Render.Enable,
 		EnableProxy:         c.Proxy.Enable,
 		StaticDir:           c.StaticDir,
@@ -149,6 +149,10 @@ type ConfigPage struct {
 	DefaultBranch   string `yaml:"default_branch"`
 	ErrNotFoundPage string `yaml:"404"`
 	ErrUnknownPage  string `yaml:"500"`
+}
+
+type ConfigDatabase struct {
+	URL string `yaml:"url"`
 }
 
 type ConfigProxy struct {

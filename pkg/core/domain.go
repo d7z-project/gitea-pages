@@ -70,24 +70,24 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch s
 	return p.ReturnMeta(ctx, owner, domain, branch, pathArr)
 }
 
-func (p *PageDomain) ReturnMeta(ctx context.Context, owner string, repo string, branch string, path []string) (*PageDomainContent, error) {
+func (p *PageDomain) ReturnMeta(ctx context.Context, owner, repo, branch string, path []string) (*PageDomainContent, error) {
 	rel := &PageDomainContent{}
-	if meta, err := p.GetMeta(ctx, owner, repo, branch); err == nil {
-		rel.PageMetaContent = meta
-		rel.Owner = owner
-		rel.Repo = repo
-		rel.Path = strings.Join(path, "/")
-		if err = p.alias.Bind(ctx, meta.Alias, rel.Owner, rel.Repo, branch); err != nil {
-			zap.L().Warn("别名绑定失败", zap.Error(err))
-			return nil, err
-		}
-		return rel, nil
-	} else {
+	meta, err := p.GetMeta(ctx, owner, repo, branch)
+	if err != nil {
 		zap.L().Debug("查询错误", zap.Error(err))
 		if meta != nil {
 			// 解析错误汇报
 			return nil, errors.New(meta.ErrorMsg)
 		}
+		return nil, errors.Wrap(os.ErrNotExist, strings.Join(path, "/"))
 	}
-	return nil, errors.Wrap(os.ErrNotExist, strings.Join(path, "/"))
+	rel.PageMetaContent = meta
+	rel.Owner = owner
+	rel.Repo = repo
+	rel.Path = strings.Join(path, "/")
+	if err = p.alias.Bind(ctx, meta.Alias, rel.Owner, rel.Repo, branch); err != nil {
+		zap.L().Warn("别名绑定失败", zap.Error(err))
+		return nil, err
+	}
+	return rel, nil
 }

@@ -28,7 +28,7 @@ jobs:
         run: go mod download
 
       - name: Run tests with coverage
-        run: go test -v -coverprofile=coverage.txt ./...
+        run: make test lint
 
       - uses: codecov/codecov-action@v5
         with:

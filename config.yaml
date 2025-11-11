@@ -2,20 +2,26 @@
 bind: 127.0.0.1:18080
 # 基础域名
 domain: example.com
+# 持久化存储
+database:
+  # 持久化存储配置
+  url: "memory://"
 auth:
+  type: gitea
   server: https://gitea.com
   # 需要 user , org , repo 的 read 权限
   token: token
 cache:
-  # 配置存储
-  storage: /path/to/config.json
-  # 配置缓存时长
-  ttl: 10m
-
-  # 单个文件最大缓存大小
-  size: 10MB
-  # 总缓存大小
-  max: 1GB
+  # 元数据缓存
+  meta: "memory://"
+  # 元数据缓存时长
+  meta_ttl: 1m
+  # 响应数据缓存
+  blob: "memory://"
+  # 响应数据缓存时长
+  blob_ttl: 1m
+  # 最大单个响应数据缓存大小
+  blob_limit: 10MB
 page:
   # 默认页面分支
   default_branch: gh-pages

@@ -14,25 +14,25 @@ import (
 const GiteaMaxCount = 9999
 
 type ProviderGitea struct {
-	BaseUrl string
+	BaseURL string
 	Token   string
 
 	gitea *gitea.Client
 }
 
-func NewGitea(url string, token string) (*ProviderGitea, error) {
+func NewGitea(url, token string) (*ProviderGitea, error) {
 	client, err := gitea.NewClient(url, gitea.SetGiteaVersion(""), gitea.SetToken(token))
 	if err != nil {
 		return nil, err
 	}
 	return &ProviderGitea{
-		BaseUrl: url,
+		BaseURL: url,
 		Token:   token,
 		gitea:   client,
 	}, nil
 }
 
-func (g *ProviderGitea) Repos(ctx context.Context, owner string) (map[string]string, error) {
+func (g *ProviderGitea) Repos(_ context.Context, owner string) (map[string]string, error) {
 	result := make(map[string]string)
 	if repos, resp, err := g.gitea.ListOrgRepos(owner, gitea.ListOrgReposOptions{
 		ListOptions: gitea.ListOptions{
@@ -75,26 +75,26 @@ func (g *ProviderGitea) Repos(ctx context.Context, owner string) (map[string]str
 	return result, nil
 }
 
-func (g *ProviderGitea) Branches(ctx context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
+func (g *ProviderGitea) Branches(_ context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
 	result := make(map[string]*core.BranchInfo)
-	if branches, resp, err := g.gitea.ListRepoBranches(owner, repo, gitea.ListRepoBranchesOptions{
+	branches, resp, err := g.gitea.ListRepoBranches(owner, repo, gitea.ListRepoBranchesOptions{
 		ListOptions: gitea.ListOptions{
 			PageSize: GiteaMaxCount,
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
 		return nil, err
-	} else {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
-		for _, branch := range branches {
-			result[branch.Name] = &core.BranchInfo{
-				ID:           branch.Commit.ID,
-				LastModified: branch.Commit.Timestamp,
-			}
+	}
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	for _, branch := range branches {
+		result[branch.Name] = &core.BranchInfo{
+			ID:           branch.Commit.ID,
+			LastModified: branch.Commit.Timestamp,
 		}
 	}
 	if len(result) == 0 {
@@ -104,7 +104,10 @@ func (g *ProviderGitea) Branches(ctx context.Context, owner, repo string) (map[s
 }
 
 func (g *ProviderGitea) Open(ctx context.Context, client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
-	giteaURL, err := url.JoinPath(g.BaseUrl, "api/v1/repos", owner, repo, "media", path)
+	if headers == nil {
+		headers = make(http.Header)
+	}
+	giteaURL, err := url.JoinPath(g.BaseURL, "api/v1/repos", owner, repo, "media", path)
 	if err != nil {
 		return nil, err
 	}
@@ -113,11 +116,9 @@ func (g *ProviderGitea) Open(ctx context.Context, client *http.Client, owner, re
 	if err != nil {
 		return nil, err
 	}
-	if headers != nil {
-		for key, values := range headers {
-			for _, value := range values {
-				req.Header.Add(key, value)
-			}
+	for key, values := range headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
 		}
 	}
 	req.Header.Add("Authorization", "token "+g.Token)

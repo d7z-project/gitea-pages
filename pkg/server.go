@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,19 +20,19 @@ import (
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 
+	stdErr "errors"
+
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
-
-	_ "gopkg.d7z.net/gitea-pages/pkg/renders"
 )
 
 var portExp = regexp.MustCompile(`:\d+$`)
 
 type ServerOptions struct {
-	Domain        string //默认域名
+	Domain        string // 默认域名
 	DefaultBranch string // 默认分支
 
 	Alias kv.KV // 配置映射关系
@@ -43,7 +44,7 @@ type ServerOptions struct {
 	CacheBlobTTL   time.Duration // 配置缓存时长
 	CacheBlobLimit uint64        // blob最大缓存大小
 
-	HttpClient *http.Client //自定义客户端
+	HTTPClient *http.Client // 自定义客户端
 
 	EnableRender bool // 允许渲染
 	EnableProxy  bool // 允许代理
@@ -68,7 +69,7 @@ func DefaultOptions(domain string) ServerOptions {
 		CacheBlobTTL:   time.Minute,
 		CacheBlobLimit: 1024 * 1024 * 10,
 
-		HttpClient: http.DefaultClient,
+		HTTPClient: http.DefaultClient,
 
 		EnableRender: true,
 		EnableProxy:  true,
@@ -95,9 +96,9 @@ var staticPrefix = "/.well-known/page-server/"
 
 func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 	backend = core.NewCacheBackend(backend, options.CacheMeta, options.CacheMetaTTL)
-	svcMeta := core.NewServerMeta(options.HttpClient, backend, options.CacheMeta, options.Domain, options.CacheMetaTTL)
+	svcMeta := core.NewServerMeta(options.HTTPClient, backend, options.CacheMeta, options.Domain, options.CacheMetaTTL)
 	pageMeta := core.NewPageDomain(svcMeta, options.Alias, options.Domain, options.DefaultBranch)
-	reader := core.NewCacheBackendBlobReader(options.HttpClient, backend, options.CacheBlob, options.CacheBlobLimit)
+	reader := core.NewCacheBackendBlobReader(options.HTTPClient, backend, options.CacheBlob, options.CacheBlobLimit)
 	var fs http.Handler
 	if options.StaticDir != "" {
 		fs = http.StripPrefix(staticPrefix, http.FileServer(http.Dir(options.StaticDir)))
@@ -112,15 +113,15 @@ func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	sessionId, _ := uuid.NewRandom()
-	request.Header.Set("Session-ID", sessionId.String())
+	sessionID, _ := uuid.NewRandom()
+	request.Header.Set("Session-ID", sessionID.String())
 	if s.fs != nil && strings.HasPrefix(request.URL.Path, staticPrefix) {
 		s.fs.ServeHTTP(writer, request)
 		return
 	}
 	defer func() {
 		if e := recover(); e != nil {
-			zap.L().Error("panic!", zap.Any("error", e), zap.Any("id", sessionId))
+			zap.L().Error("panic!", zap.Any("error", e), zap.Any("id", sessionID))
 			if err, ok := e.(error); ok {
 				s.options.DefaultErrorHandler(writer, request, err)
 			}
@@ -128,7 +129,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}()
 	err := s.Serve(writer, request)
 	if err != nil {
-		zap.L().Debug("错误请求", zap.Error(err), zap.Any("request", request.RequestURI), zap.Any("id", sessionId))
+		zap.L().Debug("错误请求", zap.Error(err), zap.Any("request", request.RequestURI), zap.Any("id", sessionID))
 		s.options.DefaultErrorHandler(writer, request, err)
 	}
 }
@@ -144,9 +145,9 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	if err != nil {
 		return err
 	}
-	zap.L().Debug("获取请求", zap.Any("request", meta.Path))
+	zap.L().Debug("new request", zap.Any("request path", meta.Path))
 	if len(meta.Alias) > 0 && !slices.Contains(meta.Alias, domainHost) {
-		zap.L().Debug("重定向地址", zap.Any("src", request.Host), zap.Any("dst", meta.Alias[0]))
+		zap.L().Debug("redirect", zap.Any("src", request.Host), zap.Any("dst", meta.Alias[0]))
 		http.Redirect(writer, request, fmt.Sprintf("https://%s/%s", meta.Alias[0], meta.Path), http.StatusFound)
 		return nil
 	}
@@ -163,7 +164,7 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 				request.URL.Path = targetPath
 				request.RequestURI = request.URL.RequestURI()
 				proxy := httputil.NewSingleHostReverseProxy(u)
-				proxy.Transport = s.options.HttpClient.Transport
+				proxy.Transport = s.options.HTTPClient.Transport
 
 				if host, _, err := net.SplitHostPort(request.RemoteAddr); err == nil {
 					request.Header.Set("X-Real-IP", host)
@@ -181,11 +182,11 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	}
 	// 在非反向代理时处理目录访问
 	if strings.HasSuffix(meta.Path, "/") || meta.Path == "" {
-		meta.Path = meta.Path + "index.html"
+		meta.Path += "index.html"
 	}
 
 	// 如果不是反向代理路由则跳过任何配置
-	if request.Method != "GET" {
+	if request.Method != http.MethodGet {
 		return os.ErrNotExist
 	}
 	var result io.ReadCloser
@@ -225,18 +226,13 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 			writer.WriteHeader(http.StatusNotFound)
 			if render := meta.TryRender(meta.Path, "/404.html"); render != nil && s.options.EnableRender {
 				defer result.Close()
-				if err = render.Render(writer, request, result); err != nil {
-					return err
-				}
-				return nil
-			} else {
-				_, _ = io.Copy(writer, result)
-				_ = result.Close()
+				return render.Render(writer, request, result)
 			}
+			_, _ = io.Copy(writer, result)
+			_ = result.Close()
 			return nil
-		} else {
-			return err
 		}
+		return err
 	}
 	fileName := filepath.Base(meta.Path)
 	render := meta.TryRender(meta.Path)
@@ -257,7 +253,7 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		}
 	} else {
 		if reader, ok := result.(*utils.SizeReadCloser); ok && render == nil {
-			writer.Header().Add("Content-Length", fmt.Sprintf("%d", reader.Size))
+			writer.Header().Add("Content-Length", strconv.FormatUint(reader.Size, 10))
 		}
 		// todo(bug) : 直连模式下告知数据长度
 		writer.Header().Add("X-CacheBlob", "MISS")
@@ -276,11 +272,10 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 }
 
 func (s *Server) Close() error {
-	if err := s.options.Alias.Close(); err != nil {
-		return err
-	}
-	if err := s.options.CacheBlob.Close(); err != nil {
-		return err
-	}
-	return s.backend.Close()
+	return stdErr.Join(
+		s.options.CacheBlob.Close(),
+		s.options.CacheMeta.Close(),
+		s.options.Alias.Close(),
+		s.backend.Close(),
+	)
 }

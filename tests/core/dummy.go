@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -60,13 +61,16 @@ func (p *ProviderDummy) Branches(ctx context.Context, owner, repo string) (map[s
 	return branches, nil
 }
 
-func (p *ProviderDummy) Open(ctx context.Context, _ *http.Client, owner, repo, commit, path string, _ http.Header) (*http.Response, error) {
+func (p *ProviderDummy) Open(_ context.Context, _ *http.Client, owner, repo, commit, path string, _ http.Header) (*http.Response, error) {
 	open, err := os.Open(filepath.Join(p.BaseDir, owner, repo, commit, path))
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, os.ErrNotExist)
 	}
-	all, err := io.ReadAll(open)
 	defer open.Close()
+	all, err := io.ReadAll(open)
+	if err != nil {
+		return nil, errors.Join(err, os.ErrNotExist)
+	}
 	recorder := httptest.NewRecorder()
 	recorder.Body = bytes.NewBuffer(all)
 	recorder.Header().Add("Content-Type", mime.TypeByExtension(filepath.Ext(path)))

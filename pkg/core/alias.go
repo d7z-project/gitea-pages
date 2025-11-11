@@ -45,7 +45,7 @@ func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, b
 			return err
 		}
 	}
-	if domains == nil || len(domains) == 0 {
+	if len(domains) == 0 {
 		return nil
 	}
 	aliasMeta := &Alias{

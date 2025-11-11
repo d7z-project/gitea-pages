@@ -10,25 +10,48 @@ import (
 	"syscall"
 
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 
 	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/gitea-pages/pkg/providers"
+	_ "gopkg.d7z.net/gitea-pages/pkg/renders"
 )
 
 var (
 	configPath = "config-local.yaml"
 	debug      = false
+	generate   = false
 )
 
 func init() {
 	flag.StringVar(&configPath, "conf", configPath, "config file path")
+	flag.BoolVar(&generate, "generate", debug, "generate config file")
 	flag.BoolVar(&debug, "debug", debug, "debug mode")
+	flag.Parse()
 }
 
 func main() {
-	flag.Parse()
+	if generate {
+		var cfg Config
+		file, err := os.ReadFile(configPath)
+		if err == nil {
+			_ = yaml.Unmarshal(file, &cfg)
+		}
+		out, err := yaml.Marshal(&cfg)
+		if err != nil {
+			log.Fatal("marshal config file failed", zap.Error(err))
+		}
+		err = os.WriteFile(configPath, out, 0o644)
+		if err != nil {
+			log.Fatal("write config file failed", zap.Error(err))
+		}
+		return
+	}
+
 	call := logInject()
-	defer call()
+	defer func() {
+		_ = call()
+	}()
 	config, err := LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("fail to load config file: %v", err)
@@ -48,9 +71,7 @@ func main() {
 
 	svc := http.Server{Addr: config.Bind, Handler: giteaServer}
 	go func() {
-		select {
-		case <-ctx.Done():
-		}
+		<-ctx.Done()
 		zap.L().Debug("shutdown gracefully")
 		_ = svc.Close()
 	}()

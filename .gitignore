@@ -64,3 +64,4 @@ config-local.yaml
 gitea-pages
 *.zip
 dist/
+coverage.txt

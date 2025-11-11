@@ -10,7 +10,7 @@
 
 ## Get Started
 
-安装 `go1.24` 或更高版本，同时安装 `Make` 工具 ，然后执行如下命令:
+安装 `go1.25` 或更高版本，同时安装 `Make` 工具 ，然后执行如下命令:
 
 ```bash
 make gitea-pages

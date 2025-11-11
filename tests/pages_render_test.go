@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"gopkg.d7z.net/gitea-pages/tests/core"
+
+	_ "gopkg.d7z.net/gitea-pages/pkg/renders"
 )
 
 func Test_get_render(t *testing.T) {

@@ -35,7 +35,7 @@ debug: gitea-pages
 
 .PHONY: test
 test:
-	@go test -v ./...
+	@go test -v -coverprofile=coverage.txt ./...
 
 
 .PHONY: releases
@@ -44,3 +44,13 @@ releases:
 	make release GOOS=linux GOARCH=arm64 && \
 	make release GOOS=linux GOARCH=loong64 && \
 	make release GOOS=windows GOARCH=amd64
+
+.PHONY: lint
+lint:
+	@(test -f "$(GOPATH)/bin/golangci-lint" || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.0) && \
+	"$(GOPATH)/bin/golangci-lint" run -c .golangci.yml
+
+.PHONY: lint-fix
+lint-fix:
+	@(test -f "$(GOPATH)/bin/golangci-lint" || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.0) && \
+	"$(GOPATH)/bin/golangci-lint" run -c .golangci.yml --fix
