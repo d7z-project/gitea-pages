@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gobwas/glob"
+	"gopkg.in/yaml.v3"
 )
 
 type renderCompiler struct {
@@ -41,8 +42,27 @@ func NewPageMetaContent() *PageMetaContent {
 	}
 }
 
-func (m *PageMetaContent) From(data string) error {
-	err := json.Unmarshal([]byte(data), m)
+func (m *PageMetaContent) UnmarshalJSON(bytes []byte) error {
+	type alias PageMetaContent
+	var c alias
+	if err := json.Unmarshal(bytes, &c); err != nil {
+		return err
+	}
+	*m = PageMetaContent(c)
+	return m.init()
+}
+
+func (m *PageMetaContent) UnmarshalYAML(value *yaml.Node) error {
+	type alias PageMetaContent
+	var c alias
+	if err := value.Decode(&c); err != nil {
+		return err
+	}
+	*m = PageMetaContent(c)
+	return m.init()
+}
+
+func (m *PageMetaContent) init() error {
 	clear(m.rendersL)
 	for key, gs := range m.Renders {
 		for _, g := range gs {
@@ -56,7 +76,7 @@ func (m *PageMetaContent) From(data string) error {
 	for _, g := range m.Ignore {
 		m.ignoreL = append(m.ignoreL, glob.MustCompile(g))
 	}
-	return err
+	return nil
 }
 
 func (m *PageMetaContent) IgnorePath(path string) bool {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/tools"
 	"gopkg.in/yaml.v3"
 
 	"github.com/gobwas/glob"
@@ -26,19 +28,20 @@ var regexpHostname = regexp.MustCompile(`^(?:([a-z0-9-]+|\*)\.)?([a-z0-9-]{1,61}
 
 type ServerMeta struct {
 	Backend
-
 	Domain string
 
 	client *http.Client
-
-	cache kv.KV
-	ttl   time.Duration
+	cache  *tools.Cache[PageMetaContent]
 
 	locker *utils.Locker
 }
 
 func NewServerMeta(client *http.Client, backend Backend, kv kv.KV, domain string, ttl time.Duration) *ServerMeta {
-	return &ServerMeta{backend, domain, client, kv, ttl, utils.NewLocker()}
+	return &ServerMeta{
+		backend, domain, client,
+		tools.NewCache[PageMetaContent](kv, "pages/meta", ttl),
+		utils.NewLocker(),
+	}
 }
 
 func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*PageMetaContent, error) {
@@ -65,43 +68,36 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*
 	rel.CommitID = info.ID
 	rel.LastModified = info.LastModified
 
-	key := s.cache.WithKey("meta", owner, repo, branch)
-	cache, err := s.cache.Get(ctx, key)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	if err == nil {
-		if err = rel.From(cache); err == nil {
-			if !rel.IsPage {
-				return nil, os.ErrNotExist
-			}
+	key := fmt.Sprintf("%s/%s/%s", owner, repo, branch)
+	if cache, find := s.cache.Load(ctx, key); find {
+		if cache.IsPage {
 			return rel, nil
+		} else {
+			return nil, os.ErrNotExist
 		}
 	}
 	mux := s.locker.Open(key)
 	mux.Lock()
 	defer mux.Unlock()
-	cache, err = s.cache.Get(ctx, key)
-	if err == nil {
-		if err = rel.From(cache); err == nil {
-			if !rel.IsPage {
-				return nil, os.ErrNotExist
-			}
+	if cache, find := s.cache.Load(ctx, key); find {
+		if cache.IsPage {
 			return rel, nil
+		} else {
+			return nil, os.ErrNotExist
 		}
 	}
 
 	// 确定存在 index.html , 否则跳过
 	if find, _ := s.FileExists(ctx, owner, repo, rel.CommitID, "index.html"); !find {
 		rel.IsPage = false
-		_ = s.cache.Put(ctx, key, rel.String(), s.ttl)
+		_ = s.cache.Store(ctx, key, *rel)
 		return nil, os.ErrNotExist
 	}
 	rel.IsPage = true
 	errCall := func(err error) error {
 		rel.IsPage = false
 		rel.ErrorMsg = err.Error()
-		_ = s.cache.Put(ctx, key, rel.String(), s.ttl)
+		_ = s.cache.Store(ctx, key, *rel)
 		return err
 	}
 	// 添加默认跳过的内容
@@ -181,7 +177,7 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*
 	}
 	rel.Alias = utils.ClearDuplicates(rel.Alias)
 	rel.Ignore = utils.ClearDuplicates(rel.Ignore)
-	_ = s.cache.Put(ctx, key, rel.String(), s.ttl)
+	_ = s.cache.Store(ctx, key, *rel)
 	return rel, nil
 }
 
