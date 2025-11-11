@@ -114,8 +114,8 @@ func (c *CacheBackendBlobReader) Open(ctx context.Context, owner, repo, commit, 
 		return nil, err
 	}
 	if open.StatusCode == http.StatusNotFound {
-		// 缓存 404 路由
-		_ = c.cache.Put(ctx, key, nil, time.Hour)
+		// TODO: 缓存 404 路由
+		//_ = c.cache.Put(ctx, key, nil, time.Hour)
 		_ = open.Body.Close()
 		return nil, os.ErrNotExist
 	}

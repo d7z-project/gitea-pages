@@ -241,9 +241,9 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	}
 	defer result.Close()
 	if reader, ok := result.(*cache.Content); ok {
-		writer.Header().Add("X-CacheBlob", "HIT")
+		writer.Header().Add("X-Cache", "HIT")
 		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(fileName)))
-		writer.Header().Add("CacheBlob-Control", "public, max-age=86400")
+		writer.Header().Add("Cache-Control", "public, max-age=86400")
 		if render != nil {
 			if err = render.Render(writer, request, reader); err != nil {
 				return err
@@ -256,8 +256,8 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 			writer.Header().Add("Content-Length", strconv.FormatUint(reader.Size, 10))
 		}
 		// todo(bug) : 直连模式下告知数据长度
-		writer.Header().Add("X-CacheBlob", "MISS")
-		writer.Header().Add("CacheBlob-Control", "public, max-age=86400")
+		writer.Header().Add("X-Cache", "MISS")
+		writer.Header().Add("Cache-Control", "public, max-age=86400")
 		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(fileName)))
 		writer.WriteHeader(http.StatusOK)
 		if render != nil {
