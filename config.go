@@ -96,12 +96,16 @@ func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to init cache meta")
 	}
+	if c.Cache.CacheControl == "" {
+		c.Cache.CacheControl = "public, max-age=86400"
+	}
 	rel := pkg.ServerOptions{
 		Domain:              c.Domain,
 		DefaultBranch:       c.Page.DefaultBranch,
 		Alias:               alias,
 		CacheMeta:           cacheMeta,
 		CacheMetaTTL:        c.Cache.MetaTTL,
+		CacheControl:        c.Cache.CacheControl,
 		CacheBlob:           memoryCache,
 		CacheBlobTTL:        c.Cache.BlobTTL,
 		CacheBlobLimit:      uint64(c.Cache.BlobLimit),
@@ -167,9 +171,10 @@ type ConfigCache struct {
 	Meta    string        `yaml:"meta"`     // 元数据缓存
 	MetaTTL time.Duration `yaml:"meta_ttl"` // 缓存时间
 
-	Blob      string           `yaml:"blob"`       // 缓存归档位置
-	BlobTTL   time.Duration    `yaml:"blob_ttl"`   // 缓存归档位置
-	BlobLimit units.Base2Bytes `yaml:"blob_limit"` // 单个文件最大大小
+	Blob         string           `yaml:"blob"`          // 缓存归档位置
+	BlobTTL      time.Duration    `yaml:"blob_ttl"`      // 缓存归档位置
+	BlobLimit    units.Base2Bytes `yaml:"blob_limit"`    // 单个文件最大大小
+	CacheControl string           `yaml:"cache_control"` // 缓存配置
 }
 
 func LoadConfig(path string) (*Config, error) {

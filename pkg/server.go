@@ -40,17 +40,18 @@ type ServerOptions struct {
 	CacheMeta    kv.KV         // 配置缓存
 	CacheMetaTTL time.Duration // 配置缓存时长
 
-	CacheBlob      cache.Cache   // blob缓存
-	CacheBlobTTL   time.Duration // 配置缓存时长
-	CacheBlobLimit uint64        // blob最大缓存大小
+	CacheBlob    cache.Cache   // blob缓存
+	CacheBlobTTL time.Duration // 配置缓存时长
+	CacheControl string        // 缓存配置
 
-	HTTPClient *http.Client // 自定义客户端
+	CacheBlobLimit uint64 // blob最大缓存大小
 
-	EnableRender bool // 允许渲染
-	EnableProxy  bool // 允许代理
+	HTTPClient   *http.Client // 自定义客户端
+	EnableRender bool         // 允许渲染
 
-	StaticDir string // 静态文件位置
+	EnableProxy bool // 允许代理
 
+	StaticDir           string // 静态文件位置
 	DefaultErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -68,6 +69,7 @@ func DefaultOptions(domain string) ServerOptions {
 		CacheBlob:      cacheMemory,
 		CacheBlobTTL:   time.Minute,
 		CacheBlobLimit: 1024 * 1024 * 10,
+		CacheControl:   "public, max-age=86400",
 
 		HTTPClient: http.DefaultClient,
 
@@ -243,7 +245,7 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	if reader, ok := result.(*cache.Content); ok {
 		writer.Header().Add("X-Cache", "HIT")
 		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(fileName)))
-		writer.Header().Add("Cache-Control", "public, max-age=86400")
+		writer.Header().Add("Cache-Control", s.options.CacheControl)
 		if render != nil {
 			if err = render.Render(writer, request, reader); err != nil {
 				return err
@@ -257,7 +259,6 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		}
 		// todo(bug) : 直连模式下告知数据长度
 		writer.Header().Add("X-Cache", "MISS")
-		writer.Header().Add("Cache-Control", "public, max-age=86400")
 		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(fileName)))
 		writer.WriteHeader(http.StatusOK)
 		if render != nil {
