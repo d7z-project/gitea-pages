@@ -98,7 +98,7 @@ func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 		options.CacheBlob, options.CacheBlobLimit,
 	)
 	svcMeta := core.NewServerMeta(options.HTTPClient, backend, options.CacheMeta, options.Domain, options.CacheMetaTTL)
-	pageMeta := core.NewPageDomain(svcMeta, options.Alias, options.Domain, options.DefaultBranch)
+	pageMeta := core.NewPageDomain(svcMeta, core.NewDomainAlias(options.Alias), options.Domain, options.DefaultBranch)
 	var fs http.Handler
 	if options.StaticDir != "" {
 		fs = http.StripPrefix(staticPrefix, http.FileServer(http.Dir(options.StaticDir)))
