@@ -22,6 +22,9 @@ var FilterInstDefaultNotFound core.FilterInstance = func(config core.FilterParam
 				return err
 			}
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if l := open.Header.Get("Content-Length"); l != "" {
+				writer.Header().Set("Content-Length", l)
+			}
 			writer.WriteHeader(http.StatusNotFound)
 			_, _ = io.Copy(writer, open.Body)
 		}

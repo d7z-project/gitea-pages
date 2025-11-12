@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/gobwas/glob"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/tools"
@@ -50,23 +49,18 @@ func NewEmptyPageMetaContent() *PageMetaContent {
 		Filters: []Filter{
 			{
 				Path:   "**",
-				Type:   "default_not_found",
+				Type:   "_404_",
 				Params: map[string]any{},
 			},
 			{ // 默认阻塞
-				Path: ".git/**",
-				Type: "block",
-				Params: map[string]any{
-					"code":    "404",
-					"message": "Not found",
-				},
-			}, { // 默认阻塞
-				Path: ".pages.yaml",
-				Type: "block",
-				Params: map[string]any{
-					"code":    "404",
-					"message": "Not found",
-				},
+				Path:   ".git/**",
+				Type:   "block",
+				Params: map[string]any{},
+			},
+			{ // 默认阻塞
+				Path:   ".pages.yaml",
+				Type:   "block",
+				Params: map[string]any{},
 			},
 		},
 	}
@@ -161,11 +155,20 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 	defer func(alias *[]string) {
 		meta.Alias = *alias
 		direct := *alias
+		if len(direct) > 0 {
+			meta.Filters = append(meta.Filters, Filter{
+				Path: "**",
+				Type: "redirect",
+				Params: map[string]any{
+					"targets": direct,
+				},
+			})
+		}
 		meta.Filters = append(meta.Filters, Filter{
 			Path: "**",
-			Type: "redirect",
+			Type: "direct",
 			Params: map[string]any{
-				"targets": direct,
+				"prefix": "",
 			},
 		})
 	}(&alias)
@@ -187,76 +190,36 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 	if err = yaml.Unmarshal([]byte(data), cfg); err != nil {
 		return errors.Wrap(err, "parse .pages.yaml failed")
 	}
-	if cfg.VirtualRoute {
-		meta.Filters = append(meta.Filters, Filter{
-			Path: "**",
-			Type: "forward",
-			Params: map[string]any{
-				"path": "index.html",
-			},
-		})
-	}
 
 	// 处理别名
-	for _, cname := range cfg.Alias {
-		if cname == "" {
+	for _, item := range cfg.Alias {
+		if item == "" {
 			continue
 		}
-		if al, ok := s.aliasCheck(cname); ok {
+		if al, ok := s.aliasCheck(item); ok {
 			alias = append(alias, al)
 		} else {
-			return fmt.Errorf("invalid alias %s", cname)
+			return fmt.Errorf("invalid alias %s", item)
 		}
 	}
 
-	// 处理渲染器
-	for sType, pattern := range cfg.Renders() {
-		meta.Filters = append(meta.Filters, Filter{
-			Path:   pattern,
-			Type:   sType,
-			Params: map[string]any{},
-		})
-	}
-
-	// 处理跳过内容
-	for _, pattern := range cfg.Ignores() {
-		meta.Filters = append(meta.Filters, Filter{ // 默认直连
-			Path: pattern,
-			Type: "block",
-			Params: map[string]any{
-				"code":    "404",
-				"message": "Not found",
-			},
-		},
-		)
-	}
-
-	// 处理反向代理
-	for path, backend := range cfg.ReverseProxy {
-		path = filepath.ToSlash(filepath.Clean(path))
-		if !strings.HasPrefix(path, "/") {
-			path = "/" + path
+	// 处理自定义路由
+	for _, r := range cfg.Routes {
+		for _, item := range strings.Split(r.Path, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, err := glob.Compile(item); err != nil {
+				return errors.Wrapf(err, "invalid route glob pattern: %s", item)
+			}
+			meta.Filters = append(meta.Filters, Filter{
+				Path:   item,
+				Type:   r.Type,
+				Params: r.Params,
+			})
 		}
-		path = strings.TrimSuffix(path, "/")
-
-		rURL, err := url.Parse(backend)
-		if err != nil {
-			return errors.Wrapf(err, "parse backend url failed: %s", backend)
-		}
-
-		if rURL.Scheme != "http" && rURL.Scheme != "https" {
-			return errors.Errorf("invalid backend url scheme: %s", backend)
-		}
-		meta.Filters = append(meta.Filters, Filter{
-			Path: path,
-			Type: "reverse_proxy",
-			Params: map[string]any{
-				"prefix": path,
-				"target": rURL.String(),
-			},
-		})
 	}
-
 	return nil
 }
 

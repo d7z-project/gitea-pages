@@ -3,9 +3,11 @@ package filters
 import (
 	"context"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -20,12 +22,17 @@ var FilterInstDirect core.FilterInstance = func(config core.FilterParams) (core.
 	if err := config.Unmarshal(&param); err != nil {
 		return nil, err
 	}
+	param.Prefix = strings.Trim(param.Prefix, "/") + "/"
 	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageDomainContent, next core.NextCall) error {
+		err := next(ctx, writer, request, metadata)
+		if (err != nil && !errors.Is(err, os.ErrNotExist)) || err == nil {
+			return err
+		}
 		var resp *http.Response
 		var path string
-		var err error
-		failback := []string{param.Prefix + metadata.Path, param.Prefix + metadata.Path + "/index.html"}
-		for _, p := range failback {
+		defaultPath := param.Prefix + strings.TrimSuffix(metadata.Path, "/")
+		for _, p := range []string{defaultPath, defaultPath + "/index.html"} {
+			zap.L().Debug("direct fetch", zap.String("path", p))
 			resp, err = metadata.NativeOpen(request.Context(), p, nil)
 			if err != nil {
 				if resp != nil {
@@ -33,6 +40,7 @@ var FilterInstDirect core.FilterInstance = func(config core.FilterParams) (core.
 				}
 				if !errors.Is(err, os.ErrNotExist) {
 					zap.L().Debug("error", zap.Any("error", err))
+					return err
 				}
 				continue
 			}
@@ -46,7 +54,8 @@ var FilterInstDirect core.FilterInstance = func(config core.FilterParams) (core.
 		if err != nil {
 			return err
 		}
-		writer.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+
+		writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(path)))
 		lastMod, err := time.Parse(http.TimeFormat, resp.Header.Get("Last-Modified"))
 		if err == nil {
 			if seeker, ok := resp.Body.(io.ReadSeeker); ok {

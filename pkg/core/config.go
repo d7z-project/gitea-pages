@@ -1,46 +1,48 @@
 package core
 
-import "strings"
+import (
+	"github.com/pkg/errors"
+	"gopkg.in/yaml.v3"
+)
 
 type PageConfig struct {
-	Alias  []string          `yaml:"alias"`     // 重定向地址
-	Render map[string]string `yaml:"templates"` // 渲染器地址
-
-	VirtualRoute bool              `yaml:"v-route"` // 是否使用虚拟路由（任何路径均使用 /index.html 返回 200 响应）
-	ReverseProxy map[string]string `yaml:"proxy"`   // 反向代理路由
-
-	Ignore string `yaml:"ignore"` // 跳过展示的内容
+	Alias  []string          `yaml:"alias"`  // 重定向地址
+	Routes []PageConfigRoute `yaml:"routes"` // 路由配置
 }
 
-func (p *PageConfig) Ignores() []string {
-	i := make([]string, 0)
-	if p.Ignore == "" {
-		return i
-	}
-	for _, line := range strings.Split(p.Ignore, "\n") {
-		for _, item := range strings.Split(line, ",") {
-			item = strings.TrimSpace(item)
-			if item == "" {
-				continue
-			}
-			i = append(i, item)
-		}
-	}
-	return i
+type PageConfigRoute struct {
+	Path   string         `yaml:"path"`
+	Type   string         `yaml:"type"`
+	Params map[string]any `yaml:"params"`
 }
 
-func (p *PageConfig) Renders() map[string]string {
-	result := make(map[string]string)
-	for sType, patterns := range p.Render {
-		for _, line := range strings.Split(patterns, "\n") {
-			for _, item := range strings.Split(line, ",") {
-				item = strings.TrimSpace(item)
-				if item == "" {
-					continue
-				}
-				result[sType] = item
-			}
-		}
+func (p *PageConfigRoute) UnmarshalYAML(value *yaml.Node) error {
+	var data map[string]any
+	if err := value.Decode(&data); err != nil {
+		return err
 	}
-	return result
+	if item, ok := data["path"]; ok {
+		p.Path = item.(string)
+	} else {
+		return errors.New("missing path field")
+	}
+	delete(data, "path")
+	keys := make([]string, 0)
+	for k := range data {
+		keys = append(keys, k)
+	}
+	if len(keys) != 1 {
+		return errors.New("invalid param")
+	}
+	p.Type = keys[0]
+	params := data[p.Type]
+	// 跳过空参数
+	if _, ok := params.(string); ok || params == nil {
+		return nil
+	}
+	out, err := yaml.Marshal(params)
+	if err != nil {
+		return err
+	}
+	return yaml.Unmarshal(out, &p.Params)
 }

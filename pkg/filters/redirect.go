@@ -18,9 +18,19 @@ var portExp = regexp.MustCompile(`:\d+$`)
 var FilterInstRedirect core.FilterInstance = func(config core.FilterParams) (core.FilterCall, error) {
 	var param struct {
 		Targets []string `json:"targets"`
+		Code    int      `json:"code"`
 	}
 	if err := config.Unmarshal(&param); err != nil {
 		return nil, err
+	}
+	if len(param.Targets) == 0 {
+		return nil, fmt.Errorf("no targets")
+	}
+	if param.Code == 0 {
+		param.Code = http.StatusFound
+	}
+	if param.Code < 300 || param.Code > 399 {
+		return nil, fmt.Errorf("invalid code: %d", param.Code)
 	}
 	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageDomainContent, next core.NextCall) error {
 		domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
@@ -37,7 +47,7 @@ var FilterInstRedirect core.FilterInstance = func(config core.FilterParams) (cor
 			}
 			target.RawQuery = request.URL.RawQuery
 
-			http.Redirect(writer, request, target.String(), http.StatusFound)
+			http.Redirect(writer, request, target.String(), param.Code)
 			return nil
 		} else {
 			return next(ctx, writer, request, metadata)

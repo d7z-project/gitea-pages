@@ -2,6 +2,7 @@ package pkg
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"regexp"
@@ -77,13 +78,13 @@ func DefaultOptions(domain string) ServerOptions {
 }
 
 type Server struct {
-	options   *ServerOptions
-	meta      *core.PageDomain
-	backend   core.Backend
-	fs        http.Handler
-	filterMgr map[string]core.FilterInstance
+	backend  core.Backend
+	options  *ServerOptions
+	meta     *core.PageDomain
+	staticFS http.Handler
 
-	filtersCache *lru.Cache[string, glob.Glob]
+	filterMgr map[string]core.FilterInstance
+	globCache *lru.Cache[string, glob.Glob]
 }
 
 var staticPrefix = "/.well-known/page-server/"
@@ -100,20 +101,20 @@ func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 		panic(err)
 	}
 	return &Server{
-		backend:      backend,
-		options:      &options,
-		meta:         pageMeta,
-		fs:           fs,
-		filtersCache: c,
-		filterMgr:    filters.DefaultFilters(),
+		backend:   backend,
+		options:   &options,
+		meta:      pageMeta,
+		staticFS:  fs,
+		globCache: c,
+		filterMgr: filters.DefaultFilters(),
 	}
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	sessionID, _ := uuid.NewRandom()
 	request.Header.Set("Session-ID", sessionID.String())
-	if s.fs != nil && strings.HasPrefix(request.URL.Path, staticPrefix) {
-		s.fs.ServeHTTP(writer, request)
+	if s.staticFS != nil && strings.HasPrefix(request.URL.Path, staticPrefix) {
+		s.staticFS.ServeHTTP(writer, request)
 		return
 	}
 	defer func() {
@@ -145,15 +146,16 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	}
 	activeFiltersCall := make([]core.FilterCall, 0)
 	activeFilters := make([]core.Filter, 0)
+	filtersRoute := make([]string, 0)
 
 	for _, filter := range meta.Filters {
-		value, ok := s.filtersCache.Get(filter.Path)
+		value, ok := s.globCache.Get(filter.Path)
 		if !ok {
 			value, err = glob.Compile(filter.Path)
 			if err != nil {
 				continue
 			}
-			s.filtersCache.Add(filter.Path, value)
+			s.globCache.Add(filter.Path, value)
 		}
 		if value.Match(meta.Path) {
 			instance := s.filterMgr[filter.Type]
@@ -161,6 +163,7 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 				return errors.New("filter not found : " + filter.Type)
 			}
 			activeFilters = append(activeFilters, filter)
+			filtersRoute = append(filtersRoute, fmt.Sprintf("%s[%s]%s", filter.Type, filter.Path, filter.Params))
 			call, err := instance(filter.Params)
 			if err != nil {
 				return err
@@ -171,16 +174,18 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	slices.Reverse(activeFiltersCall)
 	slices.Reverse(activeFilters)
 
-	zap.L().Debug("active filters", zap.Any("filters", activeFilters))
-
-	direct, _ := filters.FilterInstDirect(map[string]any{
-		"prefix": "",
-	})
-	stack := core.NextCallWrapper(direct, nil)
-	for _, filter := range activeFiltersCall {
-		stack = core.NextCallWrapper(filter, stack)
+	l := len(filtersRoute)
+	for i := l - 2; i >= 0; i-- {
+		filtersRoute = append(filtersRoute, filtersRoute[i])
 	}
-	return stack(ctx, writer, request, meta)
+	zap.L().Debug("active filters", zap.String("filters", strings.Join(filtersRoute, " -> ")))
+
+	var stack core.NextCall = core.NotFountNextCall
+	for i, filter := range activeFiltersCall {
+		stack = core.NextCallWrapper(filter, stack, activeFilters[i])
+	}
+	err = stack(ctx, writer, request, meta)
+	return err
 }
 
 func (s *Server) Close() error {

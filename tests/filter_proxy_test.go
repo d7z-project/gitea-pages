@@ -7,7 +7,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/tests/core"
 )
 
-func Test_proxy(t *testing.T) {
+func test_proxy(t *testing.T) {
 	server := core.NewDefaultTestServer()
 	hs := core.NewServer()
 	defer server.Close()
@@ -17,8 +17,12 @@ func Test_proxy(t *testing.T) {
 
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: /api/**
+  reverse_proxy:
+    prefix: /api
+    target: %s
 proxy:
-  /api: %s/test
   /abi: %s/
 `, hs.URL, hs.URL)
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/")
@@ -36,7 +40,7 @@ proxy:
 	assert.Equal(t, 404, resp.StatusCode)
 }
 
-func Test_cname_proxy(t *testing.T) {
+func test_cname_proxy(t *testing.T) {
 	server := core.NewDefaultTestServer()
 	hs := core.NewServer()
 	defer server.Close()

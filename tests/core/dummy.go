@@ -30,7 +30,7 @@ func NewDummy() (*ProviderDummy, error) {
 	}, nil
 }
 
-func (p *ProviderDummy) Repos(ctx context.Context, owner string) (map[string]string, error) {
+func (p *ProviderDummy) Repos(_ context.Context, owner string) (map[string]string, error) {
 	dir, err := os.ReadDir(filepath.Join(p.BaseDir, owner))
 	if err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func (p *ProviderDummy) Repos(ctx context.Context, owner string) (map[string]str
 	return repos, nil
 }
 
-func (p *ProviderDummy) Branches(ctx context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
+func (p *ProviderDummy) Branches(_ context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
 	dir, err := os.ReadDir(filepath.Join(p.BaseDir, owner, repo))
 	if err != nil {
 		return nil, err
