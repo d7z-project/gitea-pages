@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"go.uber.org/zap"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.in/yaml.v3"
 
 	"gopkg.d7z.net/gitea-pages/pkg"
@@ -64,7 +65,10 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	giteaServer := pkg.NewPageServer(gitea, *options)
+	backend := core.NewCacheBackend(gitea, options.CacheMeta, options.CacheMetaTTL,
+		options.CacheBlob, options.CacheBlobLimit,
+	)
+	giteaServer := pkg.NewPageServer(backend, *options)
 	defer giteaServer.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()

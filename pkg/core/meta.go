@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,183 +31,200 @@ type ServerMeta struct {
 
 	client *http.Client
 	cache  *tools.Cache[PageMetaContent]
-
 	locker *utils.Locker
 }
 
 func NewServerMeta(client *http.Client, backend Backend, kv kv.KV, domain string, ttl time.Duration) *ServerMeta {
 	return &ServerMeta{
-		backend, domain, client,
-		tools.NewCache[PageMetaContent](kv, "pages/meta", ttl),
-		utils.NewLocker(),
+		Backend: backend,
+		Domain:  domain,
+		client:  client,
+		cache:   tools.NewCache[PageMetaContent](kv, "pages/meta", ttl),
+		locker:  utils.NewLocker(),
 	}
 }
 
-func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*PageMetaContent, error) {
-	rel := NewPageMetaContent()
+func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*PageMetaContent, *PageVFS, error) {
 	repos, err := s.Repos(ctx, owner)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
 	defBranch := repos[repo]
 	if defBranch == "" {
-		return nil, os.ErrNotExist
+		return nil, nil, os.ErrNotExist
 	}
+
 	if branch == "" {
 		branch = defBranch
 	}
+
 	branches, err := s.Branches(ctx, owner, repo)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
 	info := branches[branch]
 	if info == nil {
-		return nil, os.ErrNotExist
+		return nil, nil, os.ErrNotExist
 	}
-	rel.CommitID = info.ID
-	rel.LastModified = info.LastModified
 
 	key := fmt.Sprintf("%s/%s/%s", owner, repo, branch)
-	if cache, find := s.cache.Load(ctx, key); find {
+
+	if cache, found := s.cache.Load(ctx, key); found {
 		if cache.IsPage {
-			return rel, nil
-		} else {
-			return nil, os.ErrNotExist
+			return &cache, NewPageVFS(s.client, s.Backend, owner, repo, cache.CommitID), nil
 		}
+		return nil, nil, os.ErrNotExist
 	}
+
 	mux := s.locker.Open(key)
 	mux.Lock()
 	defer mux.Unlock()
-	if cache, find := s.cache.Load(ctx, key); find {
+
+	if cache, found := s.cache.Load(ctx, key); found {
 		if cache.IsPage {
-			return rel, nil
-		} else {
-			return nil, os.ErrNotExist
+			return &cache, NewPageVFS(s.client, s.Backend, owner, repo, cache.CommitID), nil
 		}
+		return nil, nil, os.ErrNotExist
 	}
 
-	// 确定存在 index.html , 否则跳过
-	if find, _ := s.FileExists(ctx, owner, repo, rel.CommitID, "index.html"); !find {
+	rel := NewEmptyPageMetaContent()
+	vfs := NewPageVFS(s.client, s.Backend, owner, repo, info.ID)
+	rel.CommitID = info.ID
+	rel.LastModified = info.LastModified
+
+	// 检查是否存在 index.html
+	if exists, _ := vfs.Exists(ctx, "index.html"); !exists {
 		rel.IsPage = false
 		_ = s.cache.Store(ctx, key, *rel)
-		return nil, os.ErrNotExist
+		return nil, nil, os.ErrNotExist
 	}
+
 	rel.IsPage = true
-	errCall := func(err error) error {
-		rel.IsPage = false
-		rel.ErrorMsg = err.Error()
-		_ = s.cache.Store(ctx, key, *rel)
-		return err
-	}
+
 	// 添加默认跳过的内容
 	for _, defIgnore := range rel.Ignore {
 		rel.ignoreL = append(rel.ignoreL, glob.MustCompile(defIgnore))
 	}
+
 	// 解析配置
-	if data, err := s.ReadString(ctx, owner, repo, rel.CommitID, ".pages.yaml"); err == nil {
-		cfg := new(PageConfig)
-		if err = yaml.Unmarshal([]byte(data), cfg); err != nil {
-			return nil, errCall(err)
-		}
-		rel.VRoute = cfg.VirtualRoute
-		// 处理 CNAME
-		for _, cname := range cfg.Alias {
-			cname = strings.TrimSpace(cname)
-			if regexpHostname.MatchString(cname) && !strings.HasSuffix(strings.ToLower(cname), strings.ToLower(s.Domain)) {
-				rel.Alias = append(rel.Alias, cname)
-			} else {
-				return nil, errCall(errors.New("invalid alias name " + cname))
-			}
-		}
-		// 处理渲染器
-		for sType, pattern := range cfg.Renders() {
-			var r Render
-			if r = GetRender(sType); r == nil {
-				return nil, errCall(errors.Errorf("render not found %s", sType))
-			}
-			if g, err := glob.Compile(strings.TrimSpace(pattern)); err == nil {
-				rel.rendersL = append(rel.rendersL, &renderCompiler{
-					regex:  g,
-					Render: r,
-				})
-			} else {
-				return nil, errCall(err)
-			}
-			rel.Renders[sType] = append(rel.Renders[sType], pattern)
-		}
-		// 处理跳过内容
-		for _, pattern := range cfg.Ignores() {
-			if g, err := glob.Compile(pattern); err == nil {
-				rel.ignoreL = append(rel.ignoreL, g)
-			} else {
-				return nil, errCall(err)
-			}
-			rel.Ignore = append(rel.Ignore, pattern)
-		}
-		// 处理反向代理 (清理内容，符合 /<item>)
-		for path, backend := range cfg.ReverseProxy {
-			path = filepath.ToSlash(filepath.Clean(path))
-			if !strings.HasPrefix(path, "/") {
-				path = "/" + path
-			}
-			path = strings.TrimSuffix(path, "/")
-			var rURL *url.URL
-			if rURL, err = url.Parse(backend); err != nil {
-				return nil, errCall(err)
-			}
-			if rURL.Scheme != "http" && rURL.Scheme != "https" {
-				return nil, errCall(errors.New("invalid backend url " + backend))
-			}
-			rel.Proxy[path] = rURL.String()
-		}
-	} else {
-		// 不存在配置，但也可以重定向
-		zap.L().Debug("failed to read meta data", zap.String("error", err.Error()))
+	if err := s.parsePageConfig(ctx, rel, vfs); err != nil {
+		rel.IsPage = false
+		rel.ErrorMsg = err.Error()
+		_ = s.cache.Store(ctx, key, *rel)
+		return nil, nil, err
 	}
 
-	// 兼容 github 的 CNAME 模式
-	if cname, err := s.ReadString(ctx, owner, repo, rel.CommitID, "CNAME"); err == nil {
-		cname = strings.TrimSpace(cname)
-		if regexpHostname.MatchString(cname) && !strings.HasSuffix(strings.ToLower(cname), strings.ToLower(s.Domain)) {
-			rel.Alias = append(rel.Alias, cname)
-		} else {
-			zap.L().Debug("指定的 CNAME 不合法", zap.String("cname", cname))
-		}
+	// 处理 CNAME 文件
+	if err := s.parseCNAME(ctx, rel, vfs); err != nil {
+		rel.IsPage = false
+		rel.ErrorMsg = err.Error()
+		_ = s.cache.Store(ctx, key, *rel)
+		return nil, nil, err
 	}
+
 	rel.Alias = utils.ClearDuplicates(rel.Alias)
 	rel.Ignore = utils.ClearDuplicates(rel.Ignore)
 	_ = s.cache.Store(ctx, key, *rel)
-	return rel, nil
+	return rel, vfs, nil
 }
 
-func (s *ServerMeta) ReadString(ctx context.Context, owner, repo, branch, path string) (string, error) {
-	resp, err := s.Open(ctx, s.client, owner, repo, branch, path, nil)
-	if resp != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil || resp == nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", os.ErrNotExist
-	}
-	all, err := io.ReadAll(resp.Body)
+func (s *ServerMeta) parsePageConfig(ctx context.Context, rel *PageMetaContent, vfs *PageVFS) error {
+	data, err := vfs.ReadString(ctx, ".pages.yaml")
 	if err != nil {
-		return "", err
+		zap.L().Debug("failed to read meta data", zap.String("error", err.Error()))
+		return nil // 配置文件不存在不是错误
 	}
-	return string(all), nil
+
+	cfg := new(PageConfig)
+	if err = yaml.Unmarshal([]byte(data), cfg); err != nil {
+		return errors.Wrap(err, "parse .pages.yaml failed")
+	}
+
+	rel.VRoute = cfg.VirtualRoute
+
+	// 处理别名
+	for _, cname := range cfg.Alias {
+		if err := s.addAlias(rel, cname); err != nil {
+			return err
+		}
+	}
+
+	// 处理渲染器
+	for sType, pattern := range cfg.Renders() {
+		r := GetRender(sType)
+		if r == nil {
+			return errors.Errorf("render not found %s", sType)
+		}
+
+		g, err := glob.Compile(strings.TrimSpace(pattern))
+		if err != nil {
+			return errors.Wrapf(err, "compile render pattern failed: %s", pattern)
+		}
+
+		rel.rendersL = append(rel.rendersL, &renderCompiler{
+			regex:  g,
+			Render: r,
+		})
+		rel.Renders[sType] = append(rel.Renders[sType], pattern)
+	}
+
+	// 处理跳过内容
+	for _, pattern := range cfg.Ignores() {
+		g, err := glob.Compile(pattern)
+		if err != nil {
+			return errors.Wrapf(err, "compile ignore pattern failed: %s", pattern)
+		}
+		rel.ignoreL = append(rel.ignoreL, g)
+		rel.Ignore = append(rel.Ignore, pattern)
+	}
+
+	// 处理反向代理
+	for path, backend := range cfg.ReverseProxy {
+		path = filepath.ToSlash(filepath.Clean(path))
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		path = strings.TrimSuffix(path, "/")
+
+		rURL, err := url.Parse(backend)
+		if err != nil {
+			return errors.Wrapf(err, "parse backend url failed: %s", backend)
+		}
+
+		if rURL.Scheme != "http" && rURL.Scheme != "https" {
+			return errors.Errorf("invalid backend url scheme: %s", backend)
+		}
+
+		rel.Proxy[path] = rURL.String()
+	}
+
+	return nil
 }
 
-func (s *ServerMeta) FileExists(ctx context.Context, owner, repo, branch, path string) (bool, error) {
-	resp, err := s.Open(ctx, s.client, owner, repo, branch, path, nil)
-	if resp != nil {
-		defer resp.Body.Close()
+func (s *ServerMeta) parseCNAME(ctx context.Context, rel *PageMetaContent, vfs *PageVFS) error {
+	cname, err := vfs.ReadString(ctx, "CNAME")
+	if err != nil {
+		return nil // CNAME 文件不存在是正常情况
 	}
-	if err != nil || resp == nil {
-		return false, err
+	if err := s.addAlias(rel, cname); err != nil {
+		zap.L().Debug("指定的 CNAME 不合法", zap.String("cname", cname), zap.Error(err))
+		return err
 	}
-	if resp.StatusCode == http.StatusOK {
-		return true, nil
+	return nil
+}
+
+func (s *ServerMeta) addAlias(rel *PageMetaContent, cname string) error {
+	cname = strings.TrimSpace(cname)
+	if !regexpHostname.MatchString(cname) {
+		return errors.New("invalid domain name format")
 	}
-	return false, nil
+
+	if strings.HasSuffix(strings.ToLower(cname), strings.ToLower(s.Domain)) {
+		return errors.New("alias cannot be subdomain of main domain")
+	}
+
+	rel.Alias = append(rel.Alias, cname)
+	return nil
 }

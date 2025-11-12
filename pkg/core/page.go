@@ -73,3 +73,11 @@ func (p *PageVFS) Read(ctx context.Context, path string) ([]byte, error) {
 	defer open.Close()
 	return io.ReadAll(open)
 }
+
+func (p *PageVFS) ReadString(ctx context.Context, path string) (string, error) {
+	read, err := p.Read(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	return string(read), nil
+}

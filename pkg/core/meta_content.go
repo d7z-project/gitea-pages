@@ -32,7 +32,7 @@ type PageMetaContent struct {
 	ignoreL  []glob.Glob
 }
 
-func NewPageMetaContent() *PageMetaContent {
+func NewEmptyPageMetaContent() *PageMetaContent {
 	return &PageMetaContent{
 		IsPage:  false,
 		Proxy:   make(map[string]string),

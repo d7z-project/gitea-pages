@@ -1,6 +1,8 @@
 package pkg
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,16 +17,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gopkg.d7z.net/middleware/cache"
-	"gopkg.d7z.net/middleware/kv"
-
-	stdErr "errors"
-
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
-
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
+	"gopkg.d7z.net/middleware/cache"
+	"gopkg.d7z.net/middleware/kv"
 )
 
 var portExp = regexp.MustCompile(`:\d+$`)
@@ -94,9 +91,6 @@ type Server struct {
 var staticPrefix = "/.well-known/page-server/"
 
 func NewPageServer(backend core.Backend, options ServerOptions) *Server {
-	backend = core.NewCacheBackend(backend, options.CacheMeta, options.CacheMetaTTL,
-		options.CacheBlob, options.CacheBlobLimit,
-	)
 	svcMeta := core.NewServerMeta(options.HTTPClient, backend, options.CacheMeta, options.Domain, options.CacheMetaTTL)
 	pageMeta := core.NewPageDomain(svcMeta, core.NewDomainAlias(options.Alias), options.Domain, options.DefaultBranch)
 	var fs http.Handler
@@ -135,24 +129,22 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 
 func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error {
 	ctx := request.Context()
-	domainHost := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
-
-	meta, err := s.meta.ParseDomainMeta(ctx, domainHost, request.URL.Path, request.URL.Query().Get("branch"))
+	domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
+	meta, err := s.meta.ParseDomainMeta(ctx, domain, request.URL.Path, request.URL.Query().Get("branch"))
 	if err != nil {
 		return err
 	}
 	zap.L().Debug("new request", zap.Any("request path", meta.Path))
-	if len(meta.Alias) > 0 && !slices.Contains(meta.Alias, domainHost) {
+	if len(meta.Alias) > 0 && !slices.Contains(meta.Alias, domain) {
 		// 重定向到配置的地址
 		zap.L().Debug("redirect", zap.Any("src", request.Host), zap.Any("dst", meta.Alias[0]))
 		http.Redirect(writer, request, fmt.Sprintf("https://%s/%s", meta.Alias[0], meta.Path), http.StatusFound)
 		return nil
 	}
-	// 处理反向代理
 	if s.options.EnableProxy && s.Proxy(writer, request, meta) {
 		return nil
 	}
-	// 在非反向代理时处理目录访问
+
 	if strings.HasSuffix(meta.Path, "/") || meta.Path == "" {
 		meta.Path += "index.html"
 	}
@@ -162,66 +154,62 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	}
 	if meta.IgnorePath(meta.Path) {
 		zap.L().Debug("ignore path", zap.Any("request", request.RequestURI), zap.Any("meta.path", meta.Path))
-		err = os.ErrNotExist
-	}
-	type resp struct {
-		IsError bool
-		Path    string
+		return os.ErrNotExist
 	}
 
-	callPath := []resp{{false, meta.Path}}
+	var resp *http.Response
+	var path string
+	failback := []string{meta.Path, meta.Path + "/index.html"}
 	if meta.VRoute {
-		callPath = append(callPath, resp{false, "index.html"})
-	} else {
-		callPath = append(callPath, resp{false, meta.Path + "/index.html"})
+		failback = append(failback, "index.html")
 	}
-	callPath = append(callPath, resp{true, "404.html"})
-
-	var callResp *http.Response
-	callErr := os.ErrNotExist
-	var callRespMeta resp
-	for _, r := range callPath {
-		callResp, callErr = meta.NativeOpen(request.Context(), r.Path, nil)
-		if callErr != nil {
-			if callResp != nil {
-				_ = callResp.Body.Close()
+	failback = append(failback, "404.html")
+	for _, p := range failback {
+		resp, err = meta.NativeOpen(request.Context(), p, nil)
+		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
 			}
-			if !errors.Is(callErr, os.ErrNotExist) {
-				zap.L().Debug("error", zap.Any("error", callErr))
+			if !errors.Is(err, os.ErrNotExist) {
+				zap.L().Debug("error", zap.Any("error", err))
 			}
-			callRespMeta = r
 			continue
 		}
+		path = p
 		break
 	}
 
-	if callResp == nil {
+	if resp == nil {
 		return os.ErrNotExist
 	}
-	if callErr != nil {
-		// 回退失败
-		return callErr
+	defer resp.Body.Close()
+
+	if err != nil {
+		return err
 	}
-	render := meta.TryRender(meta.Path)
-	writer.Header().Set("Content-Type", callResp.Header.Get("Content-Type"))
-	if callRespMeta.IsError {
-		render = meta.TryRender(meta.Path)
+	if path == "404.html" && request.URL.Path != "/404.html" {
 		writer.WriteHeader(http.StatusNotFound)
-	} else if render == nil {
-		lastMod, err := time.Parse(http.TimeFormat, callResp.Header.Get("Last-Modified"))
-		if seekResp, ok := callResp.Body.(io.ReadSeeker); ok && err == nil {
-			http.ServeContent(writer, request, filepath.Base(callRespMeta.Path), lastMod, seekResp)
-		}
-	} else {
-		defer callResp.Body.Close()
-		return render.Render(writer, request, callResp.Body)
 	}
-	return nil
+	ctx, cancel := context.WithTimeout(request.Context(), 3*time.Second)
+	defer cancel()
+	if render := meta.TryRender(path); render != nil {
+		return render.Render(ctx, writer, request, resp.Body, meta)
+	}
+	writer.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	lastMod, err := time.Parse(http.TimeFormat, resp.Header.Get("Last-Modified"))
+	if err == nil {
+		if seeker, ok := resp.Body.(io.ReadSeeker); ok && !(path == "404.html" && request.URL.Path != "/404.html") {
+			http.ServeContent(writer, request, filepath.Base(path), lastMod, seeker)
+			return nil
+		}
+	}
+	_, err = io.Copy(writer, resp.Body)
+	return err
 }
 
 func (s *Server) Proxy(writer http.ResponseWriter, request *http.Request, meta *core.PageDomainContent) bool {
+	proxyPath := "/" + meta.Path
 	for prefix, backend := range meta.Proxy {
-		proxyPath := "/" + meta.Path
 		if strings.HasPrefix(proxyPath, prefix) {
 			targetPath := strings.TrimPrefix(proxyPath, prefix)
 			if !strings.HasPrefix(targetPath, "/") {
@@ -250,7 +238,7 @@ func (s *Server) Proxy(writer http.ResponseWriter, request *http.Request, meta *
 }
 
 func (s *Server) Close() error {
-	return stdErr.Join(
+	return errors.Join(
 		s.options.CacheBlob.Close(),
 		s.options.CacheMeta.Close(),
 		s.options.Alias.Close(),

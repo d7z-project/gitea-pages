@@ -2,6 +2,7 @@ package renders
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 
@@ -16,14 +17,17 @@ func init() {
 	core.RegisterRender("gotemplate", &GoTemplate{})
 }
 
-func (g GoTemplate) Render(w http.ResponseWriter, r *http.Request, input io.Reader) error {
-	dataB, err := io.ReadAll(input)
+func (g GoTemplate) Render(ctx context.Context, w http.ResponseWriter, r *http.Request, input io.Reader, meta *core.PageDomainContent) error {
+	data, err := io.ReadAll(input)
 	if err != nil {
 		return err
 	}
 	out := &bytes.Buffer{}
-
-	parse, err := utils.NewTemplate(string(dataB))
+	parse, err := utils.NewTemplate().Funcs(map[string]any{
+		"template": func(path string) (any, error) {
+			return meta.ReadString(ctx, path)
+		},
+	}).Parse(string(data))
 	if err != nil {
 		return err
 	}

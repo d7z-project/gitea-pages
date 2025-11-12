@@ -27,17 +27,17 @@ func NewTemplateInject(r *http.Request, def map[string]any) map[string]any {
 }
 
 func MustTemplate(data string) *template.Template {
-	newTemplate, err := NewTemplate(data)
+	parse, err := NewTemplate().Parse(data)
 	if err != nil {
 		panic(err)
 	}
-	return newTemplate
+	return parse
 }
 
-func NewTemplate(data string) (*template.Template, error) {
+func NewTemplate() *template.Template {
 	funcMap := sprig.FuncMap()
 	delete(funcMap, "env")
 	delete(funcMap, "expandenv")
 	t := template.New("tmpl").Funcs(funcMap)
-	return t.Parse(data)
+	return t
 }

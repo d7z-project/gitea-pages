@@ -34,13 +34,13 @@ func (c *CacheBackend) Close() error {
 func NewCacheBackend(
 	backend Backend,
 	cacheMeta kv.KV,
-	cacheMetaTtl time.Duration,
+	cacheMetaTTL time.Duration,
 
 	cacheBlob cache.Cache,
 	cacheBlobLimit uint64,
 ) *CacheBackend {
-	repoCache := tools.NewCache[map[string]string](cacheMeta, "repos", cacheMetaTtl)
-	branchCache := tools.NewCache[map[string]*BranchInfo](cacheMeta, "branches", cacheMetaTtl)
+	repoCache := tools.NewCache[map[string]string](cacheMeta, "repos", cacheMetaTTL)
+	branchCache := tools.NewCache[map[string]*BranchInfo](cacheMeta, "branches", cacheMetaTTL)
 	return &CacheBackend{
 		backend:     backend,
 		cacheRepo:   repoCache,
@@ -115,7 +115,7 @@ func (c *CacheBackend) Open(ctx context.Context, client *http.Client, owner, rep
 		}
 		return &http.Response{
 			Status:        "200 OK",
-			StatusCode:    200,
+			StatusCode:    http.StatusOK,
 			Proto:         "HTTP/1.1",
 			ProtoMajor:    1,
 			ProtoMinor:    1,

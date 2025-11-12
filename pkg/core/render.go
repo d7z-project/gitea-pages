@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"sync"
@@ -12,7 +13,7 @@ var (
 )
 
 type Render interface {
-	Render(w http.ResponseWriter, r *http.Request, input io.Reader) error
+	Render(ctx context.Context, w http.ResponseWriter, r *http.Request, input io.Reader, meta *PageDomainContent) error
 }
 
 func RegisterRender(fType string, r Render) {

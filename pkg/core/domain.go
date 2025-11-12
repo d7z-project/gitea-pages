@@ -70,7 +70,7 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch s
 
 func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string, path []string) (*PageDomainContent, error) {
 	result := &PageDomainContent{}
-	meta, err := p.GetMeta(ctx, owner, repo, branch)
+	meta, vfs, err := p.GetMeta(ctx, owner, repo, branch)
 	if err != nil {
 		zap.L().Debug("查询错误", zap.Error(err))
 		if meta != nil {
@@ -82,7 +82,7 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string,
 	result.PageMetaContent = meta
 	result.Owner = owner
 	result.Repo = repo
-	result.PageVFS = NewPageVFS(p.client, p, result.Owner, result.Repo, result.CommitID)
+	result.PageVFS = vfs
 	result.Path = strings.Join(path, "/")
 
 	if err = p.alias.Bind(ctx, meta.Alias, result.Owner, result.Repo, branch); err != nil {
