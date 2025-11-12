@@ -42,10 +42,10 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch s
 	if !strings.HasSuffix(domain, "."+p.baseDomain) {
 		alias, err := p.alias.Query(ctx, domain) // 确定 alias 是否存在内容
 		if err != nil {
-			zap.L().Warn("未知域名", zap.String("base", p.baseDomain), zap.String("domain", domain), zap.Error(err))
+			zap.L().Warn("unknown domain", zap.String("base", p.baseDomain), zap.String("domain", domain), zap.Error(err))
 			return nil, os.ErrNotExist
 		}
-		zap.L().Debug("命中别名", zap.String("domain", domain), zap.Any("alias", alias))
+		zap.L().Debug("alias hit", zap.String("domain", domain), zap.Any("alias", alias))
 		return p.returnMeta(ctx, alias.Owner, alias.Repo, alias.Branch, pathArr)
 	}
 	owner := strings.TrimSuffix(domain, "."+p.baseDomain)
@@ -70,7 +70,7 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch s
 
 func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string, path []string) (*PageDomainContent, error) {
 	result := &PageDomainContent{}
-	meta, vfs, err := p.GetMeta(ctx, owner, repo, branch)
+	meta, err := p.GetMeta(ctx, owner, repo, branch)
 	if err != nil {
 		zap.L().Debug("查询错误", zap.Error(err))
 		if meta != nil {
@@ -82,7 +82,7 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string,
 	result.PageMetaContent = meta
 	result.Owner = owner
 	result.Repo = repo
-	result.PageVFS = vfs
+	result.PageVFS = NewPageVFS(p.client, p.Backend, owner, repo, result.CommitID)
 	result.Path = strings.Join(path, "/")
 
 	if err = p.alias.Bind(ctx, meta.Alias, result.Owner, result.Repo, branch); err != nil {

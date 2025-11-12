@@ -1,4 +1,4 @@
-package core
+package providers
 
 import (
 	"bytes"
@@ -12,37 +12,38 @@ import (
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/tools"
 )
 
-type CacheBackend struct {
-	backend     Backend
+type ProviderCache struct {
+	parent      core.Backend
 	cacheRepo   *tools.Cache[map[string]string]
-	cacheBranch *tools.Cache[map[string]*BranchInfo]
+	cacheBranch *tools.Cache[map[string]*core.BranchInfo]
 
 	cacheBlob      cache.Cache
 	cacheBlobLimit uint64
 }
 
-func (c *CacheBackend) Close() error {
-	return c.backend.Close()
+func (c *ProviderCache) Close() error {
+	return c.parent.Close()
 }
 
-func NewCacheBackend(
-	backend Backend,
+func NewProviderCache(
+	backend core.Backend,
 	cacheMeta kv.KV,
 	cacheMetaTTL time.Duration,
 
 	cacheBlob cache.Cache,
 	cacheBlobLimit uint64,
-) *CacheBackend {
+) *ProviderCache {
 	repoCache := tools.NewCache[map[string]string](cacheMeta, "repos", cacheMetaTTL)
-	branchCache := tools.NewCache[map[string]*BranchInfo](cacheMeta, "branches", cacheMetaTTL)
-	return &CacheBackend{
-		backend:     backend,
+	branchCache := tools.NewCache[map[string]*core.BranchInfo](cacheMeta, "branches", cacheMetaTTL)
+	return &ProviderCache{
+		parent:      backend,
 		cacheRepo:   repoCache,
 		cacheBranch: branchCache,
 
@@ -51,11 +52,11 @@ func NewCacheBackend(
 	}
 }
 
-func (c *CacheBackend) Repos(ctx context.Context, owner string) (map[string]string, error) {
+func (c *ProviderCache) Repos(ctx context.Context, owner string) (map[string]string, error) {
 	if load, b := c.cacheRepo.Load(ctx, owner); b {
 		return load, nil
 	}
-	ret, err := c.backend.Repos(ctx, owner)
+	ret, err := c.parent.Repos(ctx, owner)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			_ = c.cacheRepo.Store(ctx, owner, map[string]string{})
@@ -69,15 +70,15 @@ func (c *CacheBackend) Repos(ctx context.Context, owner string) (map[string]stri
 	return ret, err
 }
 
-func (c *CacheBackend) Branches(ctx context.Context, owner, repo string) (map[string]*BranchInfo, error) {
+func (c *ProviderCache) Branches(ctx context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
 	key := fmt.Sprintf("%s/%s", owner, repo)
 	if load, b := c.cacheBranch.Load(ctx, key); b {
 		return load, nil
 	}
-	ret, err := c.backend.Branches(ctx, owner, repo)
+	ret, err := c.parent.Branches(ctx, owner, repo)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			_ = c.cacheBranch.Store(ctx, key, map[string]*BranchInfo{})
+			_ = c.cacheBranch.Store(ctx, key, map[string]*core.BranchInfo{})
 		}
 		return nil, err
 	}
@@ -88,10 +89,10 @@ func (c *CacheBackend) Branches(ctx context.Context, owner, repo string) (map[st
 	return ret, err
 }
 
-func (c *CacheBackend) Open(ctx context.Context, client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
+func (c *ProviderCache) Open(ctx context.Context, client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
 	if headers != nil && headers.Get("Range") != "" {
 		// ignore custom header
-		return c.backend.Open(ctx, client, owner, repo, commit, path, headers)
+		return c.parent.Open(ctx, client, owner, repo, commit, path, headers)
 	}
 	key := fmt.Sprintf("%s/%s/%s/%s", owner, repo, commit, path)
 	lastCache, err := c.cacheBlob.Get(ctx, key)
@@ -125,7 +126,7 @@ func (c *CacheBackend) Open(ctx context.Context, client *http.Client, owner, rep
 			Header:        respHeader,
 		}, nil
 	}
-	open, err := c.backend.Open(ctx, client, owner, repo, commit, path, http.Header{})
+	open, err := c.parent.Open(ctx, client, owner, repo, commit, path, http.Header{})
 	if err != nil || open == nil {
 		if open != nil {
 			_ = open.Body.Close()

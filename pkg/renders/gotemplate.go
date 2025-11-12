@@ -14,7 +14,6 @@ import (
 type GoTemplate struct{}
 
 func init() {
-	core.RegisterRender("gotemplate", &GoTemplate{})
 }
 
 func (g GoTemplate) Render(ctx context.Context, w http.ResponseWriter, r *http.Request, input io.Reader, meta *core.PageDomainContent) error {

@@ -1,25 +1,20 @@
 package pkg
 
 import (
-	"context"
 	"errors"
-	"fmt"
-	"io"
-	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/gobwas/glob"
 	"github.com/google/uuid"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
-	"gopkg.d7z.net/gitea-pages/pkg/utils"
+	"gopkg.d7z.net/gitea-pages/pkg/filters"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 )
@@ -82,10 +77,13 @@ func DefaultOptions(domain string) ServerOptions {
 }
 
 type Server struct {
-	options *ServerOptions
-	meta    *core.PageDomain
-	backend core.Backend
-	fs      http.Handler
+	options   *ServerOptions
+	meta      *core.PageDomain
+	backend   core.Backend
+	fs        http.Handler
+	filterMgr map[string]core.FilterInstance
+
+	filtersCache *lru.Cache[string, glob.Glob]
 }
 
 var staticPrefix = "/.well-known/page-server/"
@@ -97,11 +95,17 @@ func NewPageServer(backend core.Backend, options ServerOptions) *Server {
 	if options.StaticDir != "" {
 		fs = http.StripPrefix(staticPrefix, http.FileServer(http.Dir(options.StaticDir)))
 	}
+	c, err := lru.New[string, glob.Glob](256)
+	if err != nil {
+		panic(err)
+	}
 	return &Server{
-		backend: backend,
-		options: &options,
-		meta:    pageMeta,
-		fs:      fs,
+		backend:      backend,
+		options:      &options,
+		meta:         pageMeta,
+		fs:           fs,
+		filtersCache: c,
+		filterMgr:    filters.DefaultFilters(),
 	}
 }
 
@@ -135,106 +139,48 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 		return err
 	}
 	zap.L().Debug("new request", zap.Any("request path", meta.Path))
-	if len(meta.Alias) > 0 && !slices.Contains(meta.Alias, domain) {
-		// 重定向到配置的地址
-		zap.L().Debug("redirect", zap.Any("src", request.Host), zap.Any("dst", meta.Alias[0]))
-		http.Redirect(writer, request, fmt.Sprintf("https://%s/%s", meta.Alias[0], meta.Path), http.StatusFound)
-		return nil
-	}
-	if s.options.EnableProxy && s.Proxy(writer, request, meta) {
-		return nil
-	}
 
 	if strings.HasSuffix(meta.Path, "/") || meta.Path == "" {
 		meta.Path += "index.html"
 	}
-	// 如果不是反向代理路由则跳过任何配置
-	if request.Method != http.MethodGet {
-		return os.ErrNotExist
-	}
-	if meta.IgnorePath(meta.Path) {
-		zap.L().Debug("ignore path", zap.Any("request", request.RequestURI), zap.Any("meta.path", meta.Path))
-		return os.ErrNotExist
-	}
+	activeFiltersCall := make([]core.FilterCall, 0)
+	activeFilters := make([]core.Filter, 0)
 
-	var resp *http.Response
-	var path string
-	failback := []string{meta.Path, meta.Path + "/index.html"}
-	if meta.VRoute {
-		failback = append(failback, "index.html")
-	}
-	failback = append(failback, "404.html")
-	for _, p := range failback {
-		resp, err = meta.NativeOpen(request.Context(), p, nil)
-		if err != nil {
-			if resp != nil {
-				resp.Body.Close()
+	for _, filter := range meta.Filters {
+		value, ok := s.filtersCache.Get(filter.Path)
+		if !ok {
+			value, err = glob.Compile(filter.Path)
+			if err != nil {
+				continue
 			}
-			if !errors.Is(err, os.ErrNotExist) {
-				zap.L().Debug("error", zap.Any("error", err))
-			}
-			continue
+			s.filtersCache.Add(filter.Path, value)
 		}
-		path = p
-		break
-	}
-
-	if resp == nil {
-		return os.ErrNotExist
-	}
-	defer resp.Body.Close()
-
-	if err != nil {
-		return err
-	}
-	if path == "404.html" && request.URL.Path != "/404.html" {
-		writer.WriteHeader(http.StatusNotFound)
-	}
-	ctx, cancel := context.WithTimeout(request.Context(), 3*time.Second)
-	defer cancel()
-	if render := meta.TryRender(path); render != nil {
-		return render.Render(ctx, writer, request, resp.Body, meta)
-	}
-	writer.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	lastMod, err := time.Parse(http.TimeFormat, resp.Header.Get("Last-Modified"))
-	if err == nil {
-		if seeker, ok := resp.Body.(io.ReadSeeker); ok && !(path == "404.html" && request.URL.Path != "/404.html") {
-			http.ServeContent(writer, request, filepath.Base(path), lastMod, seeker)
-			return nil
+		if value.Match(meta.Path) {
+			instance := s.filterMgr[filter.Type]
+			if instance == nil {
+				return errors.New("filter not found : " + filter.Type)
+			}
+			activeFilters = append(activeFilters, filter)
+			call, err := instance(filter.Params)
+			if err != nil {
+				return err
+			}
+			activeFiltersCall = append(activeFiltersCall, call)
 		}
 	}
-	_, err = io.Copy(writer, resp.Body)
-	return err
-}
+	slices.Reverse(activeFiltersCall)
+	slices.Reverse(activeFilters)
 
-func (s *Server) Proxy(writer http.ResponseWriter, request *http.Request, meta *core.PageDomainContent) bool {
-	proxyPath := "/" + meta.Path
-	for prefix, backend := range meta.Proxy {
-		if strings.HasPrefix(proxyPath, prefix) {
-			targetPath := strings.TrimPrefix(proxyPath, prefix)
-			if !strings.HasPrefix(targetPath, "/") {
-				targetPath = "/" + targetPath
-			}
-			u, _ := url.Parse(backend)
-			request.URL.Path = targetPath
-			request.RequestURI = request.URL.RequestURI()
-			proxy := httputil.NewSingleHostReverseProxy(u)
-			proxy.Transport = s.options.HTTPClient.Transport
+	zap.L().Debug("active filters", zap.Any("filters", activeFilters))
 
-			if host, _, err := net.SplitHostPort(request.RemoteAddr); err == nil {
-				request.Header.Set("X-Real-IP", host)
-			}
-			request.Header.Set("X-Page-IP", utils.GetRemoteIP(request))
-			request.Header.Set("X-Page-Refer", fmt.Sprintf("%s/%s/%s", meta.Owner, meta.Repo, meta.Path))
-			request.Header.Set("X-Page-Host", request.Host)
-			zap.L().Debug("命中反向代理", zap.Any("prefix", prefix), zap.Any("backend", backend),
-				zap.Any("path", proxyPath), zap.Any("target", fmt.Sprintf("%s%s", u, targetPath)))
-			// todo(security): 处理 websocket
-			proxy.ServeHTTP(writer, request)
-			return true
-		}
+	direct, _ := filters.FilterInstDirect(map[string]any{
+		"prefix": "",
+	})
+	stack := core.NextCallWrapper(direct, nil)
+	for _, filter := range activeFiltersCall {
+		stack = core.NextCallWrapper(filter, stack)
 	}
-	return false
+	return stack(ctx, writer, request, meta)
 }
 
 func (s *Server) Close() error {
