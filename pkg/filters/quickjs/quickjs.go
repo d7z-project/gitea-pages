@@ -79,25 +79,6 @@ var FilterInstQuickJS core.FilterInstance = func(config core.FilterParams) (core
 	}, nil
 }
 
-// debugResponseWriter 用于在 debug 模式下捕获响应输出
-type debugResponseWriter struct {
-	buffer *strings.Builder
-	header http.Header
-	status int
-}
-
-func (w *debugResponseWriter) Header() http.Header {
-	return w.header
-}
-
-func (w *debugResponseWriter) Write(data []byte) (int, error) {
-	return w.buffer.Write(data)
-}
-
-func (w *debugResponseWriter) WriteHeader(statusCode int) {
-	w.status = statusCode
-}
-
 // renderDebugPage 渲染调试页面
 func renderDebugPage(writer http.ResponseWriter, outputBuffer, logBuffer *strings.Builder, jsError error) error {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
