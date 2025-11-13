@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
@@ -24,7 +25,7 @@ var FilterInstRedirect core.FilterInstance = func(config core.FilterParams) (cor
 		return nil, err
 	}
 	if len(param.Targets) == 0 {
-		return nil, fmt.Errorf("no targets")
+		return nil, errors.New("no targets")
 	}
 	if param.Code == 0 {
 		param.Code = http.StatusFound
@@ -49,8 +50,7 @@ var FilterInstRedirect core.FilterInstance = func(config core.FilterParams) (cor
 
 			http.Redirect(writer, request, target.String(), param.Code)
 			return nil
-		} else {
-			return next(ctx, writer, request, metadata)
 		}
+		return next(ctx, writer, request, metadata)
 	}, nil
 }

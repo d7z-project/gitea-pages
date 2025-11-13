@@ -7,7 +7,8 @@ import (
 	"gopkg.d7z.net/gitea-pages/tests/core"
 )
 
-func test_proxy(t *testing.T) {
+func TestProxy(t *testing.T) {
+	t.Skip()
 	server := core.NewDefaultTestServer()
 	hs := core.NewServer()
 	defer server.Close()
@@ -40,7 +41,8 @@ proxy:
 	assert.Equal(t, 404, resp.StatusCode)
 }
 
-func test_cname_proxy(t *testing.T) {
+func TestCnameProxy(t *testing.T) {
+	t.Skip()
 	server := core.NewDefaultTestServer()
 	hs := core.NewServer()
 	defer server.Close()

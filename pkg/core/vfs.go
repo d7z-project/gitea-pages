@@ -16,6 +16,7 @@ type PageVFS struct {
 	commitID string
 }
 
+// todo: 限制最大文件加载大小
 func NewPageVFS(
 	client *http.Client,
 	backend Backend,

@@ -21,9 +21,9 @@ dist/gitea-pages-$(GOOS)-$(GOARCH).tar.gz:  $(shell find . -type f -name "*.go" 
 	@echo Compile $@ via $(GO_DIST_NAME) && \
 	mkdir -p dist && \
 	rm -f dist/$(GO_DIST_NAME) && \
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/$(GO_DIST_NAME) . && \
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/$(GO_DIST_NAME) cmd/server && \
 	cd dist && \
-	tar zcf gitea-pages-$(GOOS)-$(GOARCH).tar.gz $(GO_DIST_NAME) ../LICENSE ../config.yaml ../errors.html.tmpl ../README.md ../README_*.md && \
+	tar zcf gitea-pages-$(GOOS)-$(GOARCH).tar.gz $(GO_DIST_NAME) ../LICENSE ../config.yaml ../cmd/server/errors.html.tmpl ../README.md ../README_*.md && \
 	rm -f $(GO_DIST_NAME)
 
 gitea-pages: $(shell find . -type f -name "*.go" ) go.mod go.sum
