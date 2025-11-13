@@ -33,7 +33,7 @@ type Filter struct {
 }
 
 func NextCallWrapper(call FilterCall, parentCall NextCall, stack Filter) NextCall {
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *PageDomainContent) error {
+	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *PageContent) error {
 		zap.L().Debug(fmt.Sprintf("call filter(%s) before", stack.Type), zap.Any("filter", stack))
 		err := call(ctx, writer, request, metadata, parentCall)
 		zap.L().Debug(fmt.Sprintf("call filter(%s) after", stack.Type), zap.Any("filter", stack), zap.Error(err))
@@ -45,10 +45,10 @@ type NextCall func(
 	ctx context.Context,
 	writer http.ResponseWriter,
 	request *http.Request,
-	metadata *PageDomainContent,
+	metadata *PageContent,
 ) error
 
-var NotFountNextCall = func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *PageDomainContent) error {
+var NotFountNextCall = func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *PageContent) error {
 	return os.ErrNotExist
 }
 
@@ -56,7 +56,7 @@ type FilterCall func(
 	ctx context.Context,
 	writer http.ResponseWriter,
 	request *http.Request,
-	metadata *PageDomainContent,
+	metadata *PageContent,
 	next NextCall,
 ) error
 

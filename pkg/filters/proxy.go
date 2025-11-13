@@ -22,7 +22,7 @@ var FilterInstProxy core.FilterInstance = func(config core.FilterParams) (core.F
 	if err := config.Unmarshal(&param); err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageDomainContent, next core.NextCall) error {
+	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
 		proxyPath := "/" + metadata.Path
 		targetPath := strings.TrimPrefix(proxyPath, param.Prefix)
 		if !strings.HasPrefix(targetPath, "/") {

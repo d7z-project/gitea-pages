@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -10,69 +11,68 @@ import (
 	"syscall"
 
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v3"
-
 	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/gitea-pages/pkg/providers"
-	_ "gopkg.d7z.net/gitea-pages/pkg/renders"
+	"gopkg.d7z.net/middleware/cache"
+	"gopkg.d7z.net/middleware/kv"
 )
 
 var (
 	configPath = "config-local.yaml"
 	debug      = false
-	generate   = false
 )
 
 func init() {
 	flag.StringVar(&configPath, "conf", configPath, "config file path")
-	flag.BoolVar(&generate, "generate", debug, "generate config file")
 	flag.BoolVar(&debug, "debug", debug, "debug mode")
 	flag.Parse()
 }
 
 func main() {
-	if generate {
-		var cfg Config
-		file, err := os.ReadFile(configPath)
-		if err == nil {
-			_ = yaml.Unmarshal(file, &cfg)
-		}
-		out, err := yaml.Marshal(&cfg)
-		if err != nil {
-			log.Fatal("marshal config file failed", zap.Error(err))
-		}
-		err = os.WriteFile(configPath, out, 0o644)
-		if err != nil {
-			log.Fatal("write config file failed", zap.Error(err))
-		}
-		return
-	}
-
 	call := logInject()
-	defer func() {
-		_ = call()
-	}()
+	defer call()
 	config, err := LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("fail to load config file: %v", err)
 	}
-	options, err := config.NewPageServerOptions()
-	if err != nil {
-		zap.L().Fatal("fail to load options", zap.Error(err))
-	}
+
 	gitea, err := providers.NewGitea(config.Auth.Server, config.Auth.Token)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	backend := providers.NewProviderCache(gitea, options.CacheMeta, options.CacheMetaTTL,
-		options.CacheBlob, options.CacheBlobLimit,
+	cacheMeta, err := kv.NewKVFromURL(config.Cache.Meta)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer cacheMeta.Close()
+	cacheBlob, err := cache.NewCacheFromURL(config.Cache.Blob)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer cacheBlob.Close()
+	backend := providers.NewProviderCache(gitea, cacheMeta, config.Cache.MetaTTL,
+		cacheBlob, uint64(config.Cache.BlobLimit),
 	)
-	giteaServer := pkg.NewPageServer(backend, *options)
-	defer giteaServer.Close()
+	defer backend.Close()
+	db, err := kv.NewKVFromURL(config.Database.URL)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer db.Close()
+	pageServer := pkg.NewPageServer(
+		http.DefaultClient,
+		backend,
+		config.Domain,
+		config.Page.DefaultBranch,
+		db,
+		cacheMeta,
+		config.Cache.MetaTTL,
+		config.ErrorHandler,
+	)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
-	svc := http.Server{Addr: config.Bind, Handler: giteaServer}
+	svc := http.Server{Addr: config.Bind, Handler: pageServer}
 	go func() {
 		<-ctx.Done()
 		zap.L().Debug("shutdown gracefully")
@@ -81,7 +81,7 @@ func main() {
 	_ = svc.ListenAndServe()
 }
 
-func logInject() func() error {
+func logInject() func() {
 	atom := zap.NewAtomicLevel()
 	if debug {
 		atom.SetLevel(zap.DebugLevel)
@@ -94,5 +94,9 @@ func logInject() func() error {
 	logger, _ := cfg.Build()
 	zap.ReplaceGlobals(logger)
 	zap.L().Debug("debug enabled")
-	return logger.Sync
+	return func() {
+		if err := logger.Sync(); err != nil {
+			fmt.Println(err)
+		}
+	}
 }

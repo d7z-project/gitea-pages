@@ -23,10 +23,14 @@ var FilterInstDirect core.FilterInstance = func(config core.FilterParams) (core.
 		return nil, err
 	}
 	param.Prefix = strings.Trim(param.Prefix, "/") + "/"
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageDomainContent, next core.NextCall) error {
+	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
 		err := next(ctx, writer, request, metadata)
 		if (err != nil && !errors.Is(err, os.ErrNotExist)) || err == nil {
 			return err
+		}
+		if request.Method != http.MethodHead && request.Method != http.MethodGet {
+			http.Error(writer, "Method not allowed", http.StatusMethodNotAllowed)
+			return nil
 		}
 		var resp *http.Response
 		var path string

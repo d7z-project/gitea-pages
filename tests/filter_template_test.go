@@ -5,8 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"gopkg.d7z.net/gitea-pages/tests/core"
-
-	_ "gopkg.d7z.net/gitea-pages/pkg/renders"
 )
 
 func Test_Filter_Template(t *testing.T) {
@@ -15,9 +13,12 @@ func Test_Filter_Template(t *testing.T) {
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/tmpl/index.html", "hello world,{{ .Request.Host }}")
 	server.AddFile("org1/repo1/gh-pages/tmpl/ignore.html", "hello world, No Template")
+	server.AddFile("org1/repo1/gh-pages/tmpl/include.txt", "master")
+	server.AddFile("org1/repo1/gh-pages/tmpl/include.html", `hello world, {{ load "tmpl/include.txt" }}`)
+
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
-- path: tmpl/index.html
+- path: tmpl/index.html,tmpl/include.html
   template:
 `)
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/")
@@ -31,4 +32,7 @@ routes:
 	data, _, err = server.OpenFile("https://org1.example.com/repo1/tmpl/ignore.html")
 	assert.NoError(t, err)
 	assert.Equal(t, "hello world, No Template", string(data))
+	data, _, err = server.OpenFile("https://org1.example.com/repo1/tmpl/include.html")
+	assert.NoError(t, err)
+	assert.Equal(t, "hello world, master", string(data))
 }

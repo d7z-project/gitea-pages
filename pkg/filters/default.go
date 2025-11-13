@@ -11,7 +11,7 @@ import (
 )
 
 var FilterInstDefaultNotFound core.FilterInstance = func(config core.FilterParams) (core.FilterCall, error) {
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageDomainContent, next core.NextCall) error {
+	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
 		err := next(ctx, writer, request, metadata)
 		if err != nil && errors.Is(err, os.ErrNotExist) {
 			open, err := metadata.NativeOpen(ctx, "/404.html", nil)

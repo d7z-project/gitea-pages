@@ -4,12 +4,13 @@ import "gopkg.d7z.net/gitea-pages/pkg/core"
 
 func DefaultFilters() map[string]core.FilterInstance {
 	return map[string]core.FilterInstance{
-		"block":         FilterInstBlock,
-		"redirect":      FilterInstRedirect,
-		"direct":        FilterInstDirect,
-		"reverse_proxy": FilterInstProxy,
-		"_404_":         FilterInstDefaultNotFound,
-		"failback":      FilterInstFailback,
-		"template":      FilterInstTemplate,
+		"block":    FilterInstBlock,
+		"redirect": FilterInstRedirect,
+		"direct":   FilterInstDirect,
+		//"reverse_proxy": FilterInstProxy,
+		"_404_":    FilterInstDefaultNotFound,
+		"failback": FilterInstFailback,
+		"template": FilterInstTemplate,
+		"qjs":      FilterInstQuickJS,
 	}
 }

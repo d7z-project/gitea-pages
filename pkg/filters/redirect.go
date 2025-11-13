@@ -32,7 +32,7 @@ var FilterInstRedirect core.FilterInstance = func(config core.FilterParams) (cor
 	if param.Code < 300 || param.Code > 399 {
 		return nil, fmt.Errorf("invalid code: %d", param.Code)
 	}
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageDomainContent, next core.NextCall) error {
+	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
 		domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
 		if len(param.Targets) > 0 && !slices.Contains(metadata.Alias, domain) {
 			// 重定向到配置的地址

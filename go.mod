@@ -11,12 +11,13 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.0
-	gopkg.d7z.net/middleware v0.0.0-20251111072327-ca8cc16305f4
+	gopkg.d7z.net/middleware v0.0.0-20251113064153-9f946bf959f5
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	github.com/42wim/httpsig v1.2.3 // indirect
+	github.com/buke/quickjs-go v0.6.6 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.6.0 // indirect

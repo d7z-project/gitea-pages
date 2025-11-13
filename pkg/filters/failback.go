@@ -23,7 +23,7 @@ var FilterInstFailback core.FilterInstance = func(config core.FilterParams) (cor
 	if param.Path == "" {
 		return nil, errors.Errorf("filter failback: path is empty")
 	}
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageDomainContent, next core.NextCall) error {
+	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
 		err := next(ctx, writer, request, metadata)
 		if (err != nil && !errors.Is(err, os.ErrNotExist)) || err == nil {
 			return err

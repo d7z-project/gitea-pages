@@ -36,7 +36,6 @@ func NewProviderCache(
 	backend core.Backend,
 	cacheMeta kv.KV,
 	cacheMetaTTL time.Duration,
-
 	cacheBlob cache.Cache,
 	cacheBlobLimit uint64,
 ) *ProviderCache {

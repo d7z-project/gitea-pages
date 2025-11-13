@@ -10,10 +10,7 @@ import (
 	"github.com/alecthomas/units"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
-	"gopkg.d7z.net/middleware/cache"
-	"gopkg.d7z.net/middleware/kv"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,84 +35,6 @@ type Config struct {
 	StaticDir string `yaml:"static"` // 静态资源提供路径
 
 	pageErrNotFound, pageErrUnknown *template.Template
-}
-
-func (c *Config) NewPageServerOptions() (*pkg.ServerOptions, error) {
-	if c.Domain == "" {
-		return nil, errors.New("domain is required")
-	}
-	var err error
-
-	if c.Database.URL == "" {
-		return nil, errors.New("config is required")
-	}
-	if c.StaticDir != "" {
-		stat, err := os.Stat(c.StaticDir)
-		if err != nil {
-			return nil, errors.Wrap(err, "static dir not exists")
-		}
-		if !stat.IsDir() {
-			return nil, errors.New("static dir is not a directory")
-		}
-	}
-	if c.Page.DefaultBranch == "" {
-		c.Page.DefaultBranch = "gh-pages"
-	}
-	defaultErr := utils.MustTemplate(defaultErrPage)
-	if c.Page.ErrUnknownPage != "" {
-		data, err := os.ReadFile(c.Page.ErrUnknownPage)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read file %s", string(data))
-		}
-		c.pageErrUnknown = utils.MustTemplate(string(data))
-	} else {
-		c.pageErrUnknown = defaultErr
-	}
-	if c.Page.ErrNotFoundPage != "" {
-		data, err := os.ReadFile(c.Page.ErrNotFoundPage)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read file %s", c.Page.ErrNotFoundPage)
-		}
-		c.pageErrNotFound = utils.MustTemplate(string(data))
-	} else {
-		c.pageErrNotFound = defaultErr
-	}
-
-	memoryCache, err := cache.NewMemoryCache(cache.MemoryCacheConfig{
-		MaxCapacity: 8102,
-		CleanupInt:  time.Hour,
-	})
-	if err != nil {
-		return nil, errors.Wrap(err, "create cache")
-	}
-	alias, err := kv.NewKVFromURL(c.Database.URL)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to init alias config")
-	}
-	cacheMeta, err := kv.NewKVFromURL(c.Cache.Meta)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to init cache meta")
-	}
-	if c.Cache.CacheControl == "" {
-		c.Cache.CacheControl = "public, max-age=86400"
-	}
-	rel := pkg.ServerOptions{
-		Domain:              c.Domain,
-		DefaultBranch:       c.Page.DefaultBranch,
-		Alias:               alias,
-		CacheMeta:           cacheMeta,
-		CacheMetaTTL:        c.Cache.MetaTTL,
-		CacheControl:        c.Cache.CacheControl,
-		CacheBlob:           memoryCache,
-		CacheBlobTTL:        c.Cache.BlobTTL,
-		CacheBlobLimit:      uint64(c.Cache.BlobLimit),
-		HTTPClient:          http.DefaultClient,
-		EnableRender:        c.Render.Enable,
-		EnableProxy:         c.Proxy.Enable,
-		StaticDir:           c.StaticDir,
-		DefaultErrorHandler: c.ErrorHandler,
-	}
-	return &rel, nil
 }
 
 func (c *Config) ErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
@@ -171,10 +90,9 @@ type ConfigCache struct {
 	Meta    string        `yaml:"meta"`     // 元数据缓存
 	MetaTTL time.Duration `yaml:"meta_ttl"` // 缓存时间
 
-	Blob         string           `yaml:"blob"`          // 缓存归档位置
-	BlobTTL      time.Duration    `yaml:"blob_ttl"`      // 缓存归档位置
-	BlobLimit    units.Base2Bytes `yaml:"blob_limit"`    // 单个文件最大大小
-	CacheControl string           `yaml:"cache_control"` // 缓存配置
+	Blob      string           `yaml:"blob"`       // 缓存归档位置
+	BlobTTL   time.Duration    `yaml:"blob_ttl"`   // 缓存归档位置
+	BlobLimit units.Base2Bytes `yaml:"blob_limit"` // 单个文件最大大小
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -183,11 +101,49 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	defer f.Close()
-	var config Config
+	var c Config
 	decoder := yaml.NewDecoder(f)
-	err = decoder.Decode(&config)
+	err = decoder.Decode(&c)
 	if err != nil {
 		return nil, err
 	}
-	return &config, nil
+
+	if c.Domain == "" {
+		return nil, errors.New("domain is required")
+	}
+	if c.Database.URL == "" {
+		return nil, errors.New("c is required")
+	}
+	if c.StaticDir != "" {
+		stat, err := os.Stat(c.StaticDir)
+		if err != nil {
+			return nil, errors.Wrap(err, "static dir not exists")
+		}
+		if !stat.IsDir() {
+			return nil, errors.New("static dir is not a directory")
+		}
+	}
+	if c.Page.DefaultBranch == "" {
+		c.Page.DefaultBranch = "gh-pages"
+	}
+	defaultErr := utils.MustTemplate(defaultErrPage)
+	if c.Page.ErrUnknownPage != "" {
+		data, err := os.ReadFile(c.Page.ErrUnknownPage)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to read file %s", string(data))
+		}
+		c.pageErrUnknown = utils.MustTemplate(string(data))
+	} else {
+		c.pageErrUnknown = defaultErr
+	}
+	if c.Page.ErrNotFoundPage != "" {
+		data, err := os.ReadFile(c.Page.ErrNotFoundPage)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to read file %s", c.Page.ErrNotFoundPage)
+		}
+		c.pageErrNotFound = utils.MustTemplate(string(data))
+	} else {
+		c.pageErrNotFound = defaultErr
+	}
+	return &c, nil
 }

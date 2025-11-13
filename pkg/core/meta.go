@@ -71,12 +71,12 @@ func (m *PageMetaContent) String() string {
 	return string(marshal)
 }
 
-func NewServerMeta(client *http.Client, backend Backend, kv kv.KV, domain string, ttl time.Duration) *ServerMeta {
+func NewServerMeta(client *http.Client, backend Backend, domain string, cache kv.KV, ttl time.Duration) *ServerMeta {
 	return &ServerMeta{
 		Backend: backend,
 		Domain:  domain,
 		client:  client,
-		cache:   tools.NewCache[PageMetaContent](kv, "pages/meta", ttl),
+		cache:   tools.NewCache[PageMetaContent](cache, "meta", ttl),
 		locker:  utils.NewLocker(),
 	}
 }

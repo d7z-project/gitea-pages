@@ -11,6 +11,8 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
+	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/tools"
 )
 
 type TestServer struct {
@@ -18,31 +20,39 @@ type TestServer struct {
 	dummy  *ProviderDummy
 }
 
-type SvcOpts func(options *pkg.ServerOptions)
-
 func NewDefaultTestServer() *TestServer {
-	return NewTestServer("example.com", func(options *pkg.ServerOptions) {
-		options.CacheMetaTTL = 0
-	})
+	return NewTestServer("example.com")
 }
 
-func NewTestServer(domain string, opts ...SvcOpts) *TestServer {
+func NewTestServer(domain string) *TestServer {
 	atom := zap.NewAtomicLevel()
 	atom.SetLevel(zap.DebugLevel)
 	cfg := zap.NewProductionConfig()
 	cfg.Level = atom
 	logger, _ := cfg.Build()
 	zap.ReplaceGlobals(logger)
-	options := pkg.DefaultOptions(domain)
-	for _, opt := range opts {
-		opt(&options)
-	}
 	dummy, err := NewDummy()
 	if err != nil {
 		zap.S().Fatal(err)
 	}
 
-	server := pkg.NewPageServer(dummy, options)
+	memoryKV, _ := kv.NewMemory("")
+	server := pkg.NewPageServer(
+		http.DefaultClient,
+		dummy,
+		domain,
+		"gh-pages",
+		memoryKV,
+		tools.NewPrefixKV(memoryKV, "cache"),
+		0,
+		func(w http.ResponseWriter, r *http.Request, err error) {
+			if errors.Is(err, os.ErrNotExist) {
+				http.Error(w, "page not found.", http.StatusNotFound)
+			} else if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+		},
+	)
 
 	return &TestServer{
 		dummy:  dummy,
@@ -77,5 +87,5 @@ func (t *TestServer) OpenFile(url string) ([]byte, *http.Response, error) {
 }
 
 func (t *TestServer) Close() error {
-	return t.server.Close()
+	return nil
 }

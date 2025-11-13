@@ -37,6 +37,7 @@ func (p *PageConfigRoute) UnmarshalYAML(value *yaml.Node) error {
 	p.Type = keys[0]
 	params := data[p.Type]
 	// 跳过空参数
+	p.Params = make(map[string]any)
 	if _, ok := params.(string); ok || params == nil {
 		return nil
 	}

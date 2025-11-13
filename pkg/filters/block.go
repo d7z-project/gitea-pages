@@ -21,7 +21,7 @@ var FilterInstBlock core.FilterInstance = func(config core.FilterParams) (core.F
 	if param.Message == "" {
 		param.Message = http.StatusText(param.Code)
 	}
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageDomainContent, next core.NextCall) error {
+	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
 		writer.WriteHeader(param.Code)
 		if param.Message != "" {
 			_, _ = writer.Write([]byte(param.Message))

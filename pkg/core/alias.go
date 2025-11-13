@@ -23,7 +23,7 @@ func NewDomainAlias(config kv.KV) *DomainAlias {
 }
 
 func (a *DomainAlias) Query(ctx context.Context, domain string) (*Alias, error) {
-	get, err := a.config.Get(ctx, "domain/alias/"+domain)
+	get, err := a.config.Get(ctx, domain)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func (a *DomainAlias) Query(ctx context.Context, domain string) (*Alias, error) 
 
 func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, branch string) error {
 	oldDomains := make([]string, 0)
-	rKey := fmt.Sprintf("domain/r-alias/%s/%s/%s", owner, repo, branch)
+	rKey := fmt.Sprintf("%s/%s/%s", owner, repo, branch)
 	if oldStr, err := a.config.Get(ctx, rKey); err == nil {
 		_ = json.Unmarshal([]byte(oldStr), &oldDomains)
 	}
@@ -57,7 +57,7 @@ func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, b
 	domainsRaw, _ := json.Marshal(domains)
 	_ = a.config.Put(ctx, rKey, string(domainsRaw), kv.TTLKeep)
 	for _, domain := range domains {
-		if err := a.config.Put(ctx, "domain/alias/"+domain, string(aliasMetaRaw), kv.TTLKeep); err != nil {
+		if err := a.config.Put(ctx, domain, string(aliasMetaRaw), kv.TTLKeep); err != nil {
 			return err
 		}
 	}
@@ -65,6 +65,6 @@ func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, b
 }
 
 func (a *DomainAlias) Unbind(ctx context.Context, domain string) error {
-	_, err := a.config.Delete(ctx, "domain/alias/"+domain)
+	_, err := a.config.Delete(ctx, domain)
 	return err
 }

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -16,119 +15,69 @@ import (
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/filters"
-	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/tools"
 )
 
 var portExp = regexp.MustCompile(`:\d+$`)
 
-type ServerOptions struct {
-	Domain        string // 默认域名
-	DefaultBranch string // 默认分支
-
-	Alias kv.KV // 配置映射关系
-
-	CacheMeta    kv.KV         // 配置缓存
-	CacheMetaTTL time.Duration // 配置缓存时长
-
-	CacheBlob    cache.Cache   // blob缓存
-	CacheBlobTTL time.Duration // 配置缓存时长
-	CacheControl string        // 缓存配置
-
-	CacheBlobLimit uint64 // blob最大缓存大小
-
-	HTTPClient   *http.Client // 自定义客户端
-	EnableRender bool         // 允许渲染
-
-	EnableProxy bool // 允许代理
-
-	StaticDir           string // 静态文件位置
-	DefaultErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
-}
-
-func DefaultOptions(domain string) ServerOptions {
-	configMemory, _ := kv.NewMemory("")
-	cacheMemory, _ := cache.NewMemoryCache(cache.MemoryCacheConfig{MaxCapacity: 4096, CleanupInt: time.Hour})
-	return ServerOptions{
-		Domain:        domain,
-		DefaultBranch: "gh-pages",
-
-		Alias:        configMemory,
-		CacheMeta:    configMemory,
-		CacheMetaTTL: time.Minute,
-
-		CacheBlob:      cacheMemory,
-		CacheBlobTTL:   time.Minute,
-		CacheBlobLimit: 1024 * 1024 * 10,
-		CacheControl:   "public, max-age=86400",
-
-		HTTPClient: http.DefaultClient,
-
-		EnableRender: true,
-		EnableProxy:  true,
-		StaticDir:    "",
-		DefaultErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			if errors.Is(err, os.ErrNotExist) {
-				http.Error(w, "page not found.", http.StatusNotFound)
-			} else if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-			}
-		},
-	}
-}
-
 type Server struct {
-	backend  core.Backend
-	options  *ServerOptions
-	meta     *core.PageDomain
-	staticFS http.Handler
+	backend core.Backend
+	meta    *core.PageDomain
+
+	errorHandler func(w http.ResponseWriter, r *http.Request, err error)
 
 	filterMgr map[string]core.FilterInstance
 	globCache *lru.Cache[string, glob.Glob]
 }
 
-var staticPrefix = "/.well-known/page-server/"
-
-func NewPageServer(backend core.Backend, options ServerOptions) *Server {
-	svcMeta := core.NewServerMeta(options.HTTPClient, backend, options.CacheMeta, options.Domain, options.CacheMetaTTL)
-	pageMeta := core.NewPageDomain(svcMeta, core.NewDomainAlias(options.Alias), options.Domain, options.DefaultBranch)
-	var fs http.Handler
-	if options.StaticDir != "" {
-		fs = http.StripPrefix(staticPrefix, http.FileServer(http.Dir(options.StaticDir)))
-	}
+func NewPageServer(
+	client *http.Client,
+	backend core.Backend,
+	domain string,
+	defaultBranch string,
+	db kv.KV,
+	cache kv.KV,
+	cacheTTL time.Duration,
+	errorHandler func(w http.ResponseWriter, r *http.Request, err error),
+) *Server {
+	svcMeta := core.NewServerMeta(client, backend, domain, cache, cacheTTL)
+	pageMeta := core.NewPageDomain(svcMeta,
+		core.NewDomainAlias(tools.NewPrefixKV(db, "config/alias")),
+		tools.NewPrefixKV(db, "config/pages"),
+		domain, defaultBranch)
 	c, err := lru.New[string, glob.Glob](256)
 	if err != nil {
 		panic(err)
 	}
 	return &Server{
-		backend:   backend,
-		options:   &options,
-		meta:      pageMeta,
-		staticFS:  fs,
-		globCache: c,
-		filterMgr: filters.DefaultFilters(),
+		backend:      backend,
+		meta:         pageMeta,
+		globCache:    c,
+		filterMgr:    filters.DefaultFilters(),
+		errorHandler: errorHandler,
 	}
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	sessionID, _ := uuid.NewRandom()
 	request.Header.Set("Session-ID", sessionID.String())
-	if s.staticFS != nil && strings.HasPrefix(request.URL.Path, staticPrefix) {
-		s.staticFS.ServeHTTP(writer, request)
-		return
-	}
+	//if s.staticFS != nil && strings.HasPrefix(request.URL.Path, staticPrefix) {
+	//	s.staticFS.ServeHTTP(writer, request)
+	//	return
+	//}
 	defer func() {
 		if e := recover(); e != nil {
 			zap.L().Error("panic!", zap.Any("error", e), zap.Any("id", sessionID))
 			if err, ok := e.(error); ok {
-				s.options.DefaultErrorHandler(writer, request, err)
+				s.errorHandler(writer, request, err)
 			}
 		}
 	}()
 	err := s.Serve(writer, request)
 	if err != nil {
 		zap.L().Debug("错误请求", zap.Error(err), zap.Any("request", request.RequestURI), zap.Any("id", sessionID))
-		s.options.DefaultErrorHandler(writer, request, err)
+		s.errorHandler(writer, request, err)
 	}
 }
 
@@ -186,13 +135,4 @@ func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error 
 	}
 	err = stack(ctx, writer, request, meta)
 	return err
-}
-
-func (s *Server) Close() error {
-	return errors.Join(
-		s.options.CacheBlob.Close(),
-		s.options.CacheMeta.Close(),
-		s.options.Alias.Close(),
-		s.backend.Close(),
-	)
 }

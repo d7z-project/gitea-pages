@@ -7,34 +7,40 @@ import (
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/tools"
 )
 
 type PageDomain struct {
 	*ServerMeta
 
 	alias         *DomainAlias
+	pageDB        kv.KV
 	baseDomain    string
 	defaultBranch string
 }
 
-func NewPageDomain(meta *ServerMeta, alias *DomainAlias, baseDomain, defaultBranch string) *PageDomain {
+func NewPageDomain(meta *ServerMeta, alias *DomainAlias, pageDB kv.KV, baseDomain, defaultBranch string) *PageDomain {
 	return &PageDomain{
 		baseDomain:    baseDomain,
 		defaultBranch: defaultBranch,
 		ServerMeta:    meta,
 		alias:         alias,
+		pageDB:        pageDB,
 	}
 }
 
-type PageDomainContent struct {
+type PageContent struct {
 	*PageMetaContent
 	*PageVFS
-	Owner string
-	Repo  string
-	Path  string
+	OrgDB  kv.KV
+	RepoDB kv.KV
+	Owner  string
+	Repo   string
+	Path   string
 }
 
-func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch string) (*PageDomainContent, error) {
+func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch string) (*PageContent, error) {
 	if branch == "" {
 		branch = p.defaultBranch
 	}
@@ -50,7 +56,7 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch s
 	}
 	owner := strings.TrimSuffix(domain, "."+p.baseDomain)
 	repo := pathArr[0]
-	var returnMeta *PageDomainContent
+	var returnMeta *PageContent
 	var err error
 	if repo == "" {
 		// 回退到默认仓库 (路径未包含仓库)
@@ -68,8 +74,8 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch s
 	return p.returnMeta(ctx, owner, domain, branch, pathArr)
 }
 
-func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string, path []string) (*PageDomainContent, error) {
-	result := &PageDomainContent{}
+func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string, path []string) (*PageContent, error) {
+	result := &PageContent{}
 	meta, err := p.GetMeta(ctx, owner, repo, branch)
 	if err != nil {
 		zap.L().Debug("查询错误", zap.Error(err))
@@ -83,6 +89,8 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string,
 	result.Owner = owner
 	result.Repo = repo
 	result.PageVFS = NewPageVFS(p.client, p.Backend, owner, repo, result.CommitID)
+	result.OrgDB = tools.NewPrefixKV(p.pageDB, p.pageDB.WithKey("org", owner))
+	result.RepoDB = tools.NewPrefixKV(p.pageDB, p.pageDB.WithKey("repo", owner, repo))
 	result.Path = strings.Join(path, "/")
 
 	if err = p.alias.Bind(ctx, meta.Alias, result.Owner, result.Repo, branch); err != nil {
