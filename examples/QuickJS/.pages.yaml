@@ -1,0 +1,5 @@
+routes:
+- path: "api/v1/**"
+  qjs:
+    exec: "index.js"
+    debug: true

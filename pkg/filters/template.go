@@ -2,7 +2,6 @@ package filters
 
 import (
 	"bytes"
-	"context"
 	"net/http"
 	"strings"
 
@@ -18,8 +17,8 @@ var FilterInstTemplate core.FilterInstance = func(config core.FilterParams) (cor
 		return nil, err
 	}
 	param.Prefix = strings.Trim(param.Prefix, "/") + "/"
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
-		data, err := metadata.ReadString(ctx, param.Prefix+metadata.Path)
+	return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
+		data, err := ctx.ReadString(ctx, param.Prefix+ctx.Path)
 		if err != nil {
 			return err
 		}
@@ -29,7 +28,7 @@ var FilterInstTemplate core.FilterInstance = func(config core.FilterParams) (cor
 		out := &bytes.Buffer{}
 		parse, err := utils.NewTemplate().Funcs(map[string]any{
 			"load": func(path string) (any, error) {
-				return metadata.ReadString(ctx, param.Prefix+path)
+				return ctx.ReadString(ctx, param.Prefix+path)
 			},
 		}).Parse(data)
 		if err != nil {

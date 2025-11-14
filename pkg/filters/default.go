@@ -1,7 +1,6 @@
 package filters
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"os"
@@ -11,10 +10,10 @@ import (
 )
 
 var FilterInstDefaultNotFound core.FilterInstance = func(config core.FilterParams) (core.FilterCall, error) {
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
-		err := next(ctx, writer, request, metadata)
+	return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
+		err := next(ctx, writer, request)
 		if err != nil && errors.Is(err, os.ErrNotExist) {
-			open, err := metadata.NativeOpen(ctx, "/404.html", nil)
+			open, err := ctx.NativeOpen(ctx, "/404.html", nil)
 			if open != nil {
 				defer open.Body.Close()
 			}

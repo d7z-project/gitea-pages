@@ -19,5 +19,5 @@ type Backend interface {
 	// Branches return branch + commit id
 	Branches(ctx context.Context, owner, repo string) (map[string]*BranchInfo, error)
 	// Open return file or error (error)
-	Open(ctx context.Context, client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error)
+	Open(ctx context.Context, owner, repo, commit, path string, headers http.Header) (*http.Response, error)
 }

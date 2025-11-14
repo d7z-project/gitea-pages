@@ -9,7 +9,6 @@ import (
 
 type PageVFS struct {
 	backend Backend
-	client  *http.Client
 
 	org      string
 	repo     string
@@ -18,14 +17,12 @@ type PageVFS struct {
 
 // todo: 限制最大文件加载大小
 func NewPageVFS(
-	client *http.Client,
 	backend Backend,
 	org string,
 	repo string,
 	commitID string,
 ) *PageVFS {
 	return &PageVFS{
-		client:   client,
 		backend:  backend,
 		org:      org,
 		repo:     repo,
@@ -34,7 +31,7 @@ func NewPageVFS(
 }
 
 func (p *PageVFS) NativeOpen(ctx context.Context, path string, headers http.Header) (*http.Response, error) {
-	return p.backend.Open(ctx, p.client, p.org, p.repo, p.commitID, path, headers)
+	return p.backend.Open(ctx, p.org, p.repo, p.commitID, path, headers)
 }
 
 func (p *PageVFS) Exists(ctx context.Context, path string) (bool, error) {

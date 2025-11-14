@@ -7,36 +7,31 @@ import (
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"gopkg.d7z.net/middleware/kv"
 )
 
 type PageDomain struct {
 	*ServerMeta
 
 	alias         *DomainAlias
-	pageDB        kv.KV
 	baseDomain    string
 	defaultBranch string
 }
 
-func NewPageDomain(meta *ServerMeta, alias *DomainAlias, pageDB kv.KV, baseDomain, defaultBranch string) *PageDomain {
+func NewPageDomain(meta *ServerMeta, alias *DomainAlias, baseDomain, defaultBranch string) *PageDomain {
 	return &PageDomain{
 		baseDomain:    baseDomain,
 		defaultBranch: defaultBranch,
 		ServerMeta:    meta,
 		alias:         alias,
-		pageDB:        pageDB,
 	}
 }
 
 type PageContent struct {
 	*PageMetaContent
-	*PageVFS
-	OrgDB  kv.KV
-	RepoDB kv.KV
-	Owner  string
-	Repo   string
-	Path   string
+
+	Owner string
+	Repo  string
+	Path  string
 }
 
 func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch string) (*PageContent, error) {
@@ -87,9 +82,6 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string,
 	result.PageMetaContent = meta
 	result.Owner = owner
 	result.Repo = repo
-	result.PageVFS = NewPageVFS(p.client, p.Backend, owner, repo, result.CommitID)
-	result.OrgDB = p.pageDB.Child("org").Child(owner)
-	result.RepoDB = p.pageDB.Child("repo").Child(owner).Child(repo)
 	result.Path = strings.Join(path, "/")
 
 	if err = p.alias.Bind(ctx, meta.Alias, result.Owner, result.Repo, branch); err != nil {

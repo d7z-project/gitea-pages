@@ -1,7 +1,6 @@
 package filters
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -22,8 +21,8 @@ var FilterInstProxy core.FilterInstance = func(config core.FilterParams) (core.F
 	if err := config.Unmarshal(&param); err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
-		proxyPath := "/" + metadata.Path
+	return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
+		proxyPath := "/" + ctx.Path
 		targetPath := strings.TrimPrefix(proxyPath, param.Prefix)
 		if !strings.HasPrefix(targetPath, "/") {
 			targetPath = "/" + targetPath
@@ -38,7 +37,7 @@ var FilterInstProxy core.FilterInstance = func(config core.FilterParams) (core.F
 			request.Header.Set("X-Real-IP", host)
 		}
 		request.Header.Set("X-Page-IP", utils.GetRemoteIP(request))
-		request.Header.Set("X-Page-Refer", fmt.Sprintf("%s/%s/%s", metadata.Owner, metadata.Repo, metadata.Path))
+		request.Header.Set("X-Page-Refer", fmt.Sprintf("%s/%s/%s", ctx.Owner, ctx.Repo, ctx.Path))
 		request.Header.Set("X-Page-Host", request.Host)
 		zap.L().Debug("命中反向代理", zap.Any("prefix", param.Prefix), zap.Any("target", param.Target),
 			zap.Any("path", proxyPath), zap.Any("target", fmt.Sprintf("%s%s", u, targetPath)))

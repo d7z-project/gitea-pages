@@ -1,7 +1,6 @@
 package filters
 
 import (
-	"context"
 	"io"
 	"mime"
 	"net/http"
@@ -23,12 +22,12 @@ var FilterInstFailback core.FilterInstance = func(config core.FilterParams) (cor
 	if param.Path == "" {
 		return nil, errors.Errorf("filter failback: path is empty")
 	}
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
-		err := next(ctx, writer, request, metadata)
+	return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
+		err := next(ctx, writer, request)
 		if (err != nil && !errors.Is(err, os.ErrNotExist)) || err == nil {
 			return err
 		}
-		resp, err := metadata.NativeOpen(ctx, param.Path, nil)
+		resp, err := ctx.NativeOpen(ctx, param.Path, nil)
 		if resp != nil {
 			defer resp.Body.Close()
 		}

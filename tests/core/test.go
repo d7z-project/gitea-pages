@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
+	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 )
 
@@ -34,7 +36,10 @@ func NewTestServer(domain string) *TestServer {
 	if err != nil {
 		zap.S().Fatal(err)
 	}
-
+	memoryCache, _ := cache.NewMemoryCache(cache.MemoryCacheConfig{
+		MaxCapacity: 256,
+		CleanupInt:  time.Minute,
+	})
 	memoryKV, _ := kv.NewMemory("")
 	server := pkg.NewPageServer(
 		http.DefaultClient,
@@ -44,6 +49,7 @@ func NewTestServer(domain string) *TestServer {
 		memoryKV,
 		memoryKV.Child("cache"),
 		0,
+		memoryCache,
 		func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, "page not found.", http.StatusNotFound)

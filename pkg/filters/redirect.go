@@ -1,7 +1,6 @@
 package filters
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -33,12 +32,12 @@ var FilterInstRedirect core.FilterInstance = func(config core.FilterParams) (cor
 	if param.Code < 300 || param.Code > 399 {
 		return nil, fmt.Errorf("invalid code: %d", param.Code)
 	}
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
+	return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
 		domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
-		if len(param.Targets) > 0 && !slices.Contains(metadata.Alias, domain) {
+		if len(param.Targets) > 0 && !slices.Contains(ctx.Alias, domain) {
 			// 重定向到配置的地址
 			zap.L().Debug("redirect", zap.Any("src", request.Host), zap.Any("dst", param.Targets[0]))
-			path := metadata.Path
+			path := ctx.Path
 			if strings.HasSuffix(path, "/index.html") || path == "index.html" {
 				path = strings.TrimSuffix(path, "index.html")
 			}
@@ -51,6 +50,6 @@ var FilterInstRedirect core.FilterInstance = func(config core.FilterParams) (cor
 			http.Redirect(writer, request, target.String(), param.Code)
 			return nil
 		}
-		return next(ctx, writer, request, metadata)
+		return next(ctx, writer, request)
 	}, nil
 }

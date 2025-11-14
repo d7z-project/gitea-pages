@@ -21,8 +21,8 @@ import (
 
 type ProviderCache struct {
 	parent      core.Backend
-	cacheRepo   *tools.Cache[map[string]string]
-	cacheBranch *tools.Cache[map[string]*core.BranchInfo]
+	cacheRepo   *tools.KVCache[map[string]string]
+	cacheBranch *tools.KVCache[map[string]*core.BranchInfo]
 
 	cacheBlob      cache.Cache
 	cacheBlobLimit uint64
@@ -88,10 +88,10 @@ func (c *ProviderCache) Branches(ctx context.Context, owner, repo string) (map[s
 	return ret, err
 }
 
-func (c *ProviderCache) Open(ctx context.Context, client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
+func (c *ProviderCache) Open(ctx context.Context, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
 	if headers != nil && headers.Get("Range") != "" {
 		// ignore custom header
-		return c.parent.Open(ctx, client, owner, repo, commit, path, headers)
+		return c.parent.Open(ctx, owner, repo, commit, path, headers)
 	}
 	key := fmt.Sprintf("%s/%s/%s/%s", owner, repo, commit, path)
 	lastCache, err := c.cacheBlob.Get(ctx, key)
@@ -125,7 +125,7 @@ func (c *ProviderCache) Open(ctx context.Context, client *http.Client, owner, re
 			Header:        respHeader,
 		}, nil
 	}
-	open, err := c.parent.Open(ctx, client, owner, repo, commit, path, http.Header{})
+	open, err := c.parent.Open(ctx, owner, repo, commit, path, http.Header{})
 	if err != nil || open == nil {
 		if open != nil {
 			_ = open.Body.Close()

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -36,7 +37,7 @@ func main() {
 		log.Fatalf("fail to load config file: %v", err)
 	}
 
-	gitea, err := providers.NewGitea(config.Auth.Server, config.Auth.Token)
+	gitea, err := providers.NewGitea(http.DefaultClient, config.Auth.Server, config.Auth.Token)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -51,7 +52,7 @@ func main() {
 	}
 	defer cacheBlob.Close()
 	backend := providers.NewProviderCache(gitea, cacheMeta, config.Cache.MetaTTL,
-		cacheBlob, uint64(config.Cache.BlobLimit),
+		cacheBlob.Child("backend"), uint64(config.Cache.BlobLimit),
 	)
 	defer backend.Close()
 	db, err := kv.NewKVFromURL(config.Database.URL)
@@ -59,14 +60,19 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer db.Close()
+	cdb, ok := db.(kv.RawKV).Raw().(kv.CursorPagedKV)
+	if !ok {
+		log.Fatalln(errors.New("database not support cursor"))
+	}
 	pageServer := pkg.NewPageServer(
 		http.DefaultClient,
 		backend,
 		config.Domain,
 		config.Page.DefaultBranch,
-		db,
+		cdb,
 		cacheMeta,
 		config.Cache.MetaTTL,
+		cacheBlob.Child("filter"),
 		config.ErrorHandler,
 	)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)

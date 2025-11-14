@@ -38,8 +38,7 @@ type PageMetaContent struct {
 	IsPage       bool      `json:"is_page"`       // 是否为 Page
 	ErrorMsg     string    `json:"error"`         // 错误消息 (作为 500 错误日志暴露至前端)
 
-	Alias []string `json:"alias"` // alias
-
+	Alias   []string `json:"alias"`   // alias
 	Filters []Filter `json:"filters"` // 路由消息
 }
 
@@ -127,7 +126,7 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*
 	}
 
 	rel := NewEmptyPageMetaContent()
-	vfs := NewPageVFS(s.client, s.Backend, owner, repo, info.ID)
+	vfs := NewPageVFS(s.Backend, owner, repo, info.ID)
 	rel.CommitID = info.ID
 	rel.LastModified = info.LastModified
 

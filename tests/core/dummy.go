@@ -61,7 +61,7 @@ func (p *ProviderDummy) Branches(_ context.Context, owner, repo string) (map[str
 	return branches, nil
 }
 
-func (p *ProviderDummy) Open(_ context.Context, _ *http.Client, owner, repo, commit, path string, _ http.Header) (*http.Response, error) {
+func (p *ProviderDummy) Open(_ context.Context, owner, repo, commit, path string, _ http.Header) (*http.Response, error) {
 	open, err := os.Open(filepath.Join(p.BaseDir, owner, repo, commit, path))
 	if err != nil {
 		return nil, errors.Join(err, os.ErrNotExist)

@@ -17,10 +17,11 @@ type ProviderGitea struct {
 	BaseURL string
 	Token   string
 
-	gitea *gitea.Client
+	gitea  *gitea.Client
+	client *http.Client
 }
 
-func NewGitea(url, token string) (*ProviderGitea, error) {
+func NewGitea(httpClient *http.Client, url, token string) (*ProviderGitea, error) {
 	client, err := gitea.NewClient(url, gitea.SetGiteaVersion(""), gitea.SetToken(token))
 	if err != nil {
 		return nil, err
@@ -29,6 +30,7 @@ func NewGitea(url, token string) (*ProviderGitea, error) {
 		BaseURL: url,
 		Token:   token,
 		gitea:   client,
+		client:  httpClient,
 	}, nil
 }
 
@@ -103,7 +105,7 @@ func (g *ProviderGitea) Branches(_ context.Context, owner, repo string) (map[str
 	return result, nil
 }
 
-func (g *ProviderGitea) Open(ctx context.Context, client *http.Client, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
+func (g *ProviderGitea) Open(ctx context.Context, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {
 	if headers == nil {
 		headers = make(http.Header)
 	}
@@ -122,7 +124,7 @@ func (g *ProviderGitea) Open(ctx context.Context, client *http.Client, owner, re
 		}
 	}
 	req.Header.Add("Authorization", "token "+g.Token)
-	return client.Do(req)
+	return g.client.Do(req)
 }
 
 func (g *ProviderGitea) Close() error {

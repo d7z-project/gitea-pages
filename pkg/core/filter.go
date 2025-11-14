@@ -9,7 +9,18 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/tools"
 )
+
+type FilterContext struct {
+	context.Context
+	*PageContent
+	*PageVFS
+	Cache  *tools.TTLCache
+	OrgDB  kv.CursorPagedKV
+	RepoDB kv.CursorPagedKV
+}
 
 type FilterParams map[string]any
 
@@ -33,30 +44,28 @@ type Filter struct {
 }
 
 func NextCallWrapper(call FilterCall, parentCall NextCall, stack Filter) NextCall {
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *PageContent) error {
+	return func(ctx FilterContext, writer http.ResponseWriter, request *http.Request) error {
 		zap.L().Debug(fmt.Sprintf("call filter(%s) before", stack.Type), zap.Any("filter", stack))
-		err := call(ctx, writer, request, metadata, parentCall)
+		err := call(ctx, writer, request, parentCall)
 		zap.L().Debug(fmt.Sprintf("call filter(%s) after", stack.Type), zap.Any("filter", stack), zap.Error(err))
 		return err
 	}
 }
 
 type NextCall func(
-	ctx context.Context,
+	ctx FilterContext,
 	writer http.ResponseWriter,
 	request *http.Request,
-	metadata *PageContent,
 ) error
 
-var NotFountNextCall = func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *PageContent) error {
+var NotFountNextCall = func(ctx FilterContext, writer http.ResponseWriter, request *http.Request) error {
 	return os.ErrNotExist
 }
 
 type FilterCall func(
-	ctx context.Context,
+	ctx FilterContext,
 	writer http.ResponseWriter,
 	request *http.Request,
-	metadata *PageContent,
 	next NextCall,
 ) error
 

@@ -1,7 +1,6 @@
 package filters
 
 import (
-	"context"
 	"io"
 	"mime"
 	"net/http"
@@ -23,8 +22,8 @@ var FilterInstDirect core.FilterInstance = func(config core.FilterParams) (core.
 		return nil, err
 	}
 	param.Prefix = strings.Trim(param.Prefix, "/") + "/"
-	return func(ctx context.Context, writer http.ResponseWriter, request *http.Request, metadata *core.PageContent, next core.NextCall) error {
-		err := next(ctx, writer, request, metadata)
+	return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
+		err := next(ctx, writer, request)
 		if (err != nil && !errors.Is(err, os.ErrNotExist)) || err == nil {
 			return err
 		}
@@ -34,10 +33,10 @@ var FilterInstDirect core.FilterInstance = func(config core.FilterParams) (core.
 		}
 		var resp *http.Response
 		var path string
-		defaultPath := param.Prefix + strings.TrimSuffix(metadata.Path, "/")
+		defaultPath := param.Prefix + strings.TrimSuffix(ctx.Path, "/")
 		for _, p := range []string{defaultPath, defaultPath + "/index.html"} {
 			zap.L().Debug("direct fetch", zap.String("path", p))
-			resp, err = metadata.NativeOpen(request.Context(), p, nil)
+			resp, err = ctx.NativeOpen(request.Context(), p, nil)
 			if err != nil {
 				if resp != nil {
 					resp.Body.Close()
