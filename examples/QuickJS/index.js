@@ -1,7 +1,7 @@
 response.write("hello world")
 console.log("hello world")
 console.log(req.methaaod)
-function aaa(){
+function testError(){
     throw Error("Method not implemented")
 }
-aaa()
+testError()
