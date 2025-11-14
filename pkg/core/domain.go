@@ -8,7 +8,6 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/middleware/kv"
-	"gopkg.d7z.net/middleware/tools"
 )
 
 type PageDomain struct {
@@ -89,8 +88,8 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string,
 	result.Owner = owner
 	result.Repo = repo
 	result.PageVFS = NewPageVFS(p.client, p.Backend, owner, repo, result.CommitID)
-	result.OrgDB = tools.NewPrefixKV(p.pageDB, p.pageDB.WithKey("org", owner))
-	result.RepoDB = tools.NewPrefixKV(p.pageDB, p.pageDB.WithKey("repo", owner, repo))
+	result.OrgDB = p.pageDB.Child("org").Child(owner)
+	result.RepoDB = p.pageDB.Child("repo").Child(owner).Child(repo)
 	result.Path = strings.Join(path, "/")
 
 	if err = p.alias.Bind(ctx, meta.Alias, result.Owner, result.Repo, branch); err != nil {

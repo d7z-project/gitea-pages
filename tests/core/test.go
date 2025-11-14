@@ -12,7 +12,6 @@ import (
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/middleware/kv"
-	"gopkg.d7z.net/middleware/tools"
 )
 
 type TestServer struct {
@@ -43,7 +42,7 @@ func NewTestServer(domain string) *TestServer {
 		domain,
 		"gh-pages",
 		memoryKV,
-		tools.NewPrefixKV(memoryKV, "cache"),
+		memoryKV.Child("cache"),
 		0,
 		func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {

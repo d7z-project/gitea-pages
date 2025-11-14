@@ -16,7 +16,6 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/filters"
 	"gopkg.d7z.net/middleware/kv"
-	"gopkg.d7z.net/middleware/tools"
 )
 
 var portExp = regexp.MustCompile(`:\d+$`)
@@ -42,9 +41,10 @@ func NewPageServer(
 	errorHandler func(w http.ResponseWriter, r *http.Request, err error),
 ) *Server {
 	svcMeta := core.NewServerMeta(client, backend, domain, cache, cacheTTL)
+	cfgDB := db.Child("config")
 	pageMeta := core.NewPageDomain(svcMeta,
-		core.NewDomainAlias(tools.NewPrefixKV(db, "config/alias")),
-		tools.NewPrefixKV(db, "config/pages"),
+		core.NewDomainAlias(cfgDB.Child("alias")),
+		cfgDB.Child("pages"),
 		domain, defaultBranch)
 	c, err := lru.New[string, glob.Glob](256)
 	if err != nil {

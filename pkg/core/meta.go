@@ -26,7 +26,7 @@ type ServerMeta struct {
 	Domain string
 
 	client *http.Client
-	cache  *tools.Cache[PageMetaContent]
+	cache  *tools.KVCache[PageMetaContent]
 	locker *utils.Locker
 }
 
