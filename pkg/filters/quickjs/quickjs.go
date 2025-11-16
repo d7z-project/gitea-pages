@@ -35,6 +35,7 @@ var FilterInstQuickJS core.FilterInstance = func(config core.FilterParams) (core
 
 		rt := quickjs.NewRuntime()
 		rt.SetExecuteTimeout(5)
+		rt.SetMemoryLimit(10 * 1024 * 1024)
 		defer rt.Close()
 		jsCtx := rt.NewContext()
 		defer jsCtx.Close()
