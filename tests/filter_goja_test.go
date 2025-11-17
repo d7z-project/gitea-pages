@@ -2,13 +2,14 @@ package tests
 
 import (
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"gopkg.d7z.net/gitea-pages/tests/core"
 )
 
-func Test_JS(t *testing.T) {
+func Test_GoJaJS(t *testing.T) {
 	server := core.NewDefaultTestServer()
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
@@ -16,24 +17,28 @@ func Test_JS(t *testing.T) {
 function get(a,b) {
   return a + b;
 }
+response.writeHead(201,{'X-Cache': 'ignore'});
+console.log('hello world')
 response.write('512 + 512 = ' + get(512,512))
 `)
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
 - path: "api/v1/**"
-  qjs:
+  js:
     exec: "index.js"
 `)
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/")
 	assert.NoError(t, err)
 	assert.Equal(t, "hello world", string(data))
 
-	data, _, err = server.OpenFile("https://org1.example.com/repo1/api/v1/get")
+	data, resp, err := server.OpenFile("https://org1.example.com/repo1/api/v1/get")
 	assert.NoError(t, err)
+	assert.Equal(t, 201, resp.StatusCode)
+	assert.Equal(t, "ignore", resp.Header.Get("X-Cache"))
 	assert.Equal(t, "512 + 512 = 1024", string(data))
 }
 
-func Test_JS_Request(t *testing.T) {
+func Test_GoJa_Request(t *testing.T) {
 	server := core.NewDefaultTestServer()
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
@@ -41,7 +46,7 @@ func Test_JS_Request(t *testing.T) {
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
 - path: "api/v1/**"
-  qjs:
+  js:
     exec: "index.js"
 `)
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/")
@@ -57,8 +62,8 @@ routes:
 	assert.Equal(t, "POST /api/v1/fetch", string(data))
 }
 
-func Benchmark_JS_Request(b *testing.B) {
-	// 初始化服务器（在基准测试外执行，避免计入时间）
+func Benchmark_GoJa_Request(b *testing.B) {
+	_ = os.Setenv("BM", "1")
 	server := core.NewDefaultTestServer()
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
@@ -66,7 +71,7 @@ func Benchmark_JS_Request(b *testing.B) {
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
 - path: "api/v1/**"
-  qjs:
+  js:
     exec: "index.js"
 `)
 

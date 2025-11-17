@@ -27,7 +27,12 @@ func NewDefaultTestServer() *TestServer {
 
 func NewTestServer(domain string) *TestServer {
 	atom := zap.NewAtomicLevel()
-	atom.SetLevel(zap.DebugLevel)
+	getenv := os.Getenv("BM")
+	if getenv != "" {
+		atom.SetLevel(zap.ErrorLevel)
+	} else {
+		atom.SetLevel(zap.DebugLevel)
+	}
 	cfg := zap.NewProductionConfig()
 	cfg.Level = atom
 	logger, _ := cfg.Build()
@@ -88,7 +93,7 @@ func (t *TestServer) OpenRequest(method, url string, body io.Reader) ([]byte, *h
 	if response.Body != nil {
 		defer response.Body.Close()
 	}
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode >= 400 {
 		return nil, response, errors.New(response.Status)
 	}
 	all, _ := io.ReadAll(response.Body)

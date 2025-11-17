@@ -1,17 +1,20 @@
 package goja
 
 import (
+	"context"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/console"
 	"github.com/dop251/goja_nodejs/require"
 	"github.com/dop251/goja_nodejs/url"
 	"github.com/pkg/errors"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-var FilterInstGoja core.FilterInstance = func(config core.FilterParams) (core.FilterCall, error) {
+var FilterInstGoJa core.FilterInstance = func(config core.FilterParams) (core.FilterCall, error) {
 	var param struct {
 		Exec  string `json:"exec"`
 		Debug bool   `json:"debug"`
@@ -22,18 +25,39 @@ var FilterInstGoja core.FilterInstance = func(config core.FilterParams) (core.Fi
 	if param.Exec == "" {
 		return nil, errors.Errorf("no exec specified")
 	}
-	return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
+	return func(ctx core.FilterContext, w http.ResponseWriter, request *http.Request, next core.NextCall) error {
 		js, err := ctx.ReadString(ctx, param.Exec)
 		if err != nil {
 			return err
 		}
-		newRegistry(ctx)
+		debug := NewDebug(param.Debug && request.URL.Query().Get("debug") == "true", request, w)
 		registry := newRegistry(ctx)
+		registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(debug))
 		vm := goja.New()
 		_ = registry.Enable(vm)
+		console.Enable(vm)
 		url.Enable(vm)
-		vm.GlobalObject().Set("")
-		return nil
+		if err = RequestInject(ctx, vm, request); err != nil {
+			return err
+		}
+		if err = ResponseInject(vm, debug, request); err != nil {
+			return err
+		}
+		if err = KVInject(ctx, vm); err != nil {
+			return err
+		}
+		coreCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		go func() {
+			select {
+			case <-coreCtx.Done():
+				vm.Interrupt(coreCtx.Err())
+				return
+			}
+		}()
+		_, err = vm.RunScript(param.Exec, js)
+		cancel()
+		return debug.Flush(err)
 	}, nil
 }
 

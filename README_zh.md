@@ -29,15 +29,13 @@ make gitea-pages
 在项目的 `gh-pages` 分支创建 `.pages.yaml`,填入如下内容
 
 ```yaml
-v-route: true # 虚拟路由
 alias: # CNAME
   - "example.com"
   - "example2.com"
-templates: # 渲染器
-  gotemplate: '**/*.tmpl,**/index.html'
-proxy:
-  /api: https://github.com/api
-ignore: .git/**,.pages.yaml
+routes:
+  - path: "**"
+    js:
+      exec: index.js
 ```
 
 ## TODO

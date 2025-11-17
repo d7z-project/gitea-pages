@@ -1,8 +1,8 @@
 routes:
 - path: "api/dev/**"
-  qjs:
+  js:
     exec: "index.js"
     debug: true
 - path: "api/prod/**"
-  qjs:
+  js:
     exec: "json.js"

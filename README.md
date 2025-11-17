@@ -4,9 +4,11 @@
 
 **This project is part of Dragon's Zone HomeLab**
 
-This project focuses on functional implementation and does not consider any performance optimizations or large-scale deployment scenarios. Any issues arising from this are not related to the project.
+This project focuses on functional implementation and does not consider any performance optimizations or large-scale
+deployment scenarios. Any issues arising from this are not related to the project.
 
-**Note**: The project recently added custom renderers and reverse proxy functionality, which may lead to serious security and performance issues. If not needed, it can be turned off in the settings.
+**Note**: The project recently added custom renderers and reverse proxy functionality, which may lead to serious
+security and performance issues. If not needed, it can be turned off in the settings.
 
 ## Get Started
 
@@ -29,15 +31,13 @@ For specific configurations, check [`config.yaml`](./config.yaml).
 Create `.pages.yaml` in the project's `gh-pages` branch and fill in the following content:
 
 ```yaml
-v-route: true # Virtual routing
 alias: # CNAME
   - "example.com"
   - "example2.com"
-templates: # Renderer
-  gotemplate: '**/*.tmpl,**/index.html'
-proxy:
-  /api: https://github.com/api
-ignore: .git/**,.pages.yaml
+routes:
+  - path: "**"
+    js:
+      exec: index.js
 ```
 
 ## TODO

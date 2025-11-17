@@ -26,7 +26,8 @@ var FilterInstDefaultNotFound core.FilterInstance = func(config core.FilterParam
 			}
 			writer.WriteHeader(http.StatusNotFound)
 			_, _ = io.Copy(writer, open.Body)
+			return nil
 		}
-		return nil
+		return err
 	}, nil
 }

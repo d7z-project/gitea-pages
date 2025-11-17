@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh">
+<head>
+    <title>调试控制台</title>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        .section-header {
+            background: #f5f5f5;
+            padding: 10px 15px;
+            border-bottom: 1px solid #ddd;
+            font-weight: bold;
+        }
+
+        .section-content {
+            padding: 15px;
+            background: white;
+        }
+
+        .output {
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+
+        .log {
+            white-space: pre-wrap;
+            font-family: monospace;
+            background: #f8f8f8;
+        }
+
+        .error {
+            color: #d00;
+            background: #fee;
+            padding: 10px;
+            border-radius: 3px;
+        }
+
+        .success {
+            color: #080;
+            background: #efe;
+            padding: 10px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+<h1>Debug Output</h1>
+
+<div class="section">
+    <div class="section-header">执行结果</div>
+    <div class="section-content">
+        <pre class="output"><code>{{ .Output }}</code></pre>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-header">控制台日志</div>
+    <div class="section-content">
+        <div class="log">{{- range .Logs }}<p>{{ .Time.Format "2006/01/02 15:04:05" }} - {{ .Level }} : {{ .Message }}</p>{{- end }}</div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-header">响应头</div>
+    <div class="section-content">
+        <div class="log">{{- range  $key, $value := .Headers }}<p>{{ $key }} = {{ $value }}</p>{{- end }}</div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-header">执行状态</div>
+    <div class="section-content">
+        {{- if .Error }}
+            <div class="error">{{ .Error }}</div>
+        {{- else }}
+            <div class="success">执行成功</div>
+        {{- end }}
+    </div>
+</div>
+</body>
+</html>

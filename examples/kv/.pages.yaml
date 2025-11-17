@@ -1,0 +1,10 @@
+routes:
+  - path: "get"
+    js:
+      exec: "index.js"
+      debug: true
+
+  - path: "put"
+    js:
+      exec: "index.js"
+      debug: true
