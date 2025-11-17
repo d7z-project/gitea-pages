@@ -5,7 +5,6 @@ go 1.25.3
 require (
 	code.gitea.io/sdk/gitea v0.22.1
 	github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b
-	github.com/buke/quickjs-go v0.6.6
 	github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7
 	github.com/dop251/goja_nodejs v0.0.0-20251015164255-5e94316bedaf
 	github.com/go-task/slim-sprig/v3 v3.0.0
