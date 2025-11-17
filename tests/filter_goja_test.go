@@ -2,7 +2,6 @@ package tests
 
 import (
 	"net/http"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -62,8 +61,34 @@ routes:
 	assert.Equal(t, "POST /api/v1/fetch", string(data))
 }
 
+func Test_GoJa_Async(t *testing.T) {
+	server := core.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+(async()=>{
+    await sleep(1000)
+    response.write('abc')
+})()
+
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "**"
+  js:
+    exec: "index.js"
+`)
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/fetch")
+	assert.NoError(t, err)
+	assert.Equal(t, "abc", string(data))
+}
+
 func Benchmark_GoJa_Request(b *testing.B) {
-	_ = os.Setenv("BM", "1")
+	b.Setenv("BM", "1")
 	server := core.NewDefaultTestServer()
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")

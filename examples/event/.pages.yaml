@@ -1,0 +1,5 @@
+routes:
+  - path: "**"
+    js:
+      exec: "index.js"
+      debug: true

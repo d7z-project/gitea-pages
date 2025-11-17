@@ -39,7 +39,7 @@ func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runt
 				}
 				return jsCtx.ToValue(get)
 			},
-			"set": func(key string, value string) {
+			"set": func(key, value string) {
 				err := db.Put(ctx, key, value, kv.TTLKeep)
 				if err != nil {
 					panic(err)
@@ -51,6 +51,20 @@ func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runt
 					panic(err)
 				}
 				return b
+			},
+			"putIfNotExists": func(key, value string) bool {
+				exists, err := db.PutIfNotExists(ctx, key, value, kv.TTLKeep)
+				if err != nil {
+					panic(err)
+				}
+				return exists
+			},
+			"compareAndSwap": func(key, oldValue, newValue string) bool {
+				swap, err := db.CompareAndSwap(ctx, key, oldValue, newValue)
+				if err != nil {
+					panic(err)
+				}
+				return swap
 			},
 		})
 	}

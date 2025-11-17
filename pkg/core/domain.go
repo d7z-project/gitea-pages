@@ -72,7 +72,7 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string,
 	result := &PageContent{}
 	meta, err := p.GetMeta(ctx, owner, repo, branch)
 	if err != nil {
-		zap.L().Debug("查询错误", zap.Error(err))
+		zap.L().Debug("repo does not exists", zap.Error(err), zap.Strings("meta", []string{owner, repo, branch}))
 		if meta != nil {
 			// 解析错误汇报
 			return nil, errors.New(meta.ErrorMsg)
@@ -85,7 +85,7 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string,
 	result.Path = strings.Join(path, "/")
 
 	if err = p.alias.Bind(ctx, meta.Alias, result.Owner, result.Repo, branch); err != nil {
-		zap.L().Warn("别名绑定失败", zap.Error(err))
+		zap.L().Warn("alias binding error.", zap.Error(err))
 		return nil, err
 	}
 	return result, nil

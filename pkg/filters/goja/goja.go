@@ -2,15 +2,16 @@ package goja
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/console"
+	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/dop251/goja_nodejs/require"
 	"github.com/dop251/goja_nodejs/url"
-	"github.com/pkg/errors"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
@@ -23,40 +24,56 @@ var FilterInstGoJa core.FilterInstance = func(config core.FilterParams) (core.Fi
 		return nil, err
 	}
 	if param.Exec == "" {
-		return nil, errors.Errorf("no exec specified")
+		return nil, errors.New("no exec specified")
 	}
 	return func(ctx core.FilterContext, w http.ResponseWriter, request *http.Request, next core.NextCall) error {
 		js, err := ctx.ReadString(ctx, param.Exec)
 		if err != nil {
 			return err
 		}
+		prg, err := goja.Compile("main.js", js, false)
+		if err != nil {
+			return err
+		}
 		debug := NewDebug(param.Debug && request.URL.Query().Get("debug") == "true", request, w)
 		registry := newRegistry(ctx)
 		registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(debug))
-		vm := goja.New()
-		_ = registry.Enable(vm)
-		console.Enable(vm)
-		url.Enable(vm)
-		if err = RequestInject(ctx, vm, request); err != nil {
-			return err
-		}
-		if err = ResponseInject(vm, debug, request); err != nil {
-			return err
-		}
-		if err = KVInject(ctx, vm); err != nil {
-			return err
-		}
-		coreCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		defer cancel()
+		loop := eventloop.NewEventLoop(eventloop.WithRegistry(registry), eventloop.EnableConsole(true))
+		stop := make(chan struct{}, 1)
+		shutdown := make(chan struct{}, 1)
+		timeout, cancelFunc := context.WithTimeout(ctx, 3*time.Second)
+		defer cancelFunc()
+		count := 0
 		go func() {
+			defer func() {
+				shutdown <- struct{}{}
+				close(shutdown)
+			}()
 			select {
-			case <-coreCtx.Done():
-				vm.Interrupt(coreCtx.Err())
-				return
+			case <-timeout.Done():
+			case <-stop:
 			}
+			count = loop.Stop()
 		}()
-		_, err = vm.RunScript(param.Exec, js)
-		cancel()
+		loop.Run(func(vm *goja.Runtime) {
+			url.Enable(vm)
+			if err = RequestInject(ctx, vm, request); err != nil {
+				panic(err)
+			}
+			if err = ResponseInject(vm, debug, request); err != nil {
+				panic(err)
+			}
+			if err = KVInject(ctx, vm); err != nil {
+				panic(err)
+			}
+			_, err = vm.RunProgram(prg)
+		})
+		stop <- struct{}{}
+		close(stop)
+		<-shutdown
+		if count != 0 {
+			err = errors.Join(context.DeadlineExceeded, err)
+		}
 		return debug.Flush(err)
 	}, nil
 }

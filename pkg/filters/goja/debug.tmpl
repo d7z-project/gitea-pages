@@ -7,6 +7,10 @@
           content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <style>
+        .clear{
+            padding: 0;
+            margin: 0;
+        }
         body {
             font-family: Arial, sans-serif;
             margin: 0;
@@ -70,7 +74,7 @@
 <div class="section">
     <div class="section-header">控制台日志</div>
     <div class="section-content">
-        <div class="log">{{- range .Logs }}<p>{{ .Time.Format "2006/01/02 15:04:05" }} - {{ .Level }} : {{ .Message }}</p>{{- end }}</div>
+        <div class="log">{{- range .Logs }}<p class="clear">{{ .Time.Format "2006/01/02 15:04:05" }} - {{ .Level }} : {{ .Message }}</p>{{- end }}</div>
     </div>
 </div>
 

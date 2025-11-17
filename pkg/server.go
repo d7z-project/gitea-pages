@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/filters"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/tools"
@@ -61,29 +62,32 @@ func NewPageServer(
 	}
 }
 
-func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	sessionID, _ := uuid.NewRandom()
 	request.Header.Set("Session-ID", sessionID.String())
-	//if s.staticFS != nil && strings.HasPrefix(request.URL.Path, staticPrefix) {
-	//	s.staticFS.ServeHTTP(writer, request)
-	//	return
-	//}
+	writer := utils.NewWrittenResponseWriter(w)
 	defer func() {
 		if e := recover(); e != nil {
 			zap.L().Error("panic!", zap.Any("error", e), zap.Any("id", sessionID))
-			if err, ok := e.(error); ok {
-				s.errorHandler(writer, request, err)
+			if !writer.IsWritten() {
+				if err, ok := e.(error); ok {
+					s.errorHandler(writer, request, err)
+				} else {
+					s.errorHandler(writer, request, errors.New("panic"))
+				}
 			}
 		}
 	}()
 	err := s.Serve(writer, request)
 	if err != nil {
-		zap.L().Debug("错误请求", zap.Error(err), zap.Any("request", request.RequestURI), zap.Any("id", sessionID))
-		s.errorHandler(writer, request, err)
+		zap.L().Debug("bad request.", zap.Error(err), zap.Any("request", request.RequestURI), zap.Any("id", sessionID))
+		if !writer.IsWritten() {
+			s.errorHandler(writer, request, err)
+		}
 	}
 }
 
-func (s *Server) Serve(writer http.ResponseWriter, request *http.Request) error {
+func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Request) error {
 	ctx := request.Context()
 	domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
 	meta, err := s.meta.ParseDomainMeta(ctx, domain, request.URL.Path, request.URL.Query().Get("branch"))

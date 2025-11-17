@@ -11,7 +11,7 @@ import (
 func ResponseInject(jsCtx *goja.Runtime, writer http.ResponseWriter, req *http.Request) error {
 	return jsCtx.GlobalObject().Set("response", map[string]any{
 		// 响应头操作
-		"setHeader": func(key string, value string) {
+		"setHeader": func(key, value string) {
 			writer.Header().Set(key, value)
 		},
 
@@ -97,7 +97,7 @@ func ResponseInject(jsCtx *goja.Runtime, writer http.ResponseWriter, req *http.R
 		},
 
 		// 设置 cookie
-		"setCookie": func(name string, value string, options ...map[string]interface{}) {
+		"setCookie": func(name, value string, options ...map[string]interface{}) {
 			cookie := &http.Cookie{
 				Name:  name,
 				Value: value,
