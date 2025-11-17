@@ -27,7 +27,7 @@ func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runt
 		if group == "" {
 			panic("kv: invalid group name")
 		}
-		db := db.Child(group)
+		db := db.Child(group).(kv.CursorPagedKV)
 		return jsCtx.ToValue(map[string]interface{}{
 			"get": func(key string) goja.Value {
 				get, err := db.Get(ctx, key)
@@ -65,6 +65,23 @@ func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runt
 					panic(err)
 				}
 				return swap
+			},
+			"list": func(limit int64, cursor string) map[string]any {
+				if limit <= 0 {
+					limit = 100
+				}
+				list, err := db.CursorList(ctx, &kv.ListOptions{
+					Limit:  limit,
+					Cursor: cursor,
+				})
+				if err != nil {
+					panic(err)
+				}
+				return map[string]any{
+					"keys":    list.Keys,
+					"cursor":  list.Cursor,
+					"hasNext": list.HasMore,
+				}
 			},
 		})
 	}

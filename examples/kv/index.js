@@ -8,3 +8,12 @@ if(request.path == "put"){
     }
 }
 response.write("当前存储的数值为 " + db.get('key'))
+
+var test = kv.repo("test");
+for (let i = 0; i < 500; i++) {
+    test.set("key" + i,"value" + i);
+}
+var list = test.list()
+console.log(list.keys.length)
+console.log(list.cursor)
+console.log(list.hasNext)
