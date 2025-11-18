@@ -22,14 +22,14 @@ type FilterContext struct {
 	RepoDB kv.CursorPagedKV
 }
 
-type FilterParams map[string]any
+type Params map[string]any
 
-func (f FilterParams) String() string {
+func (f Params) String() string {
 	marshal, _ := json.Marshal(f)
 	return strings.ReplaceAll(string(marshal), "\"", "'")
 }
 
-func (f FilterParams) Unmarshal(target any) error {
+func (f Params) Unmarshal(target any) error {
 	marshal, err := json.Marshal(f)
 	if err != nil {
 		return err
@@ -38,9 +38,9 @@ func (f FilterParams) Unmarshal(target any) error {
 }
 
 type Filter struct {
-	Path   string       `json:"path"`
-	Type   string       `json:"type"`
-	Params FilterParams `json:"params"`
+	Path   string `json:"path"`
+	Type   string `json:"type"`
+	Params Params `json:"params"`
 }
 
 func NextCallWrapper(call FilterCall, parentCall NextCall, stack Filter) NextCall {
@@ -69,4 +69,7 @@ type FilterCall func(
 	next NextCall,
 ) error
 
-type FilterInstance func(config FilterParams) (FilterCall, error)
+type (
+	GlobalFilter   func(config Params) (FilterInstance, error)
+	FilterInstance func(route Params) (FilterCall, error)
+)

@@ -64,7 +64,7 @@ func main() {
 	if !ok {
 		log.Fatalln(errors.New("database not support cursor"))
 	}
-	pageServer := pkg.NewPageServer(
+	pageServer, err := pkg.NewPageServer(
 		http.DefaultClient,
 		backend,
 		config.Domain,
@@ -74,7 +74,11 @@ func main() {
 		config.Cache.MetaTTL,
 		cacheBlob.Child("filter"),
 		config.ErrorHandler,
+		config.Filters,
 	)
+	if err != nil {
+		log.Fatalln(err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 

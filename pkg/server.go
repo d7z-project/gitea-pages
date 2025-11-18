@@ -44,22 +44,27 @@ func NewPageServer(
 	cacheTTL time.Duration,
 	cacheBlob cache.Cache,
 	errorHandler func(w http.ResponseWriter, r *http.Request, err error),
-) *Server {
+	filterConfig map[string]map[string]any,
+) (*Server, error) {
 	svcMeta := core.NewServerMeta(client, backend, domain, cacheMeta, cacheTTL)
 	pageMeta := core.NewPageDomain(svcMeta, core.NewDomainAlias(db.Child("config").Child("alias")), domain, defaultBranch)
 	globCache, err := lru.New[string, glob.Glob](256)
 	if err != nil {
-		panic(err)
+		return nil, err
+	}
+	defaultFilters, err := filters.DefaultFilters(filterConfig)
+	if err != nil {
+		return nil, err
 	}
 	return &Server{
 		backend:      backend,
 		meta:         pageMeta,
 		db:           db,
 		globCache:    globCache,
-		filterMgr:    filters.DefaultFilters(),
+		filterMgr:    defaultFilters,
 		errorHandler: errorHandler,
 		cacheBlob:    cacheBlob,
-	}
+	}, nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {

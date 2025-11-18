@@ -29,10 +29,9 @@ type Config struct {
 
 	Page ConfigPage `yaml:"page"` // 页面配置
 
-	Render ConfigRender `yaml:"render"` // 渲染配置
-	Proxy  ConfigProxy  `yaml:"proxy"`  // 反向代理配置
-
 	StaticDir string `yaml:"static"` // 静态资源提供路径
+
+	Filters map[string]map[string]any `yaml:"filters"` // 渲染器配置
 
 	pageErrNotFound, pageErrUnknown *template.Template
 }

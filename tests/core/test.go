@@ -46,7 +46,7 @@ func NewTestServer(domain string) *TestServer {
 		CleanupInt:  time.Minute,
 	})
 	memoryKV, _ := kv.NewMemory("")
-	server := pkg.NewPageServer(
+	server, err := pkg.NewPageServer(
 		http.DefaultClient,
 		dummy,
 		domain,
@@ -62,8 +62,11 @@ func NewTestServer(domain string) *TestServer {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
 		},
+		make(map[string]map[string]any),
 	)
-
+	if err != nil {
+		panic(err)
+	}
 	return &TestServer{
 		dummy:  dummy,
 		server: server,

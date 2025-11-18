@@ -56,7 +56,7 @@ func main() {
 	if err != nil {
 		zap.L().Fatal("failed to init memory provider", zap.Error(err))
 	}
-	server := pkg.NewPageServer(http.DefaultClient,
+	server, err := pkg.NewPageServer(http.DefaultClient,
 		provider, domain, "gh-pages", memory, memory, 0, &nopCache{},
 		func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
@@ -64,7 +64,10 @@ func main() {
 			} else if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
-		})
+		}, make(map[string]map[string]any))
+	if err != nil {
+		zap.L().Fatal("failed to init page", zap.Error(err))
+	}
 	err = http.ListenAndServe(port, server)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		zap.L().Fatal("failed to start server", zap.Error(err))

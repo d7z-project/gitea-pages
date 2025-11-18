@@ -15,66 +15,68 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-var FilterInstGoJa core.FilterInstance = func(config core.FilterParams) (core.FilterCall, error) {
-	var param struct {
-		Exec  string `json:"exec"`
-		Debug bool   `json:"debug"`
-	}
-	if err := config.Unmarshal(&param); err != nil {
-		return nil, err
-	}
-	if param.Exec == "" {
-		return nil, errors.New("no exec specified")
-	}
-	return func(ctx core.FilterContext, w http.ResponseWriter, request *http.Request, next core.NextCall) error {
-		js, err := ctx.ReadString(ctx, param.Exec)
-		if err != nil {
-			return err
+func FilterInstGoJa(_ core.Params) (core.FilterInstance, error) {
+	return func(config core.Params) (core.FilterCall, error) {
+		var param struct {
+			Exec  string `json:"exec"`
+			Debug bool   `json:"debug"`
 		}
-		prg, err := goja.Compile("main.js", js, false)
-		if err != nil {
-			return err
+		if err := config.Unmarshal(&param); err != nil {
+			return nil, err
 		}
-		debug := NewDebug(param.Debug && request.URL.Query().Get("debug") == "true", request, w)
-		registry := newRegistry(ctx)
-		registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(debug))
-		loop := eventloop.NewEventLoop(eventloop.WithRegistry(registry), eventloop.EnableConsole(true))
-		stop := make(chan struct{}, 1)
-		shutdown := make(chan struct{}, 1)
-		timeout, cancelFunc := context.WithTimeout(ctx, 3*time.Second)
-		defer cancelFunc()
-		count := 0
-		go func() {
-			defer func() {
-				shutdown <- struct{}{}
-				close(shutdown)
+		if param.Exec == "" {
+			return nil, errors.New("no exec specified")
+		}
+		return func(ctx core.FilterContext, w http.ResponseWriter, request *http.Request, next core.NextCall) error {
+			js, err := ctx.ReadString(ctx, param.Exec)
+			if err != nil {
+				return err
+			}
+			prg, err := goja.Compile("main.js", js, false)
+			if err != nil {
+				return err
+			}
+			debug := NewDebug(param.Debug && request.URL.Query().Get("debug") == "true", request, w)
+			registry := newRegistry(ctx)
+			registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(debug))
+			loop := eventloop.NewEventLoop(eventloop.WithRegistry(registry), eventloop.EnableConsole(true))
+			stop := make(chan struct{}, 1)
+			shutdown := make(chan struct{}, 1)
+			timeout, cancelFunc := context.WithTimeout(ctx, 3*time.Second)
+			defer cancelFunc()
+			count := 0
+			go func() {
+				defer func() {
+					shutdown <- struct{}{}
+					close(shutdown)
+				}()
+				select {
+				case <-timeout.Done():
+				case <-stop:
+				}
+				count = loop.Stop()
 			}()
-			select {
-			case <-timeout.Done():
-			case <-stop:
+			loop.Run(func(vm *goja.Runtime) {
+				url.Enable(vm)
+				if err = RequestInject(ctx, vm, request); err != nil {
+					panic(err)
+				}
+				if err = ResponseInject(vm, debug, request); err != nil {
+					panic(err)
+				}
+				if err = KVInject(ctx, vm); err != nil {
+					panic(err)
+				}
+				_, err = vm.RunProgram(prg)
+			})
+			stop <- struct{}{}
+			close(stop)
+			<-shutdown
+			if count != 0 {
+				err = errors.Join(context.DeadlineExceeded, err)
 			}
-			count = loop.Stop()
-		}()
-		loop.Run(func(vm *goja.Runtime) {
-			url.Enable(vm)
-			if err = RequestInject(ctx, vm, request); err != nil {
-				panic(err)
-			}
-			if err = ResponseInject(vm, debug, request); err != nil {
-				panic(err)
-			}
-			if err = KVInject(ctx, vm); err != nil {
-				panic(err)
-			}
-			_, err = vm.RunProgram(prg)
-		})
-		stop <- struct{}{}
-		close(stop)
-		<-shutdown
-		if count != 0 {
-			err = errors.Join(context.DeadlineExceeded, err)
-		}
-		return debug.Flush(err)
+			return debug.Flush(err)
+		}, nil
 	}, nil
 }
 
