@@ -1,11 +1,15 @@
 package goja
 
 import (
+	"bufio"
 	"bytes"
 	_ "embed"
 	"html/template"
+	"net"
 	"net/http"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 //go:embed debug.tmpl
@@ -87,6 +91,13 @@ func (d *DebugData) Write(i []byte) (int, error) {
 		return d.body.Write(i)
 	}
 	return d.parent.Write(i)
+}
+
+func (d *DebugData) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hijacker, ok := d.parent.(http.Hijacker); ok {
+		return hijacker.Hijack()
+	}
+	return nil, nil, errors.New("not hijackable")
 }
 
 func (d *DebugData) WriteHeader(statusCode int) {

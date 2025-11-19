@@ -1,8 +1,0 @@
-routes:
-- path: "api/dev/**"
-  js:
-    exec: "index.js"
-    debug: true
-- path: "api/prod/**"
-  js:
-    exec: "json.js"

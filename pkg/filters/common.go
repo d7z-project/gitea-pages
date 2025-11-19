@@ -27,7 +27,7 @@ func DefaultFilters(config map[string]map[string]any) (map[string]core.FilterIns
 		if !ok {
 			item = make(map[string]any)
 		}
-		if item["_disable"] == true {
+		if it, ok := item["Enabled"]; ok && it == false {
 			zap.L().Debug("skip filter", zap.String("key", key))
 			continue
 		}

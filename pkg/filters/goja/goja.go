@@ -3,8 +3,10 @@ package goja
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/dop251/goja"
@@ -15,7 +17,20 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-func FilterInstGoJa(_ core.Params) (core.FilterInstance, error) {
+func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
+	var global struct {
+		Timeout         time.Duration `json:"timeout"`
+		EnableDebug     bool          `json:"debug"`
+		EnableWebsocket bool          `json:"websocket"`
+	}
+	global.EnableDebug = true
+	global.EnableWebsocket = true
+	if err := gl.Unmarshal(&global); err != nil {
+		return nil, err
+	}
+	if global.Timeout == 0 {
+		global.Timeout = 60 * time.Second
+	}
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
 			Exec  string `json:"exec"`
@@ -36,19 +51,21 @@ func FilterInstGoJa(_ core.Params) (core.FilterInstance, error) {
 			if err != nil {
 				return err
 			}
-			debug := NewDebug(param.Debug && request.URL.Query().Get("debug") == "true", request, w)
+			debug := NewDebug(global.EnableDebug && param.Debug && request.URL.Query().Get("debug") == "true", request, w)
 			registry := newRegistry(ctx)
 			registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(debug))
 			loop := eventloop.NewEventLoop(eventloop.WithRegistry(registry), eventloop.EnableConsole(true))
 			stop := make(chan struct{}, 1)
 			shutdown := make(chan struct{}, 1)
-			timeout, cancelFunc := context.WithTimeout(ctx, 3*time.Second)
+			defer close(shutdown)
+			timeout, cancelFunc := context.WithTimeout(ctx, global.Timeout)
 			defer cancelFunc()
 			count := 0
+			closers := NewClosers()
+			defer closers.Close()
 			go func() {
 				defer func() {
 					shutdown <- struct{}{}
-					close(shutdown)
 				}()
 				select {
 				case <-timeout.Done():
@@ -66,6 +83,14 @@ func FilterInstGoJa(_ core.Params) (core.FilterInstance, error) {
 				}
 				if err = KVInject(ctx, vm); err != nil {
 					panic(err)
+				}
+				if global.EnableWebsocket {
+					var closer io.Closer
+					closer, err = WebsocketInject(vm, debug, request, cancelFunc)
+					if err != nil {
+						panic(err)
+					}
+					closers.AddCloser(closer.Close)
 				}
 				_, err = vm.RunProgram(prg)
 			})
@@ -89,4 +114,37 @@ func newRegistry(ctx core.FilterContext) *require.Registry {
 			return filepath.Join(base, filepath.FromSlash(path))
 		}))
 	return registry
+}
+
+type Closers struct {
+	mu      sync.Mutex
+	closers []func() error
+}
+
+func NewClosers() *Closers {
+	return &Closers{
+		closers: make([]func() error, 0),
+	}
+}
+
+func (c *Closers) AddCloser(closer func() error) {
+	c.mu.Lock()
+	c.closers = append(c.closers, closer)
+	c.mu.Unlock()
+}
+
+func (c *Closers) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var errs []error
+	for i := len(c.closers) - 1; i >= 0; i-- {
+		if err := c.closers[i](); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	c.closers = nil
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
 }

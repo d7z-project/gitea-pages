@@ -12,61 +12,46 @@ import (
 
 func KVInject(ctx core.FilterContext, jsCtx *goja.Runtime) error {
 	return jsCtx.GlobalObject().Set("kv", map[string]interface{}{
-		"repo": func(group string) goja.Value {
+		"repo": func(group string) (goja.Value, error) {
 			return kvResult(ctx.RepoDB)(ctx, jsCtx, group)
 		},
-		"org": func(group string) goja.Value {
+		"org": func(group string) (goja.Value, error) {
 			return kvResult(ctx.OrgDB)(ctx, jsCtx, group)
 		},
 	})
 }
 
-func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group string) goja.Value {
-	return func(ctx core.FilterContext, jsCtx *goja.Runtime, group string) goja.Value {
+func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group string) (goja.Value, error) {
+	return func(ctx core.FilterContext, jsCtx *goja.Runtime, group string) (goja.Value, error) {
 		group = strings.TrimSpace(group)
 		if group == "" {
-			panic("kv: invalid group name")
+			return goja.Undefined(), errors.New("invalid group")
 		}
 		db := db.Child(group).(kv.CursorPagedKV)
 		return jsCtx.ToValue(map[string]interface{}{
-			"get": func(key string) goja.Value {
+			"get": func(key string) (goja.Value, error) {
 				get, err := db.Get(ctx, key)
 				if err != nil {
 					if !errors.Is(err, os.ErrNotExist) {
-						panic(err)
+						return nil, err
 					}
-					return goja.Null()
+					return goja.Null(), nil
 				}
-				return jsCtx.ToValue(get)
+				return jsCtx.ToValue(get), nil
 			},
-			"set": func(key, value string) {
-				err := db.Put(ctx, key, value, kv.TTLKeep)
-				if err != nil {
-					panic(err)
-				}
+			"set": func(key, value string) error {
+				return db.Put(ctx, key, value, kv.TTLKeep)
 			},
-			"delete": func(key string) bool {
-				b, err := db.Delete(ctx, key)
-				if err != nil {
-					panic(err)
-				}
-				return b
+			"delete": func(key string) (bool, error) {
+				return db.Delete(ctx, key)
 			},
-			"putIfNotExists": func(key, value string) bool {
-				exists, err := db.PutIfNotExists(ctx, key, value, kv.TTLKeep)
-				if err != nil {
-					panic(err)
-				}
-				return exists
+			"putIfNotExists": func(key, value string) (bool, error) {
+				return db.PutIfNotExists(ctx, key, value, kv.TTLKeep)
 			},
-			"compareAndSwap": func(key, oldValue, newValue string) bool {
-				swap, err := db.CompareAndSwap(ctx, key, oldValue, newValue)
-				if err != nil {
-					panic(err)
-				}
-				return swap
+			"compareAndSwap": func(key, oldValue, newValue string) (bool, error) {
+				return db.CompareAndSwap(ctx, key, oldValue, newValue)
 			},
-			"list": func(limit int64, cursor string) map[string]any {
+			"list": func(limit int64, cursor string) (map[string]any, error) {
 				if limit <= 0 {
 					limit = 100
 				}
@@ -75,14 +60,14 @@ func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runt
 					Cursor: cursor,
 				})
 				if err != nil {
-					panic(err)
+					return nil, err
 				}
 				return map[string]any{
 					"keys":    list.Keys,
 					"cursor":  list.Cursor,
 					"hasNext": list.HasMore,
-				}
+				}, nil
 			},
-		})
+		}), nil
 	}
 }

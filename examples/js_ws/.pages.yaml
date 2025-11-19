@@ -1,0 +1,4 @@
+routes:
+  - path: "ws"
+    js:
+      exec: "index.js"

@@ -18,7 +18,6 @@ func ResponseInject(jsCtx *goja.Runtime, writer http.ResponseWriter, req *http.R
 		"getHeader": func(key string) string {
 			return writer.Header().Get(key)
 		},
-
 		"removeHeader": func(key string) {
 			writer.Header().Del(key)
 		},
@@ -38,11 +37,12 @@ func ResponseInject(jsCtx *goja.Runtime, writer http.ResponseWriter, req *http.R
 		},
 
 		// 写入响应
-		"write": func(data string) {
+		"write": func(data string) error {
 			_, err := writer.Write([]byte(data))
 			if err != nil {
-				panic(err)
+				return err
 			}
+			return nil
 		},
 
 		"writeHead": func(statusCode int, headers ...map[string]string) {
@@ -55,14 +55,14 @@ func ResponseInject(jsCtx *goja.Runtime, writer http.ResponseWriter, req *http.R
 			writer.WriteHeader(statusCode)
 		},
 
-		"end": func(data ...string) {
+		"end": func(data ...string) error {
 			if len(data) > 0 {
 				_, err := writer.Write([]byte(data[0]))
 				if err != nil {
-					panic(err)
+					return err
 				}
 			}
-			// 在实际的 HTTP 处理中，我们通常不手动结束响应
+			return nil
 		},
 
 		// 重定向
@@ -75,7 +75,7 @@ func ResponseInject(jsCtx *goja.Runtime, writer http.ResponseWriter, req *http.R
 		},
 
 		// JSON 响应
-		"json": func(data goja.Value) {
+		"json": func(data goja.Value) error {
 			writer.Header().Set("Content-Type", "application/json")
 
 			var jsonStr string
@@ -86,14 +86,12 @@ func ResponseInject(jsCtx *goja.Runtime, writer http.ResponseWriter, req *http.R
 			default:
 				marshal, err := json.Marshal(v)
 				if err != nil {
-					panic(err)
+					return err
 				}
 				jsonStr = string(marshal)
 			}
 			_, err := writer.Write([]byte(jsonStr))
-			if err != nil {
-				panic(err)
-			}
+			return err
 		},
 
 		// 设置 cookie

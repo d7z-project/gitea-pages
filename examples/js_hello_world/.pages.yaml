@@ -1,0 +1,9 @@
+routes:
+- path: "hello"
+  js:
+    exec: "index.js"
+    debug: true
+- path: "json"
+  js:
+    exec: "json.js"
+    debug: true
