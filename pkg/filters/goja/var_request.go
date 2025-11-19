@@ -50,6 +50,9 @@ func RequestInject(ctx core.FilterContext, jsCtx *goja.Runtime, req *http.Reques
 			}
 			return nil
 		},
+		"getQuery": func(key string) string {
+			return req.URL.Query().Get(key)
+		},
 		"getHeader": func(name string) string {
 			return req.Header.Get(name)
 		},

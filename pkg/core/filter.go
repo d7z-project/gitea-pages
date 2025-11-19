@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/subscribe"
 	"gopkg.d7z.net/middleware/tools"
 )
 
@@ -20,6 +21,9 @@ type FilterContext struct {
 	Cache  *tools.TTLCache
 	OrgDB  kv.CursorPagedKV
 	RepoDB kv.CursorPagedKV
+	Event  subscribe.Subscriber
+
+	Kill func()
 }
 
 type Params map[string]any

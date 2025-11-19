@@ -4,14 +4,16 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-func WebsocketInject(jsCtx *goja.Runtime, w http.ResponseWriter, request *http.Request, cancelFunc context.CancelFunc) (io.Closer, error) {
+func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.ResponseWriter, request *http.Request, cancelFunc context.CancelFunc) (io.Closer, error) {
 	closers := NewClosers()
 	return closers, jsCtx.GlobalObject().Set("websocket", func() (any, error) {
 		upgrader := websocket.Upgrader{}
@@ -20,9 +22,44 @@ func WebsocketInject(jsCtx *goja.Runtime, w http.ResponseWriter, request *http.R
 			return nil, err
 		}
 		cancelFunc()
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+		f:
+			for {
+				select {
+				case <-ctx.Done():
+					break f
+				case <-ticker.C:
+				}
+				if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
+					zap.L().Debug("websocket ping failed", zap.Error(err))
+					ctx.Kill()
+				}
+			}
+		}()
 		zap.L().Debug("websocket upgrader created")
 		closers.AddCloser(conn.Close)
 		return map[string]interface{}{
+			"on": func(f func(mType int, message string)) {
+				go func() {
+				z:
+					for {
+						select {
+						case <-ctx.Done():
+							break z
+						default:
+							messageType, p, err := conn.ReadMessage()
+							if err != nil {
+								break z
+							}
+							f(messageType, string(p))
+						}
+
+					}
+
+				}()
+			},
 			"TypeTextMessage":   websocket.TextMessage,
 			"TypeBinaryMessage": websocket.BinaryMessage,
 			"readText": func() (string, error) {
@@ -59,6 +96,9 @@ func WebsocketInject(jsCtx *goja.Runtime, w http.ResponseWriter, request *http.R
 					return errors.Errorf("invalid type for websocket text: %T", data)
 				}
 				return conn.WriteMessage(mType, dataRaw)
+			},
+			"ping": func() error {
+				return conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(1*time.Second))
 			},
 		}, nil
 	})

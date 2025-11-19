@@ -22,6 +22,7 @@ type Config struct {
 	Domain string `yaml:"domain"` // 基础域名
 
 	Database ConfigDatabase `yaml:"database"` // 配置
+	Event    ConfigEvent    `yaml:"event"`    // 事件传递
 
 	Auth ConfigAuth `yaml:"auth"` // 后端认证配置
 
@@ -76,6 +77,9 @@ type ConfigPage struct {
 type ConfigDatabase struct {
 	URL string `yaml:"url"`
 }
+type ConfigEvent struct {
+	URL string `yaml:"url"`
+}
 
 type ConfigProxy struct {
 	Enable bool `yaml:"enable"` // 是否允许反向代理
@@ -112,6 +116,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if c.Database.URL == "" {
 		return nil, errors.New("c is required")
+	}
+	if c.Event.URL == "" {
+		c.Event.URL = "memory://"
 	}
 	if c.StaticDir != "" {
 		stat, err := os.Stat(c.StaticDir)

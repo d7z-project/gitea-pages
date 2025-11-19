@@ -1,0 +1,7 @@
+routes:
+  - path: "sender"
+    js:
+      exec: "sender.js"
+  - path: "event"
+    js:
+      exec: "event.js"

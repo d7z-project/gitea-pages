@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/subscribe"
 	"gopkg.d7z.net/middleware/tools"
 )
 
@@ -28,9 +30,12 @@ type Server struct {
 	meta      *core.PageDomain
 	db        kv.CursorPagedKV
 	filterMgr map[string]core.FilterInstance
-	globCache *lru.Cache[string, glob.Glob]
-	cacheBlob cache.Cache
 
+	globCache    *lru.Cache[string, glob.Glob]
+	cacheBlob    cache.Cache
+	cacheBlobTtl time.Duration
+
+	event        subscribe.Subscriber
 	errorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -40,13 +45,15 @@ func NewPageServer(
 	domain string,
 	defaultBranch string,
 	db kv.CursorPagedKV,
+	event subscribe.Subscriber,
 	cacheMeta kv.KV,
-	cacheTTL time.Duration,
+	cacheMetaTTL time.Duration,
 	cacheBlob cache.Cache,
+	cacheBlobTtl time.Duration,
 	errorHandler func(w http.ResponseWriter, r *http.Request, err error),
 	filterConfig map[string]map[string]any,
 ) (*Server, error) {
-	svcMeta := core.NewServerMeta(client, backend, domain, cacheMeta, cacheTTL)
+	svcMeta := core.NewServerMeta(client, backend, domain, cacheMeta, cacheMetaTTL)
 	pageMeta := core.NewPageDomain(svcMeta, core.NewDomainAlias(db.Child("config").Child("alias")), domain, defaultBranch)
 	globCache, err := lru.New[string, glob.Glob](256)
 	if err != nil {
@@ -64,6 +71,8 @@ func NewPageServer(
 		filterMgr:    defaultFilters,
 		errorHandler: errorHandler,
 		cacheBlob:    cacheBlob,
+		cacheBlobTtl: cacheBlobTtl,
+		event:        event,
 	}, nil
 }
 
@@ -100,13 +109,17 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		return err
 	}
 
+	cancel, cancelFunc := context.WithCancel(request.Context())
 	filterCtx := core.FilterContext{
 		PageContent: meta,
-		Context:     request.Context(),
+		Context:     cancel,
 		PageVFS:     core.NewPageVFS(s.backend, meta.Owner, meta.Repo, meta.CommitID),
 		Cache:       tools.NewTTLCache(s.cacheBlob.Child("filter").Child(meta.Owner).Child(meta.Repo).Child(meta.CommitID), time.Minute),
 		OrgDB:       s.db.Child("org").Child(meta.Owner).(kv.CursorPagedKV),
 		RepoDB:      s.db.Child("repo").Child(meta.Owner).Child(meta.Repo).(kv.CursorPagedKV),
+		Event:       s.event.Child("domain").Child(meta.Owner).Child(meta.Repo),
+
+		Kill: cancelFunc,
 	}
 
 	zap.L().Debug("new request", zap.Any("request path", meta.Path))

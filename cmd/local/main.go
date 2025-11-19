@@ -15,6 +15,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/providers"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/subscribe"
 )
 
 var (
@@ -56,8 +57,9 @@ func main() {
 	if err != nil {
 		zap.L().Fatal("failed to init memory provider", zap.Error(err))
 	}
+	subscriber := subscribe.NewMemorySubscriber()
 	server, err := pkg.NewPageServer(http.DefaultClient,
-		provider, domain, "gh-pages", memory, memory, 0, &nopCache{},
+		provider, domain, "gh-pages", memory, subscriber, memory, 0, &nopCache{}, 0,
 		func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, "page not found.", http.StatusNotFound)

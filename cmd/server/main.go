@@ -16,6 +16,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/providers"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/subscribe"
 )
 
 var (
@@ -64,15 +65,22 @@ func main() {
 	if !ok {
 		log.Fatalln(errors.New("database not support cursor"))
 	}
+	event, err := subscribe.NewSubscriberFromURL(config.Event.URL)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer event.Close()
 	pageServer, err := pkg.NewPageServer(
 		http.DefaultClient,
 		backend,
 		config.Domain,
 		config.Page.DefaultBranch,
 		cdb,
+		event,
 		cacheMeta,
 		config.Cache.MetaTTL,
 		cacheBlob.Child("filter"),
+		config.Cache.BlobTTL,
 		config.ErrorHandler,
 		config.Filters,
 	)

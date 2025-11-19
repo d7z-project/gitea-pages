@@ -58,8 +58,8 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 			stop := make(chan struct{}, 1)
 			shutdown := make(chan struct{}, 1)
 			defer close(shutdown)
-			timeout, cancelFunc := context.WithTimeout(ctx, global.Timeout)
-			defer cancelFunc()
+			timeout, timeoutCancelFunc := context.WithTimeout(ctx, global.Timeout)
+			defer timeoutCancelFunc()
 			count := 0
 			closers := NewClosers()
 			defer closers.Close()
@@ -84,9 +84,12 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 				if err = KVInject(ctx, vm); err != nil {
 					panic(err)
 				}
+				if err = EventInject(ctx, vm); err != nil {
+					panic(err)
+				}
 				if global.EnableWebsocket {
 					var closer io.Closer
-					closer, err = WebsocketInject(vm, debug, request, cancelFunc)
+					closer, err = WebsocketInject(ctx, vm, debug, request, timeoutCancelFunc)
 					if err != nil {
 						panic(err)
 					}
