@@ -1,9 +1,7 @@
 package goja
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -15,7 +13,6 @@ import (
 	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/dop251/goja_nodejs/require"
 	"github.com/dop251/goja_nodejs/url"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
@@ -109,16 +106,15 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 						go func() {
 							for {
 								switch promise.State() {
-								case goja.PromiseStateFulfilled, goja.PromiseStateRejected:
-									result := promise.Result().Export()
-									switch data := result.(type) {
+								case goja.PromiseStateFulfilled:
+									stop <- nil
+									return
+								case goja.PromiseStateRejected:
+									switch data := promise.Result().Export().(type) {
 									case error:
 										stop <- data
 									default:
-										marshal, _ := json.Marshal(result)
-										zap.L().Debug(fmt.Sprintf("js promise result %s", string(marshal)),
-											zap.Any("result", promise.Result().ExportType()))
-										stop <- nil
+										stop <- errors.New(promise.Result().String())
 									}
 									return
 								default:
@@ -126,7 +122,11 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 								}
 							}
 						}()
+					} else {
+						stop <- nil
 					}
+				} else {
+					stop <- nil
 				}
 			})
 			resultErr := <-stop

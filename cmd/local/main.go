@@ -78,7 +78,7 @@ func main() {
 
 type nopCache struct{}
 
-func (n *nopCache) Child(_ string) cache.Cache {
+func (n *nopCache) Child(_ ...string) cache.Cache {
 	return n
 }
 

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 
@@ -36,7 +37,7 @@ func (a *DomainAlias) Query(ctx context.Context, domain string) (*Alias, error) 
 
 func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, branch string) error {
 	oldDomains := make([]string, 0)
-	rKey := fmt.Sprintf("%s/%s/%s", owner, repo, branch)
+	rKey := base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%s/%s/%s", owner, repo, branch)))
 	if oldStr, err := a.config.Get(ctx, rKey); err == nil {
 		_ = json.Unmarshal([]byte(oldStr), &oldDomains)
 	}

@@ -30,8 +30,19 @@ func EventInject(ctx core.FilterContext, jsCtx *goja.Runtime, loop *eventloop.Ev
 			}()
 			return promise
 		},
-		"put": func(key, value string) error {
-			return ctx.Event.Publish(ctx, key, value)
+		"put": func(key, value string) *goja.Promise {
+			promise, resolve, reject := jsCtx.NewPromise()
+			go func() {
+				err := ctx.Event.Publish(ctx, key, value)
+				loop.RunOnLoop(func(runtime *goja.Runtime) {
+					if err != nil {
+						_ = reject(runtime.ToValue(err))
+					} else {
+						_ = resolve(goja.Undefined())
+					}
+				})
+			}()
+			return promise
 		},
 	})
 }

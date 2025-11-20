@@ -31,9 +31,10 @@ type Server struct {
 	db        kv.CursorPagedKV
 	filterMgr map[string]core.FilterInstance
 
-	globCache    *lru.Cache[string, glob.Glob]
+	globCache *lru.Cache[string, glob.Glob]
+
 	cacheBlob    cache.Cache
-	cacheBlobTtl time.Duration
+	cacheBlobTTL time.Duration
 
 	event        subscribe.Subscriber
 	errorHandler func(w http.ResponseWriter, r *http.Request, err error)
@@ -49,7 +50,7 @@ func NewPageServer(
 	cacheMeta kv.KV,
 	cacheMetaTTL time.Duration,
 	cacheBlob cache.Cache,
-	cacheBlobTtl time.Duration,
+	cacheBlobTTL time.Duration,
 	errorHandler func(w http.ResponseWriter, r *http.Request, err error),
 	filterConfig map[string]map[string]any,
 ) (*Server, error) {
@@ -71,7 +72,7 @@ func NewPageServer(
 		filterMgr:    defaultFilters,
 		errorHandler: errorHandler,
 		cacheBlob:    cacheBlob,
-		cacheBlobTtl: cacheBlobTtl,
+		cacheBlobTTL: cacheBlobTTL,
 		event:        event,
 	}, nil
 }
@@ -94,7 +95,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	}()
 	err := s.Serve(writer, request)
 	if err != nil {
-		zap.L().Debug("bad request.", zap.Error(err), zap.Any("request", request.RequestURI), zap.Any("id", sessionID))
+		zap.L().Debug("bad request", zap.Error(err), zap.Any("request", request.RequestURI), zap.Any("id", sessionID))
 		if !writer.IsWritten() {
 			s.errorHandler(writer, request, err)
 		}
@@ -114,10 +115,10 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		PageContent: meta,
 		Context:     cancel,
 		PageVFS:     core.NewPageVFS(s.backend, meta.Owner, meta.Repo, meta.CommitID),
-		Cache:       tools.NewTTLCache(s.cacheBlob.Child("filter").Child(meta.Owner).Child(meta.Repo).Child(meta.CommitID), time.Minute),
-		OrgDB:       s.db.Child("org").Child(meta.Owner).(kv.CursorPagedKV),
-		RepoDB:      s.db.Child("repo").Child(meta.Owner).Child(meta.Repo).(kv.CursorPagedKV),
-		Event:       s.event.Child("domain").Child(meta.Owner).Child(meta.Repo),
+		Cache:       tools.NewTTLCache(s.cacheBlob.Child("filter", meta.Owner, meta.Repo, meta.CommitID), time.Minute),
+		OrgDB:       s.db.Child("org", meta.Owner).(kv.CursorPagedKV),
+		RepoDB:      s.db.Child("repo", meta.Owner, meta.Repo).(kv.CursorPagedKV),
+		Event:       s.event.Child("domain", meta.Owner, meta.Repo),
 
 		Kill: cancelFunc,
 	}

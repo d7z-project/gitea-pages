@@ -14,8 +14,8 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
-	go.uber.org/zap v1.27.0
-	gopkg.d7z.net/middleware v0.0.0-20251119134829-0c55a98e6495
+	go.uber.org/zap v1.27.1
+	gopkg.d7z.net/middleware v0.0.0-20251120123709-5d4e16e0d6fb
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -53,7 +53,7 @@ require (
 	go.etcd.io/etcd/client/pkg/v3 v3.6.6 // indirect
 	go.etcd.io/etcd/client/v3 v3.6.6 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.44.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect

@@ -21,6 +21,8 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 		if err != nil {
 			return nil, err
 		}
+		zap.L().Debug("websocket upgrader created")
+		closers.AddCloser(conn.Close)
 		go func() {
 			ticker := time.NewTicker(15 * time.Second)
 			defer ticker.Stop()
@@ -37,28 +39,7 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 				}
 			}
 		}()
-		zap.L().Debug("websocket upgrader created")
-		closers.AddCloser(conn.Close)
 		return map[string]interface{}{
-			"on": func(f func(mType int, message string)) {
-				go func() {
-				z:
-					for {
-						select {
-						case <-ctx.Done():
-							break z
-						default:
-							messageType, p, err := conn.ReadMessage()
-							if err != nil {
-								break z
-							}
-							f(messageType, string(p))
-						}
-
-					}
-
-				}()
-			},
 			"TypeTextMessage":   websocket.TextMessage,
 			"TypeBinaryMessage": websocket.BinaryMessage,
 			"readText": func() *goja.Promise {
@@ -91,36 +72,115 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 				}()
 				return promise
 			},
-			"read": func() (any, error) {
-				messageType, p, err := conn.ReadMessage()
-				if err != nil {
-					return nil, err
-				}
-				return map[string]interface{}{
-					"type": messageType,
-					"data": p,
-				}, nil
+			"read": func() *goja.Promise {
+				promise, resolve, reject := jsCtx.NewPromise()
+				go func() {
+					select {
+					case <-ctx.Done():
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(ctx.Err()))
+						})
+						return
+					default:
+					}
+					defer func() {
+						if r := recover(); r != nil {
+							zap.L().Debug("websocket panic", zap.Any("panic", r))
+							loop.RunOnLoop(func(runtime *goja.Runtime) {
+								_ = reject(runtime.ToValue(r))
+							})
+						}
+					}()
+					messageType, p, err := conn.ReadMessage()
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						if err != nil {
+							_ = reject(runtime.ToValue(err))
+						} else {
+							_ = resolve(runtime.ToValue(map[string]interface{}{
+								"type": messageType,
+								"data": p,
+							}))
+						}
+					})
+				}()
+				return promise
 			},
-			"writeText": func(data string) error {
-				return conn.WriteMessage(websocket.TextMessage, []byte(data))
+			"writeText": func(data string) *goja.Promise {
+				promise, resolve, reject := jsCtx.NewPromise()
+				go func() {
+					select {
+					case <-ctx.Done():
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(ctx.Err()))
+						})
+						return
+					default:
+					}
+					defer func() {
+						if r := recover(); r != nil {
+							zap.L().Debug("websocket panic", zap.Any("panic", r))
+							loop.RunOnLoop(func(runtime *goja.Runtime) {
+								_ = reject(runtime.ToValue(r))
+							})
+						}
+					}()
+					err := conn.WriteMessage(websocket.TextMessage, []byte(data))
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						if err != nil {
+							_ = reject(runtime.ToValue(err))
+						} else {
+							_ = resolve(runtime.ToValue(nil))
+						}
+					})
+				}()
+				return promise
 			},
-			"write": func(mType int, data any) error {
-				if item, ok := data.(goja.Value); ok {
-					data = item.Export()
-				}
-				var dataRaw []byte
-				switch it := data.(type) {
-				case []byte:
-					dataRaw = it
-				case string:
-					dataRaw = []byte(it)
-				default:
-					return errors.Errorf("invalid type for websocket text: %T", data)
-				}
-				return conn.WriteMessage(mType, dataRaw)
-			},
-			"ping": func() error {
-				return conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(1*time.Second))
+			"write": func(mType int, data any) *goja.Promise {
+				promise, resolve, reject := jsCtx.NewPromise()
+				go func() {
+					select {
+					case <-ctx.Done():
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(ctx.Err()))
+						})
+						return
+					default:
+					}
+					defer func() {
+						if r := recover(); r != nil {
+							zap.L().Debug("websocket panic", zap.Any("panic", r))
+							loop.RunOnLoop(func(runtime *goja.Runtime) {
+								_ = reject(runtime.ToValue(r))
+							})
+						}
+					}()
+
+					if item, ok := data.(goja.Value); ok {
+						data = item.Export()
+					}
+					var dataRaw []byte
+					switch it := data.(type) {
+					case []byte:
+						dataRaw = it
+					case string:
+						dataRaw = []byte(it)
+					default:
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(errors.Errorf("invalid type for websocket text: %T", data)))
+						})
+						return
+					}
+
+					err := conn.WriteMessage(mType, dataRaw)
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						if err != nil {
+							_ = reject(runtime.ToValue(err))
+						} else {
+							_ = resolve(goja.Undefined())
+						}
+					})
+				}()
+				return promise
 			},
 		}, nil
 	})

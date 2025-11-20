@@ -8,8 +8,8 @@ const ws = websocket();
 
 async function eventPull() {
     while (true) {
-        const data  = await event.pull('messages')
-        ws.writeText(data);
+        const data  = await event.load('messages')
+        await ws.writeText(data);
     }
 }
 
@@ -27,5 +27,5 @@ async function messagePull() {
 }
 
 (async () => {
-    await Promise.all(eventPull(), messagePull())
+    await Promise.all([eventPull(), messagePull()])
 })()

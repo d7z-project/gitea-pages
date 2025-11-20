@@ -1,19 +1,17 @@
 (async ()=>{
     let ws = websocket();
-    let shouldExit = false;
-    while (!shouldExit) {
+    while (true) {
         let data = await ws.readText();
         switch (data) {
             case "exit":
-                shouldExit = true;
-                break;
+                return
             case "panic":
                 throw Error("错误");
             case "date":
-                ws.writeText(new Date().toJSON())
+                await ws.writeText(new Date().toJSON())
                 break
             default:
-                ws.writeText("收到信息:" + data)
+                await ws.writeText("收到信息:" + data)
                 break;
         }
     }
