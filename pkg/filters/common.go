@@ -18,7 +18,7 @@ func DefaultFilters(config map[string]map[string]any) (map[string]core.FilterIns
 		"redirect": FilterInstRedirect,
 		"direct":   FilterInstDirect,
 		//"reverse_proxy": FilterInstProxy,
-		"_404_":    FilterInstDefaultNotFound,
+		"404":      FilterInstDefaultNotFound,
 		"failback": FilterInstFailback,
 		"template": FilterInstTemplate,
 		"js":       goja.FilterInstGoJa,

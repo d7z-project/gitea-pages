@@ -102,7 +102,7 @@ func (c *ProviderCache) Open(ctx context.Context, owner, repo, commit, path stri
 		return nil, os.ErrNotExist
 	} else if lastCache != nil {
 		h := lastCache.Metadata
-		if h["_404_"] == "true" {
+		if h["404"] == "true" {
 			return nil, os.ErrNotExist
 		}
 		respHeader := make(http.Header)
@@ -133,7 +133,7 @@ func (c *ProviderCache) Open(ctx context.Context, owner, repo, commit, path stri
 		// 当上游返回错误时，缓存404结果
 		if errors.Is(err, os.ErrNotExist) {
 			if err = c.cacheBlob.Put(ctx, key, map[string]string{
-				"_404_": "true",
+				"404": "true",
 			}, bytes.NewBuffer(nil), time.Hour); err != nil {
 				zap.L().Warn("缓存404失败", zap.Error(err))
 			}
@@ -143,7 +143,7 @@ func (c *ProviderCache) Open(ctx context.Context, owner, repo, commit, path stri
 	if open.StatusCode == http.StatusNotFound {
 		// 缓存404路由
 		if err = c.cacheBlob.Put(ctx, key, map[string]string{
-			"_404_": "true",
+			"404": "true",
 		}, bytes.NewBuffer(nil), time.Hour); err != nil {
 			zap.L().Warn("缓存404失败", zap.Error(err))
 		}

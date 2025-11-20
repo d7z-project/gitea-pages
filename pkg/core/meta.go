@@ -48,7 +48,7 @@ func NewEmptyPageMetaContent() *PageMetaContent {
 		Filters: []Filter{
 			{
 				Path:   "**",
-				Type:   "_404_",
+				Type:   "404",
 				Params: map[string]any{},
 			},
 			{ // 默认阻塞

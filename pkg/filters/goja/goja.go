@@ -16,6 +16,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
+// todo: 新增超时配置
 func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	var global struct {
 		Timeout         time.Duration `json:"timeout"`
