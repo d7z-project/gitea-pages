@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.ResponseWriter, request *http.Request, cancelFunc context.CancelFunc) (io.Closer, error) {
+func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.ResponseWriter, request *http.Request, loop *eventloop.EventLoop, cancelFunc context.CancelFunc) (io.Closer, error) {
 	closers := NewClosers()
 	return closers, jsCtx.GlobalObject().Set("websocket", func() (any, error) {
 		upgrader := websocket.Upgrader{}
@@ -62,12 +63,32 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 			},
 			"TypeTextMessage":   websocket.TextMessage,
 			"TypeBinaryMessage": websocket.BinaryMessage,
-			"readText": func() (string, error) {
-				_, p, err := conn.ReadMessage()
-				if err != nil {
-					return "", err
-				}
-				return string(p), nil
+			"readText": func() goja.Value {
+				promise, resolve, reject := jsCtx.NewPromise()
+				go func() {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+					defer func() {
+						if r := recover(); r != nil {
+							zap.L().Debug("websocket panic", zap.Any("panic", r))
+							loop.Run(func(runtime *goja.Runtime) {
+								_ = reject(runtime.ToValue(r))
+							})
+						}
+					}()
+					_, p, err := conn.ReadMessage()
+					loop.Run(func(runtime *goja.Runtime) {
+						if err != nil {
+							_ = reject(runtime.ToValue(err))
+						} else {
+							_ = resolve(runtime.ToValue(string(p)))
+						}
+					})
+				}()
+				return promise.Result()
 			},
 			"read": func() (any, error) {
 				messageType, p, err := conn.ReadMessage()

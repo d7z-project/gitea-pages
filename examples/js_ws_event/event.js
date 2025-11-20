@@ -1,23 +1,28 @@
-let name=request.getQuery("name")
-if (name===""){
-    throw Error(`Missing name "${name}"`)
+const name = (await request.getQuery("name"))?.trim();
+
+if (!name) {
+    throw new Error(`Missing or empty name parameter`);
 }
-let ws = websocket();
-event.subscribe("messages").on(function (msg){
-    ws.writeText(msg)
-})
-let shouldExit = false;
-while (!shouldExit) {
-    let data = ws.readText();
-    switch (data) {
-        case "exit":
-            shouldExit = true;
-            break;
-        default:
-            event.put("messages",JSON.stringify({
-                name:name,
-                data:data
+
+const ws = websocket();
+
+try {
+    // 事件处理
+    event.subscribe("messages").on((msg) => {
+        ws.writeText(msg);
+    });
+
+    // 主循环
+    for await (const data of ws.readText()) {
+        if (data === "exit") break;
+
+        if (data?.trim()) {
+            await event.put("messages", JSON.stringify({
+                name,
+                data: data.trim()
             }));
-            break;
+        }
     }
+} finally {
+    ws.close();
 }
