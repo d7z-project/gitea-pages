@@ -1,4 +1,4 @@
-async function run() {
+(async ()=>{
     let ws = websocket();
     let shouldExit = false;
     while (!shouldExit) {
@@ -17,5 +17,4 @@ async function run() {
                 break;
         }
     }
-}
-run().then(r => {});
+})()

@@ -1,7 +1,6 @@
 package goja
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"time"
@@ -14,7 +13,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.ResponseWriter, request *http.Request, loop *eventloop.EventLoop, cancelFunc context.CancelFunc) (io.Closer, error) {
+func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.ResponseWriter, request *http.Request, loop *eventloop.EventLoop) (io.Closer, error) {
 	closers := NewClosers()
 	return closers, jsCtx.GlobalObject().Set("websocket", func() (any, error) {
 		upgrader := websocket.Upgrader{}
@@ -22,7 +21,6 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 		if err != nil {
 			return nil, err
 		}
-		cancelFunc()
 		go func() {
 			ticker := time.NewTicker(15 * time.Second)
 			defer ticker.Stop()
@@ -63,24 +61,27 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 			},
 			"TypeTextMessage":   websocket.TextMessage,
 			"TypeBinaryMessage": websocket.BinaryMessage,
-			"readText": func() goja.Value {
+			"readText": func() *goja.Promise {
 				promise, resolve, reject := jsCtx.NewPromise()
 				go func() {
 					select {
 					case <-ctx.Done():
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(ctx.Err()))
+						})
 						return
 					default:
 					}
 					defer func() {
 						if r := recover(); r != nil {
 							zap.L().Debug("websocket panic", zap.Any("panic", r))
-							loop.Run(func(runtime *goja.Runtime) {
+							loop.RunOnLoop(func(runtime *goja.Runtime) {
 								_ = reject(runtime.ToValue(r))
 							})
 						}
 					}()
 					_, p, err := conn.ReadMessage()
-					loop.Run(func(runtime *goja.Runtime) {
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
 						if err != nil {
 							_ = reject(runtime.ToValue(err))
 						} else {
@@ -88,7 +89,7 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 						}
 					})
 				}()
-				return promise.Result()
+				return promise
 			},
 			"read": func() (any, error) {
 				messageType, p, err := conn.ReadMessage()

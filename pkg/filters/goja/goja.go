@@ -1,8 +1,9 @@
 package goja
 
 import (
-	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/dop251/goja_nodejs/require"
 	"github.com/dop251/goja_nodejs/url"
+	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
@@ -47,68 +49,93 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 			if err != nil {
 				return err
 			}
-			prg, err := goja.Compile("main.js", js, false)
+
+			debug := NewDebug(global.EnableDebug && param.Debug && request.URL.Query().
+				Get("debug") == "true", request, w)
+			program, err := goja.Compile("main.js", js, false)
 			if err != nil {
-				return err
+				return debug.Flush(err)
 			}
-			debug := NewDebug(global.EnableDebug && param.Debug && request.URL.Query().Get("debug") == "true", request, w)
-			registry := newRegistry(ctx)
-			registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(debug))
-			loop := eventloop.NewEventLoop(eventloop.WithRegistry(registry), eventloop.EnableConsole(true))
-			stop := make(chan struct{}, 1)
-			shutdown := make(chan struct{}, 1)
-			defer close(shutdown)
-			timeout, timeoutCancelFunc := context.WithTimeout(ctx, global.Timeout)
-			defer timeoutCancelFunc()
-			count := 0
+			registry := newRegistry(ctx, debug)
+			jsLoop := eventloop.NewEventLoop(eventloop.WithRegistry(registry),
+				eventloop.EnableConsole(true))
+
+			jsLoop.Start()
+			defer jsLoop.Stop()
+
 			closers := NewClosers()
 			defer closers.Close()
-			go func() {
-				defer func() {
-					shutdown <- struct{}{}
-				}()
-				select {
-				case <-timeout.Done():
-				case <-stop:
-				}
-				count = loop.Stop()
-			}()
-			loop.Run(func(vm *goja.Runtime) {
-				url.Enable(vm)
-				if err = RequestInject(ctx, vm, request); err != nil {
-					panic(err)
-				}
-				if err = ResponseInject(vm, debug, request); err != nil {
-					panic(err)
-				}
-				if err = KVInject(ctx, vm); err != nil {
-					panic(err)
-				}
-				if err = EventInject(ctx, vm); err != nil {
-					panic(err)
-				}
-				if global.EnableWebsocket {
-					var closer io.Closer
-					closer, err = WebsocketInject(ctx, vm, debug, request, loop, timeoutCancelFunc)
-					if err != nil {
-						panic(err)
+
+			stop := make(chan error, 1)
+			defer close(stop)
+
+			jsLoop.RunOnLoop(func(vm *goja.Runtime) {
+				err := func() error {
+					url.Enable(vm)
+					if err = RequestInject(ctx, vm, request); err != nil {
+						return err
 					}
-					closers.AddCloser(closer.Close)
+					if err = ResponseInject(vm, debug, request); err != nil {
+						return err
+					}
+					if err = KVInject(ctx, vm); err != nil {
+						return err
+					}
+					if err = EventInject(ctx, vm, jsLoop); err != nil {
+						return err
+					}
+					if global.EnableWebsocket {
+						var closer io.Closer
+						closer, err = WebsocketInject(ctx, vm, debug, request, jsLoop)
+						if err != nil {
+							return err
+						}
+						closers.AddCloser(closer.Close)
+					}
+					return nil
+				}()
+				if err != nil {
+					stop <- errors.Join(err, errors.New("js init failed"))
+					return
 				}
-				_, err = vm.RunProgram(prg)
+				result, err := vm.RunProgram(program)
+				if err != nil {
+					stop <- err
+					return
+				}
+				export := result.Export()
+				if export != nil {
+					if promise, ok := export.(*goja.Promise); ok {
+						go func() {
+							for {
+								switch promise.State() {
+								case goja.PromiseStateFulfilled, goja.PromiseStateRejected:
+									result := promise.Result().Export()
+									switch data := result.(type) {
+									case error:
+										stop <- data
+									default:
+										marshal, _ := json.Marshal(result)
+										zap.L().Debug(fmt.Sprintf("js promise result %s", string(marshal)),
+											zap.Any("result", promise.Result().ExportType()))
+										stop <- nil
+									}
+									return
+								default:
+									time.Sleep(time.Millisecond * 5)
+								}
+							}
+						}()
+					}
+				}
 			})
-			stop <- struct{}{}
-			close(stop)
-			<-shutdown
-			if count != 0 {
-				err = errors.Join(context.DeadlineExceeded, err)
-			}
-			return debug.Flush(err)
+			resultErr := <-stop
+			return debug.Flush(resultErr)
 		}, nil
 	}, nil
 }
 
-func newRegistry(ctx core.FilterContext) *require.Registry {
+func newRegistry(ctx core.FilterContext, printer console.Printer) *require.Registry {
 	registry := require.NewRegistry(
 		require.WithLoader(func(path string) ([]byte, error) {
 			return ctx.PageVFS.Read(ctx, path)
@@ -116,6 +143,8 @@ func newRegistry(ctx core.FilterContext) *require.Registry {
 		require.WithPathResolver(func(base, path string) string {
 			return filepath.Join(base, filepath.FromSlash(path))
 		}))
+	registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(printer))
+
 	return registry
 }
 

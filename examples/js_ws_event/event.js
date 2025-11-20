@@ -1,4 +1,4 @@
-const name = (await request.getQuery("name"))?.trim();
+const name = (request.getQuery("name"))?.trim();
 
 if (!name) {
     throw new Error(`Missing or empty name parameter`);
@@ -6,23 +6,26 @@ if (!name) {
 
 const ws = websocket();
 
-try {
-    // 事件处理
-    event.subscribe("messages").on((msg) => {
-        ws.writeText(msg);
-    });
+async function eventPull() {
+    while (true) {
+        const data  = await event.pull('messages')
+        ws.writeText(data);
+    }
+}
 
-    // 主循环
-    for await (const data of ws.readText()) {
+async function messagePull() {
+    while (true) {
+        const data  = await ws.readText()
         if (data === "exit") break;
-
         if (data?.trim()) {
             await event.put("messages", JSON.stringify({
-                name,
+                name:name,
                 data: data.trim()
             }));
         }
     }
-} finally {
-    ws.close();
 }
+
+(async () => {
+    await Promise.all(eventPull(), messagePull())
+})()

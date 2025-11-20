@@ -51,7 +51,9 @@ func NextCallWrapper(call FilterCall, parentCall NextCall, stack Filter) NextCal
 	return func(ctx FilterContext, writer http.ResponseWriter, request *http.Request) error {
 		zap.L().Debug(fmt.Sprintf("call filter(%s) before", stack.Type), zap.Any("filter", stack))
 		err := call(ctx, writer, request, parentCall)
-		zap.L().Debug(fmt.Sprintf("call filter(%s) after", stack.Type), zap.Any("filter", stack), zap.Error(err))
+		zap.L().Debug(fmt.Sprintf("call filter(%s) after", stack.Type),
+			zap.Any("filter", stack),
+			zap.Error(err))
 		return err
 	}
 }
