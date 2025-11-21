@@ -12,11 +12,15 @@ async function eventPull() {
         await ws.writeText(data);
     }
 }
-
 async function messagePull() {
     while (true) {
         const data  = await ws.readText()
-        if (data === "exit") break;
+        if (data === "exit")
+            await event.put("messages", JSON.stringify({
+                name:name,
+                data: name+' 已断开连接'
+            }));
+            break;
         if (data?.trim()) {
             await event.put("messages", JSON.stringify({
                 name:name,
@@ -27,5 +31,5 @@ async function messagePull() {
 }
 
 (async () => {
-    await Promise.all([eventPull(), messagePull()])
+    await Promise.any([eventPull(), messagePull()])
 })()

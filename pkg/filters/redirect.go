@@ -15,7 +15,16 @@ import (
 
 var portExp = regexp.MustCompile(`:\d+$`)
 
-func FilterInstRedirect(_ core.Params) (core.FilterInstance, error) {
+func FilterInstRedirect(g core.Params) (core.FilterInstance, error) {
+	var global struct {
+		Scheme string `json:"scheme"`
+	}
+	if err := g.Unmarshal(&global); err != nil {
+		return nil, err
+	}
+	if global.Scheme == "" {
+		global.Scheme = "https"
+	}
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
 			Targets []string `json:"targets"`
@@ -42,12 +51,11 @@ func FilterInstRedirect(_ core.Params) (core.FilterInstance, error) {
 				if strings.HasSuffix(path, "/index.html") || path == "index.html" {
 					path = strings.TrimSuffix(path, "index.html")
 				}
-				target, err := url.Parse(fmt.Sprintf("https://%s/%s", param.Targets[0], path))
+				target, err := url.Parse(fmt.Sprintf("%s://%s/%s", global.Scheme, param.Targets[0], path))
 				if err != nil {
 					return err
 				}
 				target.RawQuery = request.URL.RawQuery
-
 				http.Redirect(writer, request, target.String(), param.Code)
 				return nil
 			}
