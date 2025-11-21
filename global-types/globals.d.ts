@@ -16,7 +16,7 @@ declare global {
         write(mType: number, data: string | Uint8Array): Promise<void>;
     }
 
-    function websocket(): Promise<WebSocketConnection>;
+    function websocket(): WebSocketConnection;
 
     // Event 相关类型
     interface EventSystem {
@@ -24,7 +24,6 @@ declare global {
         put(key: string, value: string): Promise<void>;
     }
 
-    // @ts-ignore
     const event: EventSystem;
 
     // Request 相关类型
@@ -118,7 +117,6 @@ declare global {
         debug(...args: any[]): void;
     }
 
-    // @ts-ignore
     const console: Console;
 }
 
