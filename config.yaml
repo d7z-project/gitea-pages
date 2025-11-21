@@ -6,6 +6,9 @@ domain: example.com
 database:
   # 持久化存储配置
   url: "memory://"
+  # 事件传递配置
+event:
+  url: "memory://"
 auth:
   type: gitea
   server: https://gitea.com
@@ -29,12 +32,3 @@ page:
   404: /path/to/html.gotmpl
   # 默认 500 页面模板
   500: /path/to/html.gotmpl
-
-# 渲染器配置
-render:
-  enable: false
-# 反向代理配置
-proxy:
-  enable: false
-# 静态资源路径,可供任意网站使用 /.well-known/page-server/ 路径拉取文件
-static: /path/to/dir/

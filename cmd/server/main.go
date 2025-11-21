@@ -70,6 +70,9 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer event.Close()
+	if config.Filters == nil {
+		config.Filters = map[string]map[string]any{}
+	}
 	pageServer, err := pkg.NewPageServer(
 		http.DefaultClient,
 		backend,

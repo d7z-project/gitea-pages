@@ -150,19 +150,7 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*
 }
 
 func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent, vfs *PageVFS) error {
-	alias := make([]string, 0)
-	defer func(alias *[]string) {
-		meta.Alias = *alias
-		direct := *alias
-		if len(direct) > 0 {
-			meta.Filters = append(meta.Filters, Filter{
-				Path: "**",
-				Type: "redirect",
-				Params: map[string]any{
-					"targets": direct,
-				},
-			})
-		}
+	defer func() {
 		meta.Filters = append(meta.Filters, Filter{
 			Path: "**",
 			Type: "direct",
@@ -170,7 +158,8 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 				"prefix": "",
 			},
 		})
-	}(&alias)
+	}()
+	alias := make([]string, 0)
 	cname, err := vfs.ReadString(ctx, "CNAME")
 	if cname != "" && err == nil {
 		if al, ok := s.aliasCheck(cname); ok {
@@ -201,7 +190,16 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 			return fmt.Errorf("invalid alias %s", item)
 		}
 	}
-
+	if len(alias) > 0 {
+		meta.Filters = append(meta.Filters, Filter{
+			Path: "**",
+			Type: "redirect",
+			Params: map[string]any{
+				"targets": alias,
+			},
+		})
+	}
+	meta.Alias = alias
 	// 处理自定义路由
 	for _, r := range cfg.Routes {
 		for _, item := range strings.Split(r.Path, ",") {

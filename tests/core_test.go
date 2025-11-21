@@ -26,15 +26,15 @@ func Test_get_alias(t *testing.T) {
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 alias:
-  - www.example.org
+  - gopkg.d7z.net
 `)
-	_, resp, _ := server.OpenFile("https://www.example.org")
+	_, resp, _ := server.OpenFile("https://gopkg.d7z.net")
 	assert.Equal(t, 404, resp.StatusCode)
 
 	_, resp, _ = server.OpenFile("https://org1.example.com/repo1/")
 	assert.Equal(t, 302, resp.StatusCode)
-	assert.Equal(t, "https://www.example.org/", resp.Header.Get("Location"))
-	data, _, err := server.OpenFile("https://www.example.org")
+	assert.Equal(t, "https://gopkg.d7z.net/", resp.Header.Get("Location"))
+	data, _, err := server.OpenFile("https://gopkg.d7z.net")
 	assert.NoError(t, err)
 	assert.Equal(t, "hello world", string(data))
 
@@ -42,11 +42,11 @@ alias:
 alias:
   - zzz.example.top
 `)
-	_, resp, _ = server.OpenFile("https://www.example.org")
+	_, resp, _ = server.OpenFile("https://gopkg.d7z.net")
 	assert.Equal(t, 302, resp.StatusCode)
 	assert.Equal(t, "https://zzz.example.top/", resp.Header.Get("Location"))
 
-	_, resp, _ = server.OpenFile("https://www.example.org")
+	_, resp, _ = server.OpenFile("https://gopkg.d7z.net")
 	assert.Equal(t, 404, resp.StatusCode)
 
 	_, resp, _ = server.OpenFile("https://org1.example.com/repo1/")
