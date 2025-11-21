@@ -1,5 +1,6 @@
 // goja.d.ts
 
+
 declare global {
     // WebSocket 相关类型
     interface WebSocketConnection {
@@ -29,7 +30,7 @@ declare global {
     // Request 相关类型
     interface RequestObject {
         method: string;
-        url: URL;
+        url: string;
         rawPath: string;
         host: string;
         remoteAddr: string;
@@ -93,17 +94,17 @@ declare global {
     }
 
     interface KVOps {
-        get(key: string): Promise<string | null>;
-        set(key: string, value: string): Promise<void>;
-        delete(key: string): Promise<boolean>;
-        putIfNotExists(key: string, value: string): Promise<boolean>;
-        compareAndSwap(key: string, oldValue: string, newValue: string): Promise<boolean>;
-        list(limit?: number, cursor?: string): Promise<KVListResult>;
+        get(key: string): string | null;
+        set(key: string, value: string): void;
+        delete(key: string): boolean;
+        putIfNotExists(key: string, value: string): boolean;
+        compareAndSwap(key: string, oldValue: string, newValue: string): boolean;
+        list(limit?: number, cursor?: string): KVListResult;
     }
 
     interface KVSystem {
-        repo(group: string): Promise<KVOps>;
-        org(group: string): Promise<KVOps>;
+        repo(group: string): KVOps;
+        org(group: string): KVOps;
     }
 
     const kv: KVSystem;

@@ -1,7 +1,7 @@
-var db = kv.repo("self");
-if(request.path == "put"){
+const db = kv.repo("self");
+if(request.path === "put"){
     data = db.get('key')
-    if(data == undefined){
+    if(data == null){
         db.set('key','0')
     }else {
         db.set('key',(parseInt(data)+1).toString())
@@ -9,11 +9,11 @@ if(request.path == "put"){
 }
 response.write("当前存储的数值为 " + db.get('key'))
 
-var test = kv.repo("test");
+const test = kv.repo("test");
 for (let i = 0; i < 500; i++) {
     test.set("key" + i,"value" + i);
 }
-var list = test.list()
+const list = test.list();
 console.log(list.keys.length)
 console.log(list.cursor)
 console.log(list.hasNext)

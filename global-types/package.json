@@ -2,18 +2,9 @@
   "name": "@d7z-project/gitea-pages",
   "version": "0.0.1",
   "types": "globals.d.ts",
-  "scripts": {
-    "test": "tsc --noEmit"
-  },
-  "devDependencies": {
-    "typescript": "next"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/d7z-project/gitea-pages.git"
   },
-  "private": false,
-  "dependencies": {
-    "@dop251/types-goja_nodejs-url": "^0.0.0-20251015174255-5e94316bedaf"
-  }
+  "private": false
 }

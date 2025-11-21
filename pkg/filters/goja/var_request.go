@@ -34,7 +34,7 @@ func RequestInject(ctx core.FilterContext, jsCtx *goja.Runtime, req *http.Reques
 	}
 	return jsCtx.GlobalObject().Set("request", map[string]any{
 		"method":      req.Method,
-		"url":         url,
+		"url":         url.String(),
 		"rawPath":     req.URL.Path,
 		"host":        req.Host,
 		"remoteAddr":  req.RemoteAddr,
