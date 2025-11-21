@@ -1,35 +1,22 @@
-const name = (request.getQuery("name"))?.trim();
-
-if (!name) {
-    throw new Error(`Missing or empty name parameter`);
-}
+const name = request.getQuery("name")?.trim();
+if (!name) throw new Error('Missing or empty name parameter');
 
 const ws = websocket();
 
-async function eventPull() {
+const eventPull = async () => {
+    while (true) await ws.writeText(await event.load('messages'));
+};
+
+const messagePull = async () => {
     while (true) {
-        const data  = await event.load('messages')
-        await ws.writeText(data);
-    }
-}
-async function messagePull() {
-    while (true) {
-        const data  = await ws.readText()
-        if (data === "exit")
-            await event.put("messages", JSON.stringify({
-                name:name,
-                data: name+' 已断开连接'
-            }));
-            break;
+        const data = await ws.readText();
         if (data?.trim()) {
             await event.put("messages", JSON.stringify({
-                name:name,
-                data: data.trim()
+                name: name,
+                data: data === "exit" ? `${name} 已断开连接` : data.trim()
             }));
         }
+        if (data === "exit") break;
     }
-}
-
-(async () => {
-    await Promise.any([eventPull(), messagePull()])
-})()
+};
+(async () => await Promise.any([eventPull(), messagePull()]))();
