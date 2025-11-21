@@ -27,7 +27,7 @@ dist/gitea-pages-$(GOOS)-$(GOARCH).tar.gz:  $(shell find . -type f -name "*.go" 
 	rm -f $(GO_DIST_NAME)
 
 gitea-pages: $(shell find . -type f -name "*.go" ) go.mod go.sum
-	@CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o $@ .
+	@CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o $@ ./cmd/server
 
 .PHONY: debug
 debug: gitea-pages
