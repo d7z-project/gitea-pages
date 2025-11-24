@@ -162,6 +162,7 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 	alias := make([]string, 0)
 	cname, err := vfs.ReadString(ctx, "CNAME")
 	if cname != "" && err == nil {
+		cname = strings.TrimSpace(cname)
 		if al, ok := s.aliasCheck(cname); ok {
 			alias = append(alias, al)
 		} else {
