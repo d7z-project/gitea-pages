@@ -172,6 +172,15 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 	data, err := vfs.ReadString(ctx, ".pages.yaml")
 	if err != nil {
 		zap.L().Debug("failed to read meta data", zap.String("error", err.Error()))
+		if len(alias) > 0 {
+			meta.Filters = append(meta.Filters, Filter{
+				Path: "**",
+				Type: "redirect",
+				Params: map[string]any{
+					"targets": alias,
+				},
+			})
+		}
 		return nil // 配置文件不存在不是错误
 	}
 
