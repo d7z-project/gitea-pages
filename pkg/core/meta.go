@@ -180,6 +180,7 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 					"targets": alias,
 				},
 			})
+			meta.Alias = alias
 		}
 		return nil // 配置文件不存在不是错误
 	}

@@ -83,7 +83,7 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string,
 	result.Owner = owner
 	result.Repo = repo
 	result.Path = strings.Join(path, "/")
-
+	// todo: 优化保存逻辑 ，减少写入
 	if err = p.alias.Bind(ctx, meta.Alias, result.Owner, result.Repo, branch); err != nil {
 		zap.L().Warn("alias binding error.", zap.Error(err))
 		return nil, err
