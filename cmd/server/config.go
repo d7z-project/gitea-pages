@@ -21,8 +21,10 @@ type Config struct {
 	Bind   string `yaml:"bind"`   // HTTP 绑定
 	Domain string `yaml:"domain"` // 基础域名
 
+	// todo: 拆分 alias 和 db
 	Database ConfigDatabase `yaml:"database"` // 配置
-	Event    ConfigEvent    `yaml:"event"`    // 事件传递
+
+	Event ConfigEvent `yaml:"event"` // 事件传递
 
 	Auth ConfigAuth `yaml:"auth"` // 后端认证配置
 
@@ -79,14 +81,6 @@ type ConfigDatabase struct {
 }
 type ConfigEvent struct {
 	URL string `yaml:"url"`
-}
-
-type ConfigProxy struct {
-	Enable bool `yaml:"enable"` // 是否允许反向代理
-}
-
-type ConfigRender struct {
-	Enable bool `yaml:"enable"` // 是否开启渲染器
 }
 
 type ConfigCache struct {

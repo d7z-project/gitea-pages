@@ -55,8 +55,8 @@ func NewPageServer(
 	filterConfig map[string]map[string]any,
 ) (*Server, error) {
 	svcMeta := core.NewServerMeta(client, backend, domain, cacheMeta, cacheMetaTTL)
-	pageMeta := core.NewPageDomain(svcMeta, core.NewDomainAlias(db.Child("config").Child("alias")), domain, defaultBranch)
-	globCache, err := lru.New[string, glob.Glob](256)
+	pageMeta := core.NewPageDomain(svcMeta, core.NewDomainAlias(db.Child("config", "alias")), domain, defaultBranch)
+	globCache, err := lru.New[string, glob.Glob](512)
 	if err != nil {
 		return nil, err
 	}
