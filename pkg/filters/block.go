@@ -2,6 +2,7 @@ package filters
 
 import (
 	"net/http"
+	"os"
 
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
@@ -16,7 +17,7 @@ func FilterInstBlock(_ core.Params) (core.FilterInstance, error) {
 			return nil, err
 		}
 		if param.Code == 0 {
-			param.Code = http.StatusForbidden
+			return nil, os.ErrNotExist
 		}
 		if param.Message == "" {
 			param.Message = http.StatusText(param.Code)

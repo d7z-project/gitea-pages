@@ -12,17 +12,15 @@ import (
 type PageDomain struct {
 	*ServerMeta
 
-	alias         *DomainAlias
 	baseDomain    string
 	defaultBranch string
 }
 
-func NewPageDomain(meta *ServerMeta, alias *DomainAlias, baseDomain, defaultBranch string) *PageDomain {
+func NewPageDomain(meta *ServerMeta, baseDomain, defaultBranch string) *PageDomain {
 	return &PageDomain{
 		baseDomain:    baseDomain,
 		defaultBranch: defaultBranch,
 		ServerMeta:    meta,
-		alias:         alias,
 	}
 }
 
@@ -40,7 +38,7 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path, branch s
 	}
 	pathArr := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	if !strings.HasSuffix(domain, "."+p.baseDomain) {
-		alias, err := p.alias.Query(ctx, domain) // 确定 alias 是否存在内容
+		alias, err := p.Alias.Query(ctx, domain) // 确定 alias 是否存在内容
 		if err != nil {
 			zap.L().Warn("unknown domain", zap.String("base", p.baseDomain), zap.String("domain", domain), zap.Error(err))
 			return nil, os.ErrNotExist
@@ -83,10 +81,6 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo, branch string,
 	result.Owner = owner
 	result.Repo = repo
 	result.Path = strings.Join(path, "/")
-	// todo: 优化保存逻辑 ，减少写入
-	if err = p.alias.Bind(ctx, meta.Alias, result.Owner, result.Repo, branch); err != nil {
-		zap.L().Warn("alias binding error.", zap.Error(err))
-		return nil, err
-	}
+
 	return result, nil
 }

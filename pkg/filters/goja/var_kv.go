@@ -2,7 +2,6 @@ package goja
 
 import (
 	"os"
-	"strings"
 
 	"github.com/dop251/goja"
 	"github.com/pkg/errors"
@@ -12,22 +11,21 @@ import (
 
 func KVInject(ctx core.FilterContext, jsCtx *goja.Runtime) error {
 	return jsCtx.GlobalObject().Set("kv", map[string]interface{}{
-		"repo": func(group string) (goja.Value, error) {
-			return kvResult(ctx.RepoDB)(ctx, jsCtx, group)
+		"repo": func(group ...string) (goja.Value, error) {
+			return kvResult(ctx.RepoDB)(ctx, jsCtx, group...)
 		},
-		"org": func(group string) (goja.Value, error) {
-			return kvResult(ctx.OrgDB)(ctx, jsCtx, group)
+		"org": func(group ...string) (goja.Value, error) {
+			return kvResult(ctx.OrgDB)(ctx, jsCtx, group...)
 		},
 	})
 }
 
-func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group string) (goja.Value, error) {
-	return func(ctx core.FilterContext, jsCtx *goja.Runtime, group string) (goja.Value, error) {
-		group = strings.TrimSpace(group)
-		if group == "" {
+func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group ...string) (goja.Value, error) {
+	return func(ctx core.FilterContext, jsCtx *goja.Runtime, group ...string) (goja.Value, error) {
+		if len(group) == 0 {
 			return goja.Undefined(), errors.New("invalid group")
 		}
-		db := db.Child(group).(kv.CursorPagedKV)
+		db := db.Child(group...).(kv.CursorPagedKV)
 		return jsCtx.ToValue(map[string]interface{}{
 			"get": func(key string) (goja.Value, error) {
 				get, err := db.Get(ctx, key)

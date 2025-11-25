@@ -1,4 +1,4 @@
-// goja.d.ts
+// global.d.ts
 
 
 declare global {
@@ -25,6 +25,7 @@ declare global {
         put(key: string, value: string): Promise<void>;
     }
 
+    // @ts-ignore
     const event: EventSystem;
 
     // Request 相关类型
@@ -103,8 +104,8 @@ declare global {
     }
 
     interface KVSystem {
-        repo(group: string): KVOps;
-        org(group: string): KVOps;
+        repo(...group: string[]): KVOps;
+        org(...group: string[]): KVOps;
     }
 
     const kv: KVSystem;
@@ -118,6 +119,7 @@ declare global {
         debug(...args: any[]): void;
     }
 
+    // @ts-ignore
     const console: Console;
 }
 

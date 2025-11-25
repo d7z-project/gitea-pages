@@ -17,6 +17,7 @@ import (
 )
 
 // todo: 新增超时配置
+
 func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	var global struct {
 		Timeout         time.Duration `json:"timeout"`
@@ -50,7 +51,7 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 
 			debug := NewDebug(global.EnableDebug && param.Debug && request.URL.Query().
 				Get("debug") == "true", request, w)
-			program, err := goja.Compile("main.js", js, false)
+			program, err := goja.Compile(param.Exec, js, false)
 			if err != nil {
 				return debug.Flush(err)
 			}

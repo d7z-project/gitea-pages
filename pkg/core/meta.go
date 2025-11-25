@@ -24,6 +24,7 @@ import (
 type ServerMeta struct {
 	Backend
 	Domain string
+	Alias  *DomainAlias
 
 	client *http.Client
 	cache  *tools.KVCache[PageMetaContent]
@@ -70,10 +71,11 @@ func (m *PageMetaContent) String() string {
 	return string(marshal)
 }
 
-func NewServerMeta(client *http.Client, backend Backend, domain string, cache kv.KV, ttl time.Duration) *ServerMeta {
+func NewServerMeta(client *http.Client, backend Backend, domain string, alias *DomainAlias, cache kv.KV, ttl time.Duration) *ServerMeta {
 	return &ServerMeta{
 		Backend: backend,
 		Domain:  domain,
+		Alias:   alias,
 		client:  client,
 		cache:   tools.NewCache[PageMetaContent](cache, "meta", ttl),
 		locker:  utils.NewLocker(),
@@ -144,7 +146,11 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*
 		_ = s.cache.Store(ctx, key, *rel)
 		return nil, err
 	}
-
+	// todo: 优化保存逻辑 ，减少写入
+	if err = s.Alias.Bind(ctx, rel.Alias, owner, repo, branch); err != nil {
+		zap.L().Warn("alias binding error.", zap.Error(err))
+		return nil, err
+	}
 	_ = s.cache.Store(ctx, key, *rel)
 	return rel, nil
 }

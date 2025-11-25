@@ -23,7 +23,7 @@ func Test_filter_block(t *testing.T) {
 routes:
 - path: "bad.html"
   block:
-   code:
+   code: 403
 `)
 	data, _, err = server.OpenFile("https://org1.example.com/repo1/")
 	assert.NoError(t, err)
@@ -32,5 +32,5 @@ routes:
 	assert.Equal(t, 403, resp.StatusCode)
 	// 默认排除的内容
 	_, resp, _ = server.OpenFile("https://org1.example.com/repo1/.pages.yaml")
-	assert.Equal(t, 403, resp.StatusCode)
+	assert.Equal(t, 404, resp.StatusCode)
 }
