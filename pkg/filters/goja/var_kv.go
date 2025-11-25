@@ -2,6 +2,7 @@ package goja
 
 import (
 	"os"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/pkg/errors"
@@ -37,14 +38,24 @@ func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runt
 				}
 				return jsCtx.ToValue(get), nil
 			},
-			"set": func(key, value string) error {
-				return db.Put(ctx, key, value, kv.TTLKeep)
+			"set": func(key, value string, ttl ...int) error {
+				var t time.Duration
+				t = kv.TTLKeep
+				if len(ttl) > 0 && ttl[0] > 0 {
+					t = time.Duration(ttl[0]) * time.Millisecond
+				}
+				return db.Put(ctx, key, value, t)
 			},
 			"delete": func(key string) (bool, error) {
 				return db.Delete(ctx, key)
 			},
-			"putIfNotExists": func(key, value string) (bool, error) {
-				return db.PutIfNotExists(ctx, key, value, kv.TTLKeep)
+			"putIfNotExists": func(key, value string, ttl ...int) (bool, error) {
+				var t time.Duration
+				t = kv.TTLKeep
+				if len(ttl) > 0 && ttl[0] > 0 {
+					t = time.Duration(ttl[0]) * time.Millisecond
+				}
+				return db.PutIfNotExists(ctx, key, value, t)
 			},
 			"compareAndSwap": func(key, oldValue, newValue string) (bool, error) {
 				return db.CompareAndSwap(ctx, key, oldValue, newValue)
