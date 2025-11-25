@@ -32,24 +32,26 @@ func FilterInstDirect(_ core.Params) (core.FilterInstance, error) {
 				http.Error(writer, "Method not allowed", http.StatusMethodNotAllowed)
 				return nil
 			}
-			var resp *http.Response
-			var path string
-			defaultPath := param.Prefix + strings.TrimSuffix(ctx.Path, "/")
-			for _, p := range []string{defaultPath, defaultPath + "/index.html"} {
-				zap.L().Debug("direct fetch", zap.String("path", p))
-				resp, err = ctx.NativeOpen(request.Context(), p, nil)
-				if err != nil {
-					if resp != nil {
-						resp.Body.Close()
-					}
-					if !errors.Is(err, os.ErrNotExist) {
-						zap.L().Debug("error", zap.Any("error", err))
-						return err
-					}
-					continue
+			path := param.Prefix + strings.TrimSuffix(ctx.Path, "/")
+			zap.L().Debug("direct fetch", zap.String("path", path))
+			resp, err := ctx.NativeOpen(request.Context(), path, nil)
+			if err != nil {
+				if resp != nil {
+					resp.Body.Close()
 				}
-				path = p
-				break
+				if !errors.Is(err, os.ErrNotExist) {
+					zap.L().Debug("error", zap.Any("error", err))
+					return err
+				}
+				exists, e := ctx.Exists(ctx, path+"/index.html")
+				if e != nil {
+					return err
+				}
+				if exists {
+					http.Redirect(writer, request, strings.TrimSuffix(request.URL.Path, "/")+"/", http.StatusFound)
+					return nil
+				}
+				return err
 			}
 			if resp == nil {
 				return os.ErrNotExist

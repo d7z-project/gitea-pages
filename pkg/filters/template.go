@@ -23,9 +23,6 @@ func FilterInstTemplate(_ core.Params) (core.FilterInstance, error) {
 			if err != nil {
 				return err
 			}
-			if err != nil {
-				return err
-			}
 			out := &bytes.Buffer{}
 			parse, err := utils.NewTemplate().Funcs(map[string]any{
 				"load": func(path string) (any, error) {

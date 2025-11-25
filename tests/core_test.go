@@ -94,6 +94,12 @@ func Test_fail_back(t *testing.T) {
 		server.AddFile("org1/org1.example.com/gh-pages/index.html", "hello world 1")
 		server.AddFile("org1/org1.example.com/gh-pages/child/index.html", "hello world 2")
 		server.AddFile("org1/child/gh-pages/no.html", "hello world 3")
+
+		_, resp, err := server.OpenFile("https://org1.example.com/child")
+		assert.NoError(t, err)
+		assert.Equal(t, 302, resp.StatusCode)
+		assert.Equal(t, "/child/", resp.Header.Get("Location"))
+
 		data, _, err := server.OpenFile("https://org1.example.com/child/")
 		assert.NoError(t, err)
 		assert.Equal(t, "hello world 2", string(data))
