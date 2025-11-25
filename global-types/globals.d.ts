@@ -8,12 +8,14 @@ declare global {
         TypeBinaryMessage: number;
 
         readText(): Promise<string>;
+
         read(): Promise<{
             type: number;
             data: Uint8Array;
         }>;
 
         writeText(data: string): Promise<void>;
+
         write(mType: number, data: string | Uint8Array): Promise<void>;
     }
 
@@ -22,6 +24,7 @@ declare global {
     // Event 相关类型
     interface EventSystem {
         load(key: string): Promise<any>;
+
         put(key: string, value: string): Promise<void>;
     }
 
@@ -43,13 +46,21 @@ declare global {
         headers: Record<string, string>;
 
         get(key: string): string | null;
+
         getQuery(key: string): string;
+
         getHeader(name: string): string;
+
         getHeaderNames(): string[];
+
         getHeaders(): Record<string, string>;
+
         getRawHeaderNames(): string[];
+
         hasHeader(name: string): boolean;
+
         readBody(): Uint8Array;
+
         protocol: string;
     }
 
@@ -68,15 +79,21 @@ declare global {
 
     interface ResponseObject {
         setHeader(key: string, value: string): void;
+
         getHeader(key: string): string;
+
         removeHeader(key: string): void;
+
         hasHeader(key: string): boolean;
 
         setStatus(statusCode: number): void;
+
         statusCode(statusCode: number): void;
 
         write(data: string): void;
+
         writeHead(statusCode: number, headers?: Record<string, string>): void;
+
         end(data?: string): void;
 
         redirect(location: string, statusCode?: number): void;
@@ -97,15 +114,21 @@ declare global {
 
     interface KVOps {
         get(key: string): string | null;
-        set(key: string, value: string): void;
+
+        set(key: string, value: string, ttl?: number): void;
+
         delete(key: string): boolean;
-        putIfNotExists(key: string, value: string): boolean;
+
+        putIfNotExists(key: string, value: string, ttl?: number): boolean;
+
         compareAndSwap(key: string, oldValue: string, newValue: string): boolean;
+
         list(limit?: number, cursor?: string): KVListResult;
     }
 
     interface KVSystem {
         repo(...group: string[]): KVOps;
+
         org(...group: string[]): KVOps;
     }
 
@@ -114,9 +137,13 @@ declare global {
     // Console 相关 (假设通过 require 引入)
     interface Console {
         log(...args: any[]): void;
+
         warn(...args: any[]): void;
+
         error(...args: any[]): void;
+
         info(...args: any[]): void;
+
         debug(...args: any[]): void;
     }
 
