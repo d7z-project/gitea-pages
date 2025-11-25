@@ -7,6 +7,7 @@ import (
 
 	"github.com/dop251/goja"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
 func RequestInject(ctx core.FilterContext, jsCtx *goja.Runtime, req *http.Request) error {
@@ -38,6 +39,7 @@ func RequestInject(ctx core.FilterContext, jsCtx *goja.Runtime, req *http.Reques
 		"rawPath":     req.URL.Path,
 		"host":        req.Host,
 		"remoteAddr":  req.RemoteAddr,
+		"remoteIP":    utils.GetRemoteIP(req),
 		"proto":       req.Proto,
 		"httpVersion": req.Proto,
 		"path":        url.Path,

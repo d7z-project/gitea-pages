@@ -35,6 +35,7 @@ declare global {
         rawPath: string;
         host: string;
         remoteAddr: string;
+        remoteIP: string;
         proto: string;
         httpVersion: string;
         path: string;
