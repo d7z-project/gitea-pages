@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -14,7 +13,6 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
-	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/providers"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
@@ -60,13 +58,13 @@ func main() {
 
 	file, _ := os.ReadFile(filepath.Join(path, ".pages.yaml"))
 	if file != nil {
-		var info core.PageConfig
+		var info map[string]interface{}
 		err := yaml.Unmarshal(file, &info)
 		if err != nil {
 			zap.L().Fatal("parse yaml", zap.Error(err))
 		}
-		info.Alias = []string{}
-		marshal, _ := json.Marshal(info)
+		delete(info, "alias")
+		marshal, _ := yaml.Marshal(info)
 		provider.AddOverlay(".pages.yaml", marshal)
 	}
 	memory, err := kv.NewMemory("")

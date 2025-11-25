@@ -32,7 +32,7 @@ func (p *PageConfigRoute) UnmarshalYAML(value *yaml.Node) error {
 		keys = append(keys, k)
 	}
 	if len(keys) != 1 {
-		return errors.New("invalid param")
+		return errors.Errorf("invalid param: %v", keys)
 	}
 	p.Type = keys[0]
 	params := data[p.Type]
