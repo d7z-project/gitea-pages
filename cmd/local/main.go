@@ -2,20 +2,24 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/providers"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/subscribe"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -53,6 +57,18 @@ func main() {
 	provider := providers.NewLocalProvider(map[string][]string{
 		org: {repo},
 	}, path)
+
+	file, _ := os.ReadFile(filepath.Join(path, ".pages.yaml"))
+	if file != nil {
+		var info core.PageConfig
+		err := yaml.Unmarshal(file, &info)
+		if err != nil {
+			zap.L().Fatal("parse yaml", zap.Error(err))
+		}
+		info.Alias = []string{}
+		marshal, _ := json.Marshal(info)
+		provider.AddOverlay(".pages.yaml", marshal)
+	}
 	memory, err := kv.NewMemory("")
 	if err != nil {
 		zap.L().Fatal("failed to init memory provider", zap.Error(err))
@@ -66,7 +82,11 @@ func main() {
 			} else if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
-		}, make(map[string]map[string]any))
+		}, map[string]map[string]any{
+			"redirect": {
+				"scheme": "http",
+			},
+		})
 	if err != nil {
 		zap.L().Fatal("failed to init page", zap.Error(err))
 	}
