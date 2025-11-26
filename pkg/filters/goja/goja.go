@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/buffer"
 	"github.com/dop251/goja_nodejs/console"
 	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/dop251/goja_nodejs/require"
@@ -20,17 +21,13 @@ import (
 
 func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	var global struct {
-		Timeout         time.Duration `json:"timeout"`
-		EnableDebug     bool          `json:"debug"`
-		EnableWebsocket bool          `json:"websocket"`
+		EnableDebug     bool `json:"debug"`
+		EnableWebsocket bool `json:"websocket"`
 	}
 	global.EnableDebug = true
 	global.EnableWebsocket = true
 	if err := gl.Unmarshal(&global); err != nil {
 		return nil, err
-	}
-	if global.Timeout == 0 {
-		global.Timeout = 60 * time.Second
 	}
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
@@ -71,6 +68,10 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 			jsLoop.RunOnLoop(func(vm *goja.Runtime) {
 				err := func() error {
 					url.Enable(vm)
+					buffer.Enable(vm)
+					if err = MetaInject(ctx, vm); err != nil {
+						return err
+					}
 					if err = RequestInject(ctx, vm, request); err != nil {
 						return err
 					}

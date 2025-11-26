@@ -32,7 +32,13 @@ func FilterInstTemplate(_ core.Params) (core.FilterInstance, error) {
 			if err != nil {
 				return err
 			}
-			err = parse.Execute(out, utils.NewTemplateInject(request, nil))
+			err = parse.Execute(out, utils.NewTemplateInject(request, map[string]any{
+				"Meta": map[string]string{
+					"Org":    ctx.Owner,
+					"Repo":   ctx.Repo,
+					"Commit": ctx.CommitID,
+				},
+			}))
 			if err != nil {
 				return err
 			}

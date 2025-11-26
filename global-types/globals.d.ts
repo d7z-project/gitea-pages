@@ -31,6 +31,18 @@ declare global {
     // @ts-ignore
     const event: EventSystem;
 
+    //元数据
+    const meta:Meta;
+
+    interface Meta {
+        // 组织名称
+        org:string;
+        // 仓库名称
+        repo:string;
+        // 提交 id
+        commit:string;
+    }
+
     // Request 相关类型
     interface RequestObject {
         method: string;
