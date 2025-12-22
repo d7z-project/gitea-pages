@@ -2,8 +2,10 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
+	"os"
 
 	"code.gitea.io/sdk/gitea"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
@@ -33,8 +35,11 @@ func NewGitea(httpClient *http.Client, url, token, defaultBranch string) (*Provi
 }
 
 func (g *ProviderGitea) Meta(_ context.Context, owner, repo string) (*core.Metadata, error) {
-	branch, _, err := g.gitea.GetRepoBranch(owner, repo, g.defaultBranch)
+	branch, resp, err := g.gitea.GetRepoBranch(owner, repo, g.defaultBranch)
 	if err != nil {
+		if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return nil, errors.Join(err, os.ErrNotExist)
+		}
 		return nil, err
 	}
 	return &core.Metadata{

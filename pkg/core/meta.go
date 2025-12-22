@@ -16,8 +16,6 @@ import (
 	"gopkg.d7z.net/middleware/tools"
 	"gopkg.in/yaml.v3"
 
-	stdErr "errors"
-
 	"github.com/pkg/errors"
 
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
@@ -109,12 +107,15 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo string) (*PageMeta
 		}
 		return nil, os.ErrNotExist
 	}
-
+	rel := NewEmptyPageMetaContent()
 	info, err := s.Meta(ctx, owner, repo)
 	if err != nil {
-		return nil, stdErr.Join(err, os.ErrNotExist)
+		if errors.Is(err, os.ErrNotExist) {
+			rel.IsPage = false
+			_ = s.cache.Store(ctx, key, *rel)
+		}
+		return nil, err
 	}
-	rel := NewEmptyPageMetaContent()
 	vfs := NewPageVFS(s.Backend, owner, repo, info.ID)
 	rel.CommitID = info.ID
 	rel.LastModified = info.LastModified
