@@ -44,7 +44,6 @@ func NewPageServer(
 	client *http.Client,
 	backend core.Backend,
 	domain string,
-	defaultBranch string,
 	db kv.CursorPagedKV,
 	event subscribe.Subscriber,
 	cacheMeta kv.KV,
@@ -56,7 +55,7 @@ func NewPageServer(
 ) (*Server, error) {
 	alias := core.NewDomainAlias(db.Child("config", "alias"))
 	svcMeta := core.NewServerMeta(client, backend, domain, alias, cacheMeta, cacheMetaTTL)
-	pageMeta := core.NewPageDomain(svcMeta, domain, defaultBranch)
+	pageMeta := core.NewPageDomain(svcMeta, domain)
 	globCache, err := lru.New[string, glob.Glob](512)
 	if err != nil {
 		return nil, err
@@ -106,17 +105,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Request) error {
 	ctx := request.Context()
 	domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
-	meta, err := s.meta.ParseDomainMeta(ctx, domain, request.URL.Path, request.URL.Query().Get("branch"))
+	meta, err := s.meta.ParseDomainMeta(ctx, domain, request.URL.Path)
 	if err != nil {
 		return err
 	}
-
-	cancel, cancelFunc := context.WithCancel(request.Context())
+	writer.Header().Set("X-Page-ID", meta.CommitID)
+	cancelCtx, cancelFunc := context.WithCancel(request.Context())
 	filterCtx := core.FilterContext{
 		PageContent: meta,
-		Context:     cancel,
+		Context:     cancelCtx,
 		PageVFS:     core.NewPageVFS(s.backend, meta.Owner, meta.Repo, meta.CommitID),
-		Cache:       tools.NewTTLCache(s.cacheBlob.Child("filter", meta.Owner, meta.Repo, meta.CommitID), time.Minute),
+		Cache:       tools.NewTTLCache(s.cacheBlob.Child("filter", meta.Owner, meta.Repo, meta.CommitID), s.cacheBlobTTL),
 		OrgDB:       s.db.Child("org", meta.Owner).(kv.CursorPagedKV),
 		RepoDB:      s.db.Child("repo", meta.Owner, meta.Repo).(kv.CursorPagedKV),
 		Event:       s.event.Child("domain", meta.Owner, meta.Repo),

@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,31 +42,10 @@ func (l *LocalProvider) Close() error {
 	return nil
 }
 
-func (l *LocalProvider) Repos(_ context.Context, owner string) (map[string]string, error) {
-	item, ok := l.graph[owner]
-	if !ok {
-		return nil, os.ErrNotExist
-	}
-	result := make(map[string]string)
-	for _, s := range item {
-		result[s] = "gh-pages"
-	}
-	return result, nil
-}
-
-func (l *LocalProvider) Branches(_ context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
-	item, ok := l.graph[owner]
-	if !ok {
-		return nil, os.ErrNotExist
-	}
-	if !slices.Contains(item, repo) {
-		return nil, os.ErrNotExist
-	}
-	return map[string]*core.BranchInfo{
-		"gh-pages": {
-			ID:           "adc83b19e793491b1c6ea0fd8b46cd9f32e592fc",
-			LastModified: time.Now(),
-		},
+func (l *LocalProvider) Meta(_ context.Context, _, _ string) (*core.Metadata, error) {
+	return &core.Metadata{
+		ID:           "localhost",
+		LastModified: time.Now(),
 	}, nil
 }
 

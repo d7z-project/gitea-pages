@@ -38,7 +38,7 @@ func main() {
 		log.Fatalf("fail to load config file: %v", err)
 	}
 
-	gitea, err := providers.NewGitea(http.DefaultClient, config.Auth.Server, config.Auth.Token)
+	gitea, err := providers.NewGitea(http.DefaultClient, config.Auth.Server, config.Auth.Token, config.Page.DefaultBranch)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -52,7 +52,7 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer cacheBlob.Close()
-	backend := providers.NewProviderCache(gitea, cacheMeta, config.Cache.MetaTTL,
+	backend := providers.NewProviderCache(gitea,
 		cacheBlob.Child("backend"), uint64(config.Cache.BlobLimit),
 	)
 	defer backend.Close()
@@ -71,13 +71,12 @@ func main() {
 	}
 	defer event.Close()
 	if config.Filters == nil {
-		config.Filters = map[string]map[string]any{}
+		config.Filters = make(map[string]map[string]any)
 	}
 	pageServer, err := pkg.NewPageServer(
 		http.DefaultClient,
 		backend,
 		config.Domain,
-		config.Page.DefaultBranch,
 		cdb,
 		event,
 		cacheMeta,

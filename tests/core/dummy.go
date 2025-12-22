@@ -30,35 +30,11 @@ func NewDummy() (*ProviderDummy, error) {
 	}, nil
 }
 
-func (p *ProviderDummy) Repos(_ context.Context, owner string) (map[string]string, error) {
-	dir, err := os.ReadDir(filepath.Join(p.BaseDir, owner))
-	if err != nil {
-		return nil, err
-	}
-	repos := make(map[string]string)
-	for _, d := range dir {
-		if d.IsDir() {
-			repos[d.Name()] = "main"
-		}
-	}
-	return repos, nil
-}
-
-func (p *ProviderDummy) Branches(_ context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
-	dir, err := os.ReadDir(filepath.Join(p.BaseDir, owner, repo))
-	if err != nil {
-		return nil, err
-	}
-	branches := make(map[string]*core.BranchInfo)
-	for _, d := range dir {
-		if d.IsDir() {
-			branches[d.Name()] = &core.BranchInfo{
-				ID:           d.Name(),
-				LastModified: time.Time{},
-			}
-		}
-	}
-	return branches, nil
+func (p *ProviderDummy) Meta(_ context.Context, _, _ string) (*core.Metadata, error) {
+	return &core.Metadata{
+		ID:           "gh-pages",
+		LastModified: time.Now(),
+	}, nil
 }
 
 func (p *ProviderDummy) Open(_ context.Context, owner, repo, commit, path string, _ http.Header) (*http.Response, error) {

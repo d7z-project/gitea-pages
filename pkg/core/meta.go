@@ -16,6 +16,8 @@ import (
 	"gopkg.d7z.net/middleware/tools"
 	"gopkg.in/yaml.v3"
 
+	stdErr "errors"
+
 	"github.com/pkg/errors"
 
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
@@ -71,7 +73,14 @@ func (m *PageMetaContent) String() string {
 	return string(marshal)
 }
 
-func NewServerMeta(client *http.Client, backend Backend, domain string, alias *DomainAlias, cache kv.KV, ttl time.Duration) *ServerMeta {
+func NewServerMeta(
+	client *http.Client,
+	backend Backend,
+	domain string,
+	alias *DomainAlias,
+	cache kv.KV,
+	ttl time.Duration,
+) *ServerMeta {
 	return &ServerMeta{
 		Backend: backend,
 		Domain:  domain,
@@ -82,40 +91,14 @@ func NewServerMeta(client *http.Client, backend Backend, domain string, alias *D
 	}
 }
 
-func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*PageMetaContent, error) {
-	repos, err := s.Repos(ctx, owner)
-	if err != nil {
-		return nil, err
-	}
-
-	defBranch := repos[repo]
-	if defBranch == "" {
-		return nil, os.ErrNotExist
-	}
-
-	if branch == "" {
-		branch = defBranch
-	}
-
-	branches, err := s.Branches(ctx, owner, repo)
-	if err != nil {
-		return nil, err
-	}
-
-	info := branches[branch]
-	if info == nil {
-		return nil, os.ErrNotExist
-	}
-
-	key := fmt.Sprintf("%s/%s/%s", owner, repo, branch)
-
+func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
+	key := fmt.Sprintf("%s/%s", owner, repo)
 	if cache, found := s.cache.Load(ctx, key); found {
 		if cache.IsPage {
 			return &cache, nil
 		}
 		return nil, os.ErrNotExist
 	}
-
 	mux := s.locker.Open(key)
 	mux.Lock()
 	defer mux.Unlock()
@@ -127,6 +110,10 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*
 		return nil, os.ErrNotExist
 	}
 
+	info, err := s.Meta(ctx, owner, repo)
+	if err != nil {
+		return nil, stdErr.Join(err, os.ErrNotExist)
+	}
 	rel := NewEmptyPageMetaContent()
 	vfs := NewPageVFS(s.Backend, owner, repo, info.ID)
 	rel.CommitID = info.ID
@@ -147,7 +134,7 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo, branch string) (*
 		return nil, err
 	}
 	// todo: 优化保存逻辑 ，减少写入
-	if err = s.Alias.Bind(ctx, rel.Alias, owner, repo, branch); err != nil {
+	if err = s.Alias.Bind(ctx, rel.Alias, owner, repo); err != nil {
 		zap.L().Warn("alias binding error.", zap.Error(err))
 		return nil, err
 	}

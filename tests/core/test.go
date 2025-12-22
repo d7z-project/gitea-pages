@@ -51,7 +51,6 @@ func NewTestServer(domain string) *TestServer {
 		http.DefaultClient,
 		dummy,
 		domain,
-		"gh-pages",
 		memoryKV,
 		subscribe.NewMemorySubscriber(),
 		memoryKV.Child("cache"),

@@ -4,105 +4,43 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"os"
-
-	"gopkg.d7z.net/gitea-pages/pkg/core"
 
 	"code.gitea.io/sdk/gitea"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
-
-const GiteaMaxCount = 9999
 
 type ProviderGitea struct {
 	BaseURL string
 	Token   string
 
-	gitea  *gitea.Client
-	client *http.Client
+	gitea         *gitea.Client
+	client        *http.Client
+	defaultBranch string
 }
 
-func NewGitea(httpClient *http.Client, url, token string) (*ProviderGitea, error) {
+func NewGitea(httpClient *http.Client, url, token, defaultBranch string) (*ProviderGitea, error) {
 	client, err := gitea.NewClient(url, gitea.SetGiteaVersion(""), gitea.SetToken(token))
 	if err != nil {
 		return nil, err
 	}
 	return &ProviderGitea{
-		BaseURL: url,
-		Token:   token,
-		gitea:   client,
-		client:  httpClient,
+		BaseURL:       url,
+		Token:         token,
+		gitea:         client,
+		client:        httpClient,
+		defaultBranch: defaultBranch,
 	}, nil
 }
 
-func (g *ProviderGitea) Repos(_ context.Context, owner string) (map[string]string, error) {
-	result := make(map[string]string)
-	if repos, resp, err := g.gitea.ListOrgRepos(owner, gitea.ListOrgReposOptions{
-		ListOptions: gitea.ListOptions{
-			PageSize: GiteaMaxCount,
-		},
-	}); err != nil {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
-	} else {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
-		for _, item := range repos {
-			result[item.Name] = item.DefaultBranch
-		}
-		return result, nil
-	}
-	if len(result) == 0 {
-		if repos, resp, err := g.gitea.ListUserRepos(owner, gitea.ListReposOptions{
-			ListOptions: gitea.ListOptions{
-				PageSize: GiteaMaxCount,
-			},
-		}); err != nil {
-			if resp != nil {
-				_ = resp.Body.Close()
-			}
-		} else {
-			if resp != nil {
-				_ = resp.Body.Close()
-			}
-			for _, item := range repos {
-				result[item.Name] = item.DefaultBranch
-			}
-		}
-	}
-	if len(result) == 0 {
-		return nil, os.ErrNotExist
-	}
-	return result, nil
-}
-
-func (g *ProviderGitea) Branches(_ context.Context, owner, repo string) (map[string]*core.BranchInfo, error) {
-	result := make(map[string]*core.BranchInfo)
-	branches, resp, err := g.gitea.ListRepoBranches(owner, repo, gitea.ListRepoBranchesOptions{
-		ListOptions: gitea.ListOptions{
-			PageSize: GiteaMaxCount,
-		},
-	})
+func (g *ProviderGitea) Meta(_ context.Context, owner, repo string) (*core.Metadata, error) {
+	branch, _, err := g.gitea.GetRepoBranch(owner, repo, g.defaultBranch)
 	if err != nil {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
 		return nil, err
 	}
-	if resp != nil {
-		_ = resp.Body.Close()
-	}
-	for _, branch := range branches {
-		result[branch.Name] = &core.BranchInfo{
-			ID:           branch.Commit.ID,
-			LastModified: branch.Commit.Timestamp,
-		}
-	}
-	if len(result) == 0 {
-		return nil, os.ErrNotExist
-	}
-	return result, nil
+	return &core.Metadata{
+		ID:           branch.Commit.ID,
+		LastModified: branch.Commit.Timestamp,
+	}, nil
 }
 
 func (g *ProviderGitea) Open(ctx context.Context, owner, repo, commit, path string, headers http.Header) (*http.Response, error) {

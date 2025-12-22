@@ -10,9 +10,8 @@ import (
 )
 
 type Alias struct {
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Branch string `json:"branch"`
+	Owner string `json:"owner"`
+	Repo  string `json:"repo"`
 }
 
 type DomainAlias struct {
@@ -35,9 +34,9 @@ func (a *DomainAlias) Query(ctx context.Context, domain string) (*Alias, error) 
 	return rel, nil
 }
 
-func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, branch string) error {
+func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo string) error {
 	oldDomains := make([]string, 0)
-	rKey := base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%s/%s/%s", owner, repo, branch)))
+	rKey := base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%s/%s", owner, repo)))
 	if oldStr, err := a.config.Get(ctx, rKey); err == nil {
 		_ = json.Unmarshal([]byte(oldStr), &oldDomains)
 	}
@@ -50,9 +49,8 @@ func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo, b
 		return nil
 	}
 	aliasMeta := &Alias{
-		Owner:  owner,
-		Repo:   repo,
-		Branch: branch,
+		Owner: owner,
+		Repo:  repo,
 	}
 	aliasMetaRaw, _ := json.Marshal(aliasMeta)
 	domainsRaw, _ := json.Marshal(domains)

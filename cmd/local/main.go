@@ -73,7 +73,7 @@ func main() {
 	}
 	subscriber := subscribe.NewMemorySubscriber()
 	server, err := pkg.NewPageServer(http.DefaultClient,
-		provider, domain, "gh-pages", memory, subscriber, memory, 0, &nopCache{}, 0,
+		provider, domain, memory, subscriber, memory, 0, &nopCache{}, 0,
 		func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, "page not found.", http.StatusNotFound)
