@@ -38,7 +38,6 @@ func init() {
 	zap.ReplaceGlobals(logger)
 	dir, _ := os.Getwd()
 	path = dir
-	zap.L().Info("exec workdir", zap.String("path", path))
 	flag.StringVar(&org, "org", org, "org")
 	flag.StringVar(&repo, "repo", repo, "repo")
 	flag.StringVar(&domain, "domain", domain, "domain")
@@ -48,7 +47,7 @@ func init() {
 }
 
 func main() {
-	fmt.Printf("请访问 http://%s%s/", repo, port)
+	fmt.Printf("请访问 http://%s%s/ ,本地路径: %s", repo, port, path)
 	if stat, err := os.Stat(path); err != nil || !stat.IsDir() {
 		zap.L().Fatal("path is not a directory", zap.String("path", path))
 	}

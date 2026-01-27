@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -42,7 +43,14 @@ func (l *LocalProvider) Close() error {
 	return nil
 }
 
-func (l *LocalProvider) Meta(_ context.Context, _, _ string) (*core.Metadata, error) {
+func (l *LocalProvider) Meta(_ context.Context, owner, repo string) (*core.Metadata, error) {
+	if _, ok := l.graph[owner]; !ok {
+		return nil, os.ErrNotExist
+	}
+	if !slices.Contains(l.graph[owner], repo) {
+		return nil, os.ErrNotExist
+	}
+
 	return &core.Metadata{
 		ID:           "localhost",
 		LastModified: time.Now(),
