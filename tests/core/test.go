@@ -48,23 +48,21 @@ func NewTestServer(domain string) *TestServer {
 	})
 	memoryKV, _ := kv.NewMemory("")
 	server, err := pkg.NewPageServer(
-		http.DefaultClient,
 		dummy,
 		domain,
 		memoryKV,
-		subscribe.NewMemorySubscriber(),
-		memoryKV.Child("cache"),
-		0,
-		memoryCache,
-		0,
-		func(w http.ResponseWriter, r *http.Request, err error) {
+		pkg.WithClient(http.DefaultClient),
+		pkg.WithEvent(subscribe.NewMemorySubscriber()),
+		pkg.WithMetaCache(memoryKV.Child("cache"), 0),
+		pkg.WithBlobCache(memoryCache, 0),
+		pkg.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, "page not found.", http.StatusNotFound)
 			} else if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
-		},
-		make(map[string]map[string]any),
+		}),
+		pkg.WithFilterConfig(make(map[string]map[string]any)),
 	)
 	if err != nil {
 		panic(err)

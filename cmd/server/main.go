@@ -74,17 +74,15 @@ func main() {
 		config.Filters = make(map[string]map[string]any)
 	}
 	pageServer, err := pkg.NewPageServer(
-		http.DefaultClient,
 		backend,
 		config.Domain,
 		cdb,
-		event,
-		cacheMeta,
-		config.Cache.MetaTTL,
-		cacheBlob.Child("filter"),
-		config.Cache.BlobTTL,
-		config.ErrorHandler,
-		config.Filters,
+		pkg.WithClient(http.DefaultClient),
+		pkg.WithEvent(event),
+		pkg.WithMetaCache(cacheMeta, config.Cache.MetaTTL),
+		pkg.WithBlobCache(cacheBlob.Child("filter"), config.Cache.BlobTTL),
+		pkg.WithErrorHandler(config.ErrorHandler),
+		pkg.WithFilterConfig(config.Filters),
 	)
 	if err != nil {
 		log.Fatalln(err)

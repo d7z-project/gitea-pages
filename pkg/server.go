@@ -40,27 +40,108 @@ type Server struct {
 	errorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
 
+type serverConfig struct {
+	client       *http.Client
+	event        subscribe.Subscriber
+	cacheMeta    kv.KV
+	cacheMetaTTL time.Duration
+	cacheBlob    cache.Cache
+	cacheBlobTTL time.Duration
+	errorHandler func(w http.ResponseWriter, r *http.Request, err error)
+	filterConfig map[string]map[string]any
+}
+
+type ServerOption func(*serverConfig)
+
+func WithClient(client *http.Client) ServerOption {
+	return func(c *serverConfig) {
+		c.client = client
+	}
+}
+
+func WithEvent(event subscribe.Subscriber) ServerOption {
+	return func(c *serverConfig) {
+		c.event = event
+	}
+}
+
+func WithMetaCache(cache kv.KV, ttl time.Duration) ServerOption {
+	return func(c *serverConfig) {
+		c.cacheMeta = cache
+		c.cacheMetaTTL = ttl
+	}
+}
+
+func WithBlobCache(cache cache.Cache, ttl time.Duration) ServerOption {
+	return func(c *serverConfig) {
+		c.cacheBlob = cache
+		c.cacheBlobTTL = ttl
+	}
+}
+
+func WithErrorHandler(handler func(w http.ResponseWriter, r *http.Request, err error)) ServerOption {
+	return func(c *serverConfig) {
+		c.errorHandler = handler
+	}
+}
+
+func WithFilterConfig(config map[string]map[string]any) ServerOption {
+	return func(c *serverConfig) {
+		c.filterConfig = config
+	}
+}
+
 func NewPageServer(
-	client *http.Client,
 	backend core.Backend,
 	domain string,
 	db kv.CursorPagedKV,
-	event subscribe.Subscriber,
-	cacheMeta kv.KV,
-	cacheMetaTTL time.Duration,
-	cacheBlob cache.Cache,
-	cacheBlobTTL time.Duration,
-	errorHandler func(w http.ResponseWriter, r *http.Request, err error),
-	filterConfig map[string]map[string]any,
+	opts ...ServerOption,
 ) (*Server, error) {
+	cfg := &serverConfig{
+		client:       http.DefaultClient,
+		filterConfig: make(map[string]map[string]any),
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.event == nil {
+		cfg.event = subscribe.NewMemorySubscriber()
+	}
+
+	if cfg.cacheMeta == nil {
+		var err error
+		cfg.cacheMeta, err = kv.NewMemory("")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if cfg.cacheBlob == nil {
+		var err error
+		cfg.cacheBlob, err = cache.NewMemoryCache(cache.MemoryCacheConfig{
+			MaxCapacity: 128,
+			CleanupInt:  time.Minute,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if cfg.errorHandler == nil {
+		cfg.errorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+
 	alias := core.NewDomainAlias(db.Child("config", "alias"))
-	svcMeta := core.NewServerMeta(client, backend, domain, alias, cacheMeta, cacheMetaTTL)
+	svcMeta := core.NewServerMeta(cfg.client, backend, domain, alias, cfg.cacheMeta, cfg.cacheMetaTTL)
 	pageMeta := core.NewPageDomain(svcMeta, domain)
 	globCache, err := lru.New[string, glob.Glob](512)
 	if err != nil {
 		return nil, err
 	}
-	defaultFilters, err := filters.DefaultFilters(filterConfig)
+	defaultFilters, err := filters.DefaultFilters(cfg.filterConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -70,10 +151,10 @@ func NewPageServer(
 		db:           db,
 		globCache:    globCache,
 		filterMgr:    defaultFilters,
-		errorHandler: errorHandler,
-		cacheBlob:    cacheBlob,
-		cacheBlobTTL: cacheBlobTTL,
-		event:        event,
+		errorHandler: cfg.errorHandler,
+		cacheBlob:    cfg.cacheBlob,
+		cacheBlobTTL: cfg.cacheBlobTTL,
+		event:        cfg.event,
 	}, nil
 }
 

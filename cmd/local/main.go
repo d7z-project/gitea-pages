@@ -71,19 +71,25 @@ func main() {
 		zap.L().Fatal("failed to init memory provider", zap.Error(err))
 	}
 	subscriber := subscribe.NewMemorySubscriber()
-	server, err := pkg.NewPageServer(http.DefaultClient,
-		provider, domain, memory, subscriber, memory, 0, &nopCache{}, 0,
-		func(w http.ResponseWriter, r *http.Request, err error) {
+	server, err := pkg.NewPageServer(
+		provider, domain, memory,
+		pkg.WithClient(http.DefaultClient),
+		pkg.WithEvent(subscriber),
+		pkg.WithMetaCache(memory, 0),
+		pkg.WithBlobCache(&nopCache{}, 0),
+		pkg.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {
 				http.Error(w, "page not found.", http.StatusNotFound)
 			} else if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
-		}, map[string]map[string]any{
+		}),
+		pkg.WithFilterConfig(map[string]map[string]any{
 			"redirect": {
 				"scheme": "http",
 			},
-		})
+		}),
+	)
 	if err != nil {
 		zap.L().Fatal("failed to init page", zap.Error(err))
 	}
