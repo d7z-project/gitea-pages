@@ -47,7 +47,7 @@ func init() {
 }
 
 func main() {
-	fmt.Printf("请访问 http://%s%s/ ,本地路径: %s", repo, port, path)
+	fmt.Printf("请访问 http://%s%s/ ,本地路径: %s\n", repo, port, path)
 	if stat, err := os.Stat(path); err != nil || !stat.IsDir() {
 		zap.L().Fatal("path is not a directory", zap.String("path", path))
 	}
