@@ -15,7 +15,9 @@ type PageVFS struct {
 	commitID string
 }
 
-// todo: 限制最大文件加载大小
+// MaxFileLoadSize limits the maximum size of file loaded into memory (10MB)
+const MaxFileLoadSize = 10 * 1024 * 1024
+
 func NewPageVFS(
 	backend Backend,
 	org string,
@@ -69,7 +71,19 @@ func (p *PageVFS) Read(ctx context.Context, path string) ([]byte, error) {
 		return nil, err
 	}
 	defer open.Close()
-	return io.ReadAll(open)
+
+	// Use LimitReader to prevent reading too much data
+	limitReader := io.LimitReader(open, MaxFileLoadSize+1)
+	data, err := io.ReadAll(limitReader)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(data) > MaxFileLoadSize {
+		return nil, &os.PathError{Op: "read", Path: path, Err: os.ErrInvalid} // Or a specific "file too large" error
+	}
+
+	return data, nil
 }
 
 func (p *PageVFS) ReadString(ctx context.Context, path string) (string, error) {

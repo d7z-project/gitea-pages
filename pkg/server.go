@@ -218,6 +218,7 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		if !ok {
 			value, err = glob.Compile(filter.Path)
 			if err != nil {
+				zap.L().Warn("invalid glob pattern", zap.String("pattern", filter.Path), zap.Error(err))
 				continue
 			}
 			s.globCache.Add(filter.Path, value)
@@ -239,9 +240,12 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 	slices.Reverse(activeFiltersCall)
 	slices.Reverse(activeFilters)
 
+	// Build the visual call stack for logging (e.g., A -> B -> C -> B -> A)
 	l := len(filtersRoute)
-	for i := l - 2; i >= 0; i-- {
-		filtersRoute = append(filtersRoute, filtersRoute[i])
+	if l > 1 {
+		for i := l - 2; i >= 0; i-- {
+			filtersRoute = append(filtersRoute, filtersRoute[i])
+		}
 	}
 	zap.L().Debug("active filters", zap.String("filters", strings.Join(filtersRoute, " -> ")))
 
