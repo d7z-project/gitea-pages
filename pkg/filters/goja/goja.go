@@ -84,6 +84,9 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 					if err = EventInject(ctx, vm, jsLoop); err != nil {
 						return err
 					}
+					if err = FetchInject(vm, jsLoop); err != nil {
+						return err
+					}
 					if global.EnableWebsocket {
 						var closer io.Closer
 						closer, err = WebsocketInject(ctx, vm, debug, request, jsLoop)

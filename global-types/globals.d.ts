@@ -161,6 +161,24 @@ declare global {
 
     // @ts-ignore
     const console: Console;
+
+    // Fetch API 相关类型
+    interface FetchResponse {
+        ok: boolean;
+        status: number;
+        statusText: string;
+        headers: Record<string, string>;
+        text(): Promise<string>;
+        json<T = any>(): Promise<T>;
+    }
+
+    interface FetchOptions {
+        method?: string;
+        headers?: Record<string, string>;
+        body?: string;
+    }
+
+    function fetch(url: string, options?: FetchOptions): Promise<FetchResponse>;
 }
 
 export {};

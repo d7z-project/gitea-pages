@@ -3,6 +3,7 @@ package goja
 import (
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/dop251/goja"
@@ -21,6 +22,9 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 		if err != nil {
 			return nil, err
 		}
+		var readMu sync.Mutex
+		var writeMu sync.Mutex
+
 		zap.L().Debug("websocket upgrader created")
 		closers.AddCloser(conn.Close)
 		go func() {
@@ -61,7 +65,9 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 							})
 						}
 					}()
+					readMu.Lock()
 					_, p, err := conn.ReadMessage()
+					readMu.Unlock()
 					loop.RunOnLoop(func(runtime *goja.Runtime) {
 						if err != nil {
 							_ = reject(runtime.ToValue(err))
@@ -91,7 +97,9 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 							})
 						}
 					}()
+					readMu.Lock()
 					messageType, p, err := conn.ReadMessage()
+					readMu.Unlock()
 					loop.RunOnLoop(func(runtime *goja.Runtime) {
 						if err != nil {
 							_ = reject(runtime.ToValue(err))
@@ -124,7 +132,9 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 							})
 						}
 					}()
+					writeMu.Lock()
 					err := conn.WriteMessage(websocket.TextMessage, []byte(data))
+					writeMu.Unlock()
 					loop.RunOnLoop(func(runtime *goja.Runtime) {
 						if err != nil {
 							_ = reject(runtime.ToValue(err))
@@ -171,7 +181,9 @@ func WebsocketInject(ctx core.FilterContext, jsCtx *goja.Runtime, w http.Respons
 						return
 					}
 
+					writeMu.Lock()
 					err := conn.WriteMessage(mType, dataRaw)
+					writeMu.Unlock()
 					loop.RunOnLoop(func(runtime *goja.Runtime) {
 						if err != nil {
 							_ = reject(runtime.ToValue(err))

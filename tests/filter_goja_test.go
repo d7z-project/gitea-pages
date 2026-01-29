@@ -2,6 +2,7 @@ package tests
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -85,6 +86,37 @@ routes:
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/fetch")
 	assert.NoError(t, err)
 	assert.Equal(t, "abc", string(data))
+}
+
+func Test_GoJa_Fetch(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Test", "test-header")
+		_, _ = w.Write([]byte("fetched-content"))
+	}))
+	defer ts.Close()
+
+	server := core.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+(async()=>{
+    const res = await fetch('%s')
+    response.setHeader('X-Fetched-Header', res.headers['X-Test'] || res.headers['x-test'])
+    const text = await res.text()
+    response.write(text)
+})()
+`, ts.URL)
+	server.AddFile("org1/repo1/gh-pages/index.html", "dummy")
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "**"
+  js:
+    exec: "index.js"
+`)
+
+	data, resp, err := server.OpenFile("https://org1.example.com/repo1/fetch")
+	assert.NoError(t, err)
+	assert.Equal(t, "fetched-content", string(data))
+	assert.Equal(t, "test-header", resp.Header.Get("X-Fetched-Header"))
 }
 
 func Benchmark_GoJa_Request(b *testing.B) {
