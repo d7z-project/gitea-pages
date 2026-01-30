@@ -19,8 +19,8 @@ type FilterContext struct {
 	*PageContent
 	*PageVFS
 	Cache  *tools.TTLCache
-	OrgDB  kv.CursorPagedKV
-	RepoDB kv.CursorPagedKV
+	OrgDB  kv.KV
+	RepoDB kv.KV
 	Event  subscribe.Subscriber
 
 	Kill func()

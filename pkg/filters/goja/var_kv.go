@@ -21,12 +21,12 @@ func KVInject(ctx core.FilterContext, jsCtx *goja.Runtime) error {
 	})
 }
 
-func kvResult(db kv.CursorPagedKV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group ...string) (goja.Value, error) {
+func kvResult(db kv.KV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group ...string) (goja.Value, error) {
 	return func(ctx core.FilterContext, jsCtx *goja.Runtime, group ...string) (goja.Value, error) {
 		if len(group) == 0 {
 			return goja.Undefined(), errors.New("invalid group")
 		}
-		db := db.Child(group...).(kv.CursorPagedKV)
+		db := db.Child(group...)
 		return jsCtx.ToValue(map[string]interface{}{
 			"get": func(key string) (goja.Value, error) {
 				get, err := db.Get(ctx, key)

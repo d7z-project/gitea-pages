@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -61,10 +60,6 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer db.Close()
-	cdb, ok := db.(kv.RawKV).Raw().(kv.CursorPagedKV)
-	if !ok {
-		log.Fatalln(errors.New("database not support cursor"))
-	}
 	event, err := subscribe.NewSubscriberFromURL(config.Event.URL)
 	if err != nil {
 		log.Fatalln(err)
@@ -76,7 +71,7 @@ func main() {
 	pageServer, err := pkg.NewPageServer(
 		backend,
 		config.Domain,
-		cdb,
+		db,
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(event),
 		pkg.WithMetaCache(cacheMeta, config.Cache.MetaTTL),

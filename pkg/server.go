@@ -28,7 +28,7 @@ var portExp = regexp.MustCompile(`:\d+$`)
 type Server struct {
 	backend   core.Backend
 	meta      *core.PageDomain
-	db        kv.CursorPagedKV
+	db        kv.KV
 	filterMgr map[string]core.FilterInstance
 
 	globCache *lru.Cache[string, glob.Glob]
@@ -94,7 +94,7 @@ func WithFilterConfig(config map[string]map[string]any) ServerOption {
 func NewPageServer(
 	backend core.Backend,
 	domain string,
-	db kv.CursorPagedKV,
+	db kv.KV,
 	opts ...ServerOption,
 ) (*Server, error) {
 	cfg := &serverConfig{
@@ -197,8 +197,8 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		Context:     cancelCtx,
 		PageVFS:     core.NewPageVFS(s.backend, meta.Owner, meta.Repo, meta.CommitID),
 		Cache:       tools.NewTTLCache(s.cacheBlob.Child("filter", meta.Owner, meta.Repo, meta.CommitID), s.cacheBlobTTL),
-		OrgDB:       s.db.Child("org", meta.Owner).(kv.CursorPagedKV),
-		RepoDB:      s.db.Child("repo", meta.Owner, meta.Repo).(kv.CursorPagedKV),
+		OrgDB:       s.db.Child("org", meta.Owner),
+		RepoDB:      s.db.Child("repo", meta.Owner, meta.Repo),
 		Event:       s.event.Child("domain", meta.Owner, meta.Repo),
 
 		Kill: cancelFunc,
