@@ -35,16 +35,50 @@ func (a *DomainAlias) Query(ctx context.Context, domain string) (*Alias, error) 
 }
 
 func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo string) error {
-	oldDomains := make([]string, 0)
 	rKey := base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%s/%s", owner, repo)))
-	if oldStr, err := a.config.Get(ctx, rKey); err == nil {
-		_ = json.Unmarshal([]byte(oldStr), &oldDomains)
-	}
-	for _, oldDomain := range oldDomains {
-		if err := a.Unbind(ctx, oldDomain); err != nil {
+
+	var oldDomains []string
+	domainsRaw, _ := json.Marshal(domains)
+
+	for {
+		success, err := a.config.PutIfNotExists(ctx, rKey, string(domainsRaw), kv.TTLKeep)
+		if err != nil {
 			return err
 		}
+		if success {
+			oldDomains = []string{}
+			break
+		}
+
+		oldStr, err := a.config.Get(ctx, rKey)
+		if err != nil {
+			continue
+		}
+
+		if err = json.Unmarshal([]byte(oldStr), &oldDomains); err != nil {
+			oldDomains = []string{}
+		}
+
+		success, err = a.config.CompareAndSwap(ctx, rKey, oldStr, string(domainsRaw))
+		if err != nil {
+			return err
+		}
+		if success {
+			break
+		}
 	}
+
+	newDomainsMap := make(map[string]bool)
+	for _, d := range domains {
+		newDomainsMap[d] = true
+	}
+
+	for _, oldDomain := range oldDomains {
+		if !newDomainsMap[oldDomain] {
+			_ = a.Unbind(ctx, oldDomain)
+		}
+	}
+
 	if len(domains) == 0 {
 		return nil
 	}
@@ -53,12 +87,8 @@ func (a *DomainAlias) Bind(ctx context.Context, domains []string, owner, repo st
 		Repo:  repo,
 	}
 	aliasMetaRaw, _ := json.Marshal(aliasMeta)
-	domainsRaw, _ := json.Marshal(domains)
-	_ = a.config.Put(ctx, rKey, string(domainsRaw), kv.TTLKeep)
 	for _, domain := range domains {
-		if err := a.config.Put(ctx, domain, string(aliasMetaRaw), kv.TTLKeep); err != nil {
-			return err
-		}
+		_ = a.config.Put(ctx, domain, string(aliasMetaRaw), kv.TTLKeep)
 	}
 	return nil
 }

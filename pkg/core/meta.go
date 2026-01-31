@@ -201,7 +201,7 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 	cname, err := vfs.ReadString(ctx, "CNAME")
 	if cname != "" && err == nil {
 		cname = strings.TrimSpace(cname)
-		if al, ok := s.aliasCheck(cname); ok {
+		if al, ok := s.AliasCheck(cname); ok {
 			alias = append(alias, al)
 		} else {
 			return fmt.Errorf("invalid alias %s", cname)
@@ -233,7 +233,7 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 		if item == "" {
 			continue
 		}
-		if al, ok := s.aliasCheck(item); ok {
+		if al, ok := s.AliasCheck(item); ok {
 			alias = append(alias, al)
 		} else {
 			return fmt.Errorf("invalid alias %s", item)
@@ -269,9 +269,9 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 	return nil
 }
 
-var regexpHostname = regexp.MustCompile(`^(?:([a-z0-9-]+|\*)\.)?([a-z0-9-]{1,61})\.([a-z0-9]{2,7})$`)
+var regexpHostname = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,18}$`)
 
-func (s *ServerMeta) aliasCheck(cname string) (string, bool) {
+func (s *ServerMeta) AliasCheck(cname string) (string, bool) {
 	cname = strings.TrimSpace(cname)
 	if !regexpHostname.MatchString(cname) {
 		return "", false

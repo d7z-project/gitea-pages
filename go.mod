@@ -15,7 +15,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.1
-	gopkg.d7z.net/middleware v0.0.0-20260131134426-cea18952b028
+	gopkg.d7z.net/middleware v0.0.0-20260131162733-c737c5341584
 	gopkg.in/yaml.v3 v3.0.1
 )
 

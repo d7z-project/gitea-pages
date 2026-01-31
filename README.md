@@ -18,6 +18,9 @@ This project focuses on providing a high-performance, secure, and extensible Git
 - [x] **Programmable**: Extensible logic using JavaScript (Goja).
 - [x] **Reverse Proxy**: Support for proxying requests to backends.
 
+> [!WARNING]
+> **Security Note**: This project is designed for self-hosted/private environments. It does not perform domain ownership verification for CNAME aliases. In a multi-user environment, users could potentially "hijack" domains by claiming them in their `.pages.yaml`.
+
 
 ## Get Started
 

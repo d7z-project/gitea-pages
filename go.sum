@@ -168,6 +168,8 @@ gopkg.d7z.net/middleware v0.0.0-20260131122058-3c200930af2d h1:nNXZgc02tab2+WuAn
 gopkg.d7z.net/middleware v0.0.0-20260131122058-3c200930af2d/go.mod h1:TDqvtfgaXzOvm9gbG8t5FF0AKSKve8pcE9uBVix+1pU=
 gopkg.d7z.net/middleware v0.0.0-20260131134426-cea18952b028 h1:BPm7q2ys8IPHAQe01HBSkYH+2itXuP6DvVPZlg45tM4=
 gopkg.d7z.net/middleware v0.0.0-20260131134426-cea18952b028/go.mod h1:TDqvtfgaXzOvm9gbG8t5FF0AKSKve8pcE9uBVix+1pU=
+gopkg.d7z.net/middleware v0.0.0-20260131162733-c737c5341584 h1:Bdtk/GJQELmfVeoAEyCAUUzR90ZOx6qGA/M3Yjf09Ao=
+gopkg.d7z.net/middleware v0.0.0-20260131162733-c737c5341584/go.mod h1:TDqvtfgaXzOvm9gbG8t5FF0AKSKve8pcE9uBVix+1pU=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
