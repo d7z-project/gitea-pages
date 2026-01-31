@@ -64,7 +64,7 @@ func kvResult(db kv.KV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group 
 				if limit <= 0 {
 					limit = 100
 				}
-				list, err := db.CursorList(ctx, &kv.ListOptions{
+				list, err := db.ListCurrentCursor(ctx, &kv.ListOptions{
 					Limit:  limit,
 					Cursor: cursor,
 				})
