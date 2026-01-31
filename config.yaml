@@ -6,7 +6,7 @@ domain: example.com
 database:
   # 持久化存储配置
   url: "memory://"
-  # 事件传递配置
+# 事件传递配置
 event:
   url: "memory://"
 auth:
@@ -19,12 +19,23 @@ cache:
   meta: "memory://"
   # 元数据缓存时长
   meta_ttl: 1m
+  # 元数据刷新间隔
+  meta_refresh: 30s
+  # 元数据并发刷新限制
+  meta_refresh_concurrent: 16
+
   # 响应数据缓存
   blob: "memory://"
   # 响应数据缓存时长
   blob_ttl: 1m
   # 最大单个响应数据缓存大小
   blob_limit: 10MB
+  # 并发缓存写入限制
+  blob_concurrent: 16
+  # 404 响应缓存时长
+  blob_not_found_ttl: 1h
+  # 并发后端请求限制
+  backend_concurrent: 64
 page:
   # 默认页面分支
   default_branch: gh-pages
