@@ -67,7 +67,7 @@ func WithEvent(event subscribe.Subscriber) ServerOption {
 	}
 }
 
-func WithMetaCache(cache kv.KV, ttl time.Duration, refresh time.Duration, refreshConcurrent int) ServerOption {
+func WithMetaCache(cache kv.KV, ttl, refresh time.Duration, refreshConcurrent int) ServerOption {
 	return func(c *serverConfig) {
 		c.cacheMeta = cache
 		c.cacheMetaTTL = ttl

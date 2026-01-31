@@ -133,9 +133,14 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 				}
 				if result != nil {
 					if _, ok := result.Export().(*goja.Promise); ok {
-						vm.Set("__internal_resolve", func(goja.Value) { stop <- nil })
-						vm.Set("__internal_reject", func(reason goja.Value) { stop <- errors.New(reason.String()) })
-						vm.Set("__internal_promise", result)
+						if err := errors.Join(
+							vm.Set("__internal_resolve", func(goja.Value) { stop <- nil }),
+							vm.Set("__internal_reject", func(reason goja.Value) { stop <- errors.New(reason.String()) }),
+							vm.Set("__internal_promise", result),
+						); err != nil {
+							stop <- err
+							return
+						}
 						_, err := vm.RunString(`__internal_promise.then(__internal_resolve).catch(__internal_reject)`)
 						if err != nil {
 							stop <- err
