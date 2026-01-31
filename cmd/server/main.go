@@ -52,7 +52,10 @@ func main() {
 	}
 	defer cacheBlob.Close()
 	backend := providers.NewProviderCache(gitea,
-		cacheBlob.Child("backend"), uint64(config.Cache.BlobLimit),
+		cacheBlob.Child("backend"),
+		uint64(config.Cache.BlobLimit),
+		config.Cache.BlobConcurrent,
+		config.Cache.BackendConcurrent,
 	)
 	defer backend.Close()
 	db, err := kv.NewKVFromURL(config.Database.URL)
@@ -74,7 +77,7 @@ func main() {
 		db,
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(event),
-		pkg.WithMetaCache(cacheMeta, config.Cache.MetaTTL),
+		pkg.WithMetaCache(cacheMeta, config.Cache.MetaTTL, config.Cache.MetaRefresh),
 		pkg.WithBlobCache(cacheBlob.Child("filter"), config.Cache.BlobTTL),
 		pkg.WithErrorHandler(config.ErrorHandler),
 		pkg.WithFilterConfig(config.Filters),

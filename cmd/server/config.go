@@ -84,12 +84,15 @@ type ConfigEvent struct {
 }
 
 type ConfigCache struct {
-	Meta    string        `yaml:"meta"`     // 元数据缓存
-	MetaTTL time.Duration `yaml:"meta_ttl"` // 缓存时间
+	Meta        string        `yaml:"meta"`         // 元数据缓存
+	MetaTTL     time.Duration `yaml:"meta_ttl"`     // 缓存时间
+	MetaRefresh time.Duration `yaml:"meta_refresh"` // 刷新时间
 
-	Blob      string           `yaml:"blob"`       // 缓存归档位置
-	BlobTTL   time.Duration    `yaml:"blob_ttl"`   // 缓存归档位置
-	BlobLimit units.Base2Bytes `yaml:"blob_limit"` // 单个文件最大大小
+	Blob              string           `yaml:"blob"`               // 缓存归档位置
+	BlobTTL           time.Duration    `yaml:"blob_ttl"`           // 缓存归档位置
+	BlobLimit         units.Base2Bytes `yaml:"blob_limit"`         // 单个文件最大大小
+	BlobConcurrent    uint64           `yaml:"blob_concurrent"`    // 并发缓存限制
+	BackendConcurrent uint64           `yaml:"backend_concurrent"` // 并发后端请求限制
 }
 
 func LoadConfig(path string) (*Config, error) {

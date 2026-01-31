@@ -75,7 +75,7 @@ func main() {
 		provider, domain, memory,
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(subscriber),
-		pkg.WithMetaCache(memory, 0),
+		pkg.WithMetaCache(memory, 0, 0),
 		pkg.WithBlobCache(&nopCache{}, 0),
 		pkg.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {

@@ -26,9 +26,10 @@ type ServerMeta struct {
 	Domain string
 	Alias  *DomainAlias
 
-	client *http.Client
-	cache  *tools.KVCache[PageMetaContent]
-	locker *utils.Locker
+	client  *http.Client
+	cache   *tools.KVCache[PageMetaContent]
+	locker  *utils.Locker
+	refresh time.Duration
 }
 
 // PageConfig 配置
@@ -38,6 +39,7 @@ type PageMetaContent struct {
 	LastModified time.Time `json:"last_modified"` // 上次更新时间
 	IsPage       bool      `json:"is_page"`       // 是否为 Page
 	ErrorMsg     string    `json:"error"`         // 错误消息 (作为 500 错误日志暴露至前端)
+	RefreshAt    time.Time `json:"refresh_at"`    // 下次刷新时间
 
 	Alias   []string `json:"alias"`   // alias
 	Filters []Filter `json:"filters"` // 路由消息
@@ -45,7 +47,8 @@ type PageMetaContent struct {
 
 func NewEmptyPageMetaContent() *PageMetaContent {
 	return &PageMetaContent{
-		IsPage: false,
+		IsPage:    false,
+		RefreshAt: time.Now(),
 		Filters: []Filter{
 			{
 				Path:   "**",
@@ -78,6 +81,7 @@ func NewServerMeta(
 	alias *DomainAlias,
 	cache kv.KV,
 	ttl time.Duration,
+	refresh time.Duration,
 ) *ServerMeta {
 	return &ServerMeta{
 		Backend: backend,
@@ -86,32 +90,58 @@ func NewServerMeta(
 		client:  client,
 		cache:   tools.NewCache[PageMetaContent](cache, "meta", ttl),
 		locker:  utils.NewLocker(),
+		refresh: refresh,
 	}
 }
 
 func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
 	key := fmt.Sprintf("%s/%s", owner, repo)
 	if cache, found := s.cache.Load(ctx, key); found {
+		if time.Now().After(cache.RefreshAt) {
+			// 异步刷新
+			mux := s.locker.Open(key)
+			if mux.TryLock() {
+				go func() {
+					defer mux.Unlock()
+					bgCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+					defer cancel()
+					_, _ = s.updateMetaWithLock(bgCtx, owner, repo)
+				}()
+			}
+		}
 		if cache.IsPage {
 			return &cache, nil
 		}
 		return nil, os.ErrNotExist
 	}
+	return s.updateMeta(ctx, owner, repo)
+}
+
+func (s *ServerMeta) updateMeta(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
+	key := fmt.Sprintf("%s/%s", owner, repo)
 	mux := s.locker.Open(key)
 	mux.Lock()
 	defer mux.Unlock()
 
-	if cache, found := s.cache.Load(ctx, key); found {
+	return s.updateMetaWithLock(ctx, owner, repo)
+}
+
+func (s *ServerMeta) updateMetaWithLock(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
+	key := fmt.Sprintf("%s/%s", owner, repo)
+	// 再次检查缓存
+	if cache, found := s.cache.Load(ctx, key); found && time.Now().Before(cache.RefreshAt) {
 		if cache.IsPage {
 			return &cache, nil
 		}
 		return nil, os.ErrNotExist
 	}
+
 	rel := NewEmptyPageMetaContent()
 	info, err := s.Meta(ctx, owner, repo)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			rel.IsPage = false
+			rel.RefreshAt = time.Now().Add(s.refresh)
 			_ = s.cache.Store(ctx, key, *rel)
 		}
 		return nil, err
@@ -119,6 +149,7 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo string) (*PageMeta
 	vfs := NewPageVFS(s.Backend, owner, repo, info.ID)
 	rel.CommitID = info.ID
 	rel.LastModified = info.LastModified
+	rel.RefreshAt = time.Now().Add(s.refresh)
 
 	// 检查是否存在 index.html
 	if exists, _ := vfs.Exists(ctx, "index.html"); !exists {
