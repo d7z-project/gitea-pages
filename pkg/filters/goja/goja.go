@@ -1,7 +1,9 @@
 package goja
 
 import (
+	"crypto/md5"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -14,10 +16,19 @@ import (
 	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/dop251/goja_nodejs/require"
 	"github.com/dop251/goja_nodejs/url"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-// todo: 新增超时配置
+var programCache *lru.Cache[string, *goja.Program]
+
+func init() {
+	var err error
+	programCache, err = lru.New[string, *goja.Program](1024)
+	if err != nil {
+		panic(err)
+	}
+}
 
 func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	var global struct {
@@ -28,6 +39,9 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	global.EnableWebsocket = true
 	if err := gl.Unmarshal(&global); err != nil {
 		return nil, err
+	}
+	sharedClient := &http.Client{
+		Timeout: 30 * time.Second,
 	}
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
@@ -48,10 +62,18 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 
 			debug := NewDebug(global.EnableDebug && param.Debug && request.URL.Query().
 				Get("debug") == "true", request, w)
-			program, err := goja.Compile(param.Exec, js, false)
-			if err != nil {
-				return debug.Flush(err)
+
+			hash := md5.Sum([]byte(js))
+			cacheKey := fmt.Sprintf("%s:%x", param.Exec, hash)
+			program, ok := programCache.Get(cacheKey)
+			if !ok {
+				program, err = goja.Compile(param.Exec, js, false)
+				if err != nil {
+					return debug.Flush(err)
+				}
+				programCache.Add(cacheKey, program)
 			}
+
 			registry := newRegistry(ctx, debug)
 			jsLoop := eventloop.NewEventLoop(eventloop.WithRegistry(registry),
 				eventloop.EnableConsole(true))
@@ -63,9 +85,12 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 			defer closers.Close()
 
 			stop := make(chan error, 1)
-			defer close(stop)
 
 			jsLoop.RunOnLoop(func(vm *goja.Runtime) {
+				go func() {
+					<-ctx.Done()
+					vm.Interrupt("context done")
+				}()
 				err := func() error {
 					url.Enable(vm)
 					buffer.Enable(vm)
@@ -84,7 +109,7 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 					if err = EventInject(ctx, vm, jsLoop); err != nil {
 						return err
 					}
-					if err = FetchInject(vm, jsLoop); err != nil {
+					if err = FetchInject(ctx, vm, jsLoop, sharedClient); err != nil {
 						return err
 					}
 					if global.EnableWebsocket {
@@ -106,34 +131,19 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 					stop <- err
 					return
 				}
-				export := result.Export()
-				if export != nil {
-					if promise, ok := export.(*goja.Promise); ok {
-						go func() {
-							for {
-								switch promise.State() {
-								case goja.PromiseStateFulfilled:
-									stop <- nil
-									return
-								case goja.PromiseStateRejected:
-									switch data := promise.Result().Export().(type) {
-									case error:
-										stop <- data
-									default:
-										stop <- errors.New(promise.Result().String())
-									}
-									return
-								default:
-									time.Sleep(time.Millisecond * 5)
-								}
-							}
-						}()
-					} else {
-						stop <- nil
+				if result != nil {
+					if _, ok := result.Export().(*goja.Promise); ok {
+						vm.Set("__internal_resolve", func(goja.Value) { stop <- nil })
+						vm.Set("__internal_reject", func(reason goja.Value) { stop <- errors.New(reason.String()) })
+						vm.Set("__internal_promise", result)
+						_, err := vm.RunString(`__internal_promise.then(__internal_resolve).catch(__internal_reject)`)
+						if err != nil {
+							stop <- err
+						}
+						return
 					}
-				} else {
-					stop <- nil
 				}
+				stop <- nil
 			})
 			resultErr := <-stop
 			return debug.Flush(resultErr)

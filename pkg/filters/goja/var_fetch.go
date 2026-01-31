@@ -1,6 +1,7 @@
 package goja
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,7 +11,7 @@ import (
 	"github.com/dop251/goja_nodejs/eventloop"
 )
 
-func FetchInject(jsCtx *goja.Runtime, loop *eventloop.EventLoop) error {
+func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.EventLoop, client *http.Client) error {
 	return jsCtx.GlobalObject().Set("fetch", func(url string, options ...map[string]interface{}) *goja.Promise {
 		promise, resolve, reject := jsCtx.NewPromise()
 
@@ -36,7 +37,7 @@ func FetchInject(jsCtx *goja.Runtime, loop *eventloop.EventLoop) error {
 				}
 			}
 
-			req, err := http.NewRequest(method, url, body)
+			req, err := http.NewRequestWithContext(ctx, method, url, body)
 			if err != nil {
 				loop.RunOnLoop(func(*goja.Runtime) {
 					_ = reject(err)
@@ -45,7 +46,6 @@ func FetchInject(jsCtx *goja.Runtime, loop *eventloop.EventLoop) error {
 			}
 			req.Header = headers
 
-			client := &http.Client{}
 			resp, err := client.Do(req)
 			if err != nil {
 				loop.RunOnLoop(func(*goja.Runtime) {
