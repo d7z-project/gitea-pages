@@ -4,9 +4,20 @@
 
 **This project is part of Dragon's Zone HomeLab**
 
-This project focuses on functionality implementation and does not consider any performance optimizations or large-scale deployment scenarios. Any issues arising from this are not related to the project.
+This project focuses on providing a high-performance, secure, and extensible Gitea Pages service.
 
 **Note**: This project has been completely refactored and is not compatible with upgrades from version `0.0.1`
+
+## Features
+
+- [x] **High Performance**: Optimized JS execution with program caching and efficient promise handling.
+- [x] **Secure**: Built-in path traversal protection for template and file access.
+- [x] **Content Caching**: Multi-level caching for metadata and blob content.
+- [x] **CNAME**: Support for custom domains.
+- [x] **Template Engine**: Secure template rendering with include support.
+- [x] **Programmable**: Extensible logic using JavaScript (Goja).
+- [x] **Reverse Proxy**: Support for proxying requests to backends.
+
 
 ## Get Started
 
@@ -40,10 +51,6 @@ routes:
 
 ## TODO
 
-- [x] Content caching
-- [x] CNAME custom domains
-- [x] Template rendering
-- [x] Reverse proxy requests
 - [ ] Support CORS
 - [ ] Support custom caching strategies (HTTP cache-control)
 - [ ] OAuth2 authorization for accessing private pages
