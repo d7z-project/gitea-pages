@@ -11,12 +11,56 @@ import (
 )
 
 func KVInject(ctx core.FilterContext, jsCtx *goja.Runtime) error {
-	return jsCtx.GlobalObject().Set("kv", map[string]interface{}{
+	if err := jsCtx.GlobalObject().Set("kv", map[string]interface{}{
 		"repo": func(group ...string) (goja.Value, error) {
 			return kvResult(ctx.RepoDB)(ctx, jsCtx, group...)
 		},
 		"org": func(group ...string) (goja.Value, error) {
 			return kvResult(ctx.OrgDB)(ctx, jsCtx, group...)
+		},
+	}); err != nil {
+		return err
+	}
+
+	// 注入 localStorage 模拟
+	lsDB := ctx.RepoDB.Child("local_storage")
+	return jsCtx.GlobalObject().Set("localStorage", map[string]interface{}{
+		"getItem": func(key string) (goja.Value, error) {
+			get, err := lsDB.Get(ctx, key)
+			if err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					return nil, err
+				}
+				return goja.Null(), nil
+			}
+			return jsCtx.ToValue(get), nil
+		},
+		"setItem": func(key, value string) error {
+			return lsDB.Put(ctx, key, value, kv.TTLKeep)
+		},
+		"removeItem": func(key string) (bool, error) {
+			return lsDB.Delete(ctx, key)
+		},
+		"clear": func() error {
+			// 简单的清除逻辑：列出并删除
+			list, err := lsDB.ListCurrentCursor(ctx, &kv.ListOptions{Limit: 1000})
+			if err != nil {
+				return err
+			}
+			for _, k := range list.Keys {
+				_, _ = lsDB.Delete(ctx, k)
+			}
+			return nil
+		},
+		"key": func(index int) (goja.Value, error) {
+			list, err := lsDB.ListCurrentCursor(ctx, &kv.ListOptions{Limit: int64(index + 1)})
+			if err != nil {
+				return nil, err
+			}
+			if len(list.Keys) > index {
+				return jsCtx.ToValue(list.Keys[index]), nil
+			}
+			return goja.Null(), nil
 		},
 	})
 }

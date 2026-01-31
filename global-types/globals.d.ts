@@ -146,6 +146,21 @@ declare global {
 
     const kv: KVSystem;
 
+    // localStorage 模拟
+    interface Storage {
+        getItem(key: string): string | null;
+
+        setItem(key: string, value: string): void;
+
+        removeItem(key: string): void;
+
+        clear(): void;
+
+        key(index: number): string | null;
+    }
+
+    const localStorage: Storage;
+
     // Console 相关 (假设通过 require 引入)
     interface Console {
         log(...args: any[]): void;
