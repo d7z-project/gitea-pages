@@ -3,6 +3,7 @@ package filters
 import (
 	"bytes"
 	"net/http"
+	"path"
 	"strings"
 
 	"gopkg.d7z.net/gitea-pages/pkg/core"
@@ -17,16 +18,23 @@ func FilterInstTemplate(_ core.Params) (core.FilterInstance, error) {
 		if err := config.Unmarshal(&param); err != nil {
 			return nil, err
 		}
-		param.Prefix = strings.Trim(param.Prefix, "/") + "/"
+		prefix := path.Clean("/" + param.Prefix)
+		if prefix == "/" {
+			prefix = ""
+		} else {
+			prefix = strings.Trim(prefix, "/") + "/"
+		}
+
 		return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
-			data, err := ctx.ReadString(ctx, param.Prefix+ctx.Path)
+			data, err := ctx.ReadString(ctx, prefix+ctx.Path)
 			if err != nil {
 				return err
 			}
 			out := &bytes.Buffer{}
 			parse, err := utils.NewTemplate().Funcs(map[string]any{
-				"load": func(path string) (any, error) {
-					return ctx.ReadString(ctx, param.Prefix+path)
+				"load": func(p string) (any, error) {
+					fullPath := path.Clean("/" + p)
+					return ctx.ReadString(ctx, prefix+strings.TrimPrefix(fullPath, "/"))
 				},
 			}).Parse(data)
 			if err != nil {
