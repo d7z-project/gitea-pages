@@ -24,6 +24,7 @@ type ProviderCache struct {
 	cacheBlobLimit uint64
 	cacheSem       chan struct{}
 	backendSem     chan struct{}
+	notFoundTTL    time.Duration
 }
 
 func (c *ProviderCache) Close() error {
@@ -36,6 +37,7 @@ func NewProviderCache(
 	cacheBlobLimit uint64,
 	cacheConcurrent uint64,
 	backendConcurrent uint64,
+	notFoundTTL time.Duration,
 ) *ProviderCache {
 	if cacheConcurrent == 0 {
 		cacheConcurrent = 16 // 默认限制 16 个并发缓存操作
@@ -43,16 +45,27 @@ func NewProviderCache(
 	if backendConcurrent == 0 {
 		backendConcurrent = 64 // 默认限制 64 个并发后端请求
 	}
+	if notFoundTTL == 0 {
+		notFoundTTL = time.Hour // 默认 404 缓存 1 小时
+	}
 	return &ProviderCache{
 		parent:         backend,
 		cacheBlob:      cacheBlob,
 		cacheBlobLimit: cacheBlobLimit,
 		cacheSem:       make(chan struct{}, cacheConcurrent),
 		backendSem:     make(chan struct{}, backendConcurrent),
+		notFoundTTL:    notFoundTTL,
 	}
 }
 
 func (c *ProviderCache) Meta(ctx context.Context, owner, repo string) (*core.Metadata, error) {
+	// 获取后端并发锁
+	select {
+	case c.backendSem <- struct{}{}:
+		defer func() { <-c.backendSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	return c.parent.Meta(ctx, owner, repo)
 }
 
@@ -118,7 +131,7 @@ func (c *ProviderCache) Open(ctx context.Context, owner, repo, id, path string, 
 		if errors.Is(err, os.ErrNotExist) {
 			if err = c.cacheBlob.Put(ctx, key, map[string]string{
 				"404": "true",
-			}, bytes.NewBuffer(nil), time.Hour); err != nil {
+			}, bytes.NewBuffer(nil), c.notFoundTTL); err != nil {
 				zap.L().Warn("缓存404失败", zap.Error(err))
 			}
 		}
@@ -136,7 +149,7 @@ func (c *ProviderCache) Open(ctx context.Context, owner, repo, id, path string, 
 		// 缓存404路由
 		if err = c.cacheBlob.Put(ctx, key, map[string]string{
 			"404": "true",
-		}, bytes.NewBuffer(nil), time.Hour); err != nil {
+		}, bytes.NewBuffer(nil), c.notFoundTTL); err != nil {
 			zap.L().Warn("缓存404失败", zap.Error(err))
 		}
 		_ = open.Body.Close()

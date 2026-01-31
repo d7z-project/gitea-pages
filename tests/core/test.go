@@ -53,7 +53,7 @@ func NewTestServer(domain string) *TestServer {
 		memoryKV,
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(subscribe.NewMemorySubscriber()),
-		pkg.WithMetaCache(memoryKV.Child("cache"), 0, 0),
+		pkg.WithMetaCache(memoryKV.Child("cache"), 0, 0, 0),
 		pkg.WithBlobCache(memoryCache, 0),
 		pkg.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {

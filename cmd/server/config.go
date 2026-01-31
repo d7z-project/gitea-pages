@@ -84,14 +84,16 @@ type ConfigEvent struct {
 }
 
 type ConfigCache struct {
-	Meta        string        `yaml:"meta"`         // 元数据缓存
-	MetaTTL     time.Duration `yaml:"meta_ttl"`     // 缓存时间
-	MetaRefresh time.Duration `yaml:"meta_refresh"` // 刷新时间
+	Meta                  string        `yaml:"meta"`                    // 元数据缓存
+	MetaTTL               time.Duration `yaml:"meta_ttl"`                // 缓存时间
+	MetaRefresh           time.Duration `yaml:"meta_refresh"`            // 刷新时间
+	MetaRefreshConcurrent int           `yaml:"meta_refresh_concurrent"` // 并发刷新限制
 
 	Blob              string           `yaml:"blob"`               // 缓存归档位置
 	BlobTTL           time.Duration    `yaml:"blob_ttl"`           // 缓存归档位置
 	BlobLimit         units.Base2Bytes `yaml:"blob_limit"`         // 单个文件最大大小
 	BlobConcurrent    uint64           `yaml:"blob_concurrent"`    // 并发缓存限制
+	BlobNotFoundTTL   time.Duration    `yaml:"blob_not_found_ttl"` // 404 缓存时间
 	BackendConcurrent uint64           `yaml:"backend_concurrent"` // 并发后端请求限制
 }
 
@@ -108,11 +110,8 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	if c.Domain == "" {
-		return nil, errors.New("domain is required")
-	}
 	if c.Database.URL == "" {
-		return nil, errors.New("c is required")
+		return nil, errors.New("database.url is required")
 	}
 	if c.Event.URL == "" {
 		c.Event.URL = "memory://"

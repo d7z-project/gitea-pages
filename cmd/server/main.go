@@ -56,6 +56,7 @@ func main() {
 		uint64(config.Cache.BlobLimit),
 		config.Cache.BlobConcurrent,
 		config.Cache.BackendConcurrent,
+		config.Cache.BlobNotFoundTTL,
 	)
 	defer backend.Close()
 	db, err := kv.NewKVFromURL(config.Database.URL)
@@ -77,7 +78,7 @@ func main() {
 		db,
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(event),
-		pkg.WithMetaCache(cacheMeta, config.Cache.MetaTTL, config.Cache.MetaRefresh),
+		pkg.WithMetaCache(cacheMeta, config.Cache.MetaTTL, config.Cache.MetaRefresh, config.Cache.MetaRefreshConcurrent),
 		pkg.WithBlobCache(cacheBlob.Child("filter"), config.Cache.BlobTTL),
 		pkg.WithErrorHandler(config.ErrorHandler),
 		pkg.WithFilterConfig(config.Filters),

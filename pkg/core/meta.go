@@ -26,10 +26,11 @@ type ServerMeta struct {
 	Domain string
 	Alias  *DomainAlias
 
-	client  *http.Client
-	cache   *tools.KVCache[PageMetaContent]
-	locker  *utils.Locker
-	refresh time.Duration
+	client     *http.Client
+	cache      *tools.KVCache[PageMetaContent]
+	locker     *utils.Locker
+	refresh    time.Duration
+	refreshSem chan struct{}
 }
 
 // PageConfig 配置
@@ -82,15 +83,20 @@ func NewServerMeta(
 	cache kv.KV,
 	ttl time.Duration,
 	refresh time.Duration,
+	refreshConcurrent int,
 ) *ServerMeta {
+	if refreshConcurrent <= 0 {
+		refreshConcurrent = 16
+	}
 	return &ServerMeta{
-		Backend: backend,
-		Domain:  domain,
-		Alias:   alias,
-		client:  client,
-		cache:   tools.NewCache[PageMetaContent](cache, "meta", ttl),
-		locker:  utils.NewLocker(),
-		refresh: refresh,
+		Backend:    backend,
+		Domain:     domain,
+		Alias:      alias,
+		client:     client,
+		cache:      tools.NewCache[PageMetaContent](cache, "meta", ttl),
+		locker:     utils.NewLocker(),
+		refresh:    refresh,
+		refreshSem: make(chan struct{}, refreshConcurrent),
 	}
 }
 
@@ -101,12 +107,19 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo string) (*PageMeta
 			// 异步刷新
 			mux := s.locker.Open(key)
 			if mux.TryLock() {
-				go func() {
-					defer mux.Unlock()
-					bgCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
-					defer cancel()
-					_, _ = s.updateMetaWithLock(bgCtx, owner, repo)
-				}()
+				select {
+				case s.refreshSem <- struct{}{}:
+					go func() {
+						defer func() { <-s.refreshSem }()
+						defer mux.Unlock()
+						bgCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+						defer cancel()
+						_, _ = s.updateMetaWithLock(bgCtx, owner, repo)
+					}()
+				default:
+					// 达到并发限制，跳过本次异步刷新，直接返回旧缓存
+					mux.Unlock()
+				}
 			}
 		}
 		if cache.IsPage {
