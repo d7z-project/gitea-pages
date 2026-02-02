@@ -203,8 +203,6 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 		cname = strings.TrimSpace(cname)
 		if al, ok := s.AliasCheck(cname); ok {
 			alias = append(alias, al)
-		} else {
-			return fmt.Errorf("invalid alias %s", cname)
 		}
 	}
 	data, err := vfs.ReadString(ctx, ".pages.yaml")
