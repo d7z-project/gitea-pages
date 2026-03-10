@@ -104,6 +104,9 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo string) (*PageMeta
 	key := fmt.Sprintf("%s/%s", owner, repo)
 	if cache, found := s.cache.Load(ctx, key); found {
 		if time.Now().After(cache.RefreshAt) {
+			if s.refresh == 0 {
+				return s.updateMeta(ctx, owner, repo)
+			}
 			// 异步刷新
 			mux := s.locker.Open(key)
 			if mux.TryLock() {

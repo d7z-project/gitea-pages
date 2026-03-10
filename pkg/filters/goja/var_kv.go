@@ -24,45 +24,44 @@ func KVInject(ctx core.FilterContext, jsCtx *goja.Runtime) error {
 
 	// 注入 localStorage 模拟
 	lsDB := ctx.RepoDB.Child("local_storage")
-	return jsCtx.GlobalObject().Set("localStorage", map[string]interface{}{
-		"getItem": func(key string) (goja.Value, error) {
-			get, err := lsDB.Get(ctx, key)
-			if err != nil {
-				if !errors.Is(err, os.ErrNotExist) {
-					return nil, err
-				}
-				return goja.Null(), nil
-			}
-			return jsCtx.ToValue(get), nil
-		},
-		"setItem": func(key, value string) error {
-			return lsDB.Put(ctx, key, value, kv.TTLKeep)
-		},
-		"removeItem": func(key string) (bool, error) {
-			return lsDB.Delete(ctx, key)
-		},
-		"clear": func() error {
-			// 简单的清除逻辑：列出并删除
-			list, err := lsDB.ListCurrentCursor(ctx, &kv.ListOptions{Limit: 1000})
-			if err != nil {
-				return err
-			}
-			for _, k := range list.Keys {
-				_, _ = lsDB.Delete(ctx, k)
-			}
-			return nil
-		},
-		"key": func(index int) (goja.Value, error) {
-			list, err := lsDB.ListCurrentCursor(ctx, &kv.ListOptions{Limit: int64(index + 1)})
-			if err != nil {
+	lsObj := jsCtx.NewObject()
+	_ = lsObj.Set("getItem", func(key string) (goja.Value, error) {
+		get, err := lsDB.Get(ctx, key)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
 				return nil, err
 			}
-			if len(list.Keys) > index {
-				return jsCtx.ToValue(list.Keys[index]), nil
-			}
 			return goja.Null(), nil
-		},
+		}
+		return jsCtx.ToValue(get), nil
 	})
+	_ = lsObj.Set("setItem", func(key, value string) error {
+		return lsDB.Put(ctx, key, value, kv.TTLKeep)
+	})
+	_ = lsObj.Set("removeItem", func(key string) (bool, error) {
+		return lsDB.Delete(ctx, key)
+	})
+	_ = lsObj.Set("clear", func() error {
+		return lsDB.DeleteAll(ctx)
+	})
+	_ = lsObj.Set("key", func(index int) (goja.Value, error) {
+		if index < 0 {
+			return goja.Null(), nil
+		}
+		list, err := lsDB.ListCurrentCursor(ctx, &kv.ListOptions{Limit: int64(index + 1)})
+		if err != nil {
+			return nil, err
+		}
+		if len(list.Pairs) > index {
+			return jsCtx.ToValue(list.Pairs[index].Key), nil
+		}
+		return goja.Null(), nil
+	})
+	_ = lsObj.DefineAccessorProperty("length", jsCtx.ToValue(func() (int64, error) {
+		return lsDB.Count(ctx)
+	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+
+	return jsCtx.GlobalObject().Set("localStorage", lsObj)
 }
 
 func kvResult(db kv.KV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group ...string) (goja.Value, error) {
@@ -115,8 +114,18 @@ func kvResult(db kv.KV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group 
 				if err != nil {
 					return nil, err
 				}
+				keys := make([]string, len(list.Pairs))
+				items := make([]map[string]string, len(list.Pairs))
+				for i, p := range list.Pairs {
+					keys[i] = p.Key
+					items[i] = map[string]string{
+						"key":   p.Key,
+						"value": p.Value,
+					}
+				}
 				return map[string]any{
-					"keys":    list.Keys,
+					"keys":    keys,
+					"items":   items,
 					"cursor":  list.Cursor,
 					"hasNext": list.HasMore,
 				}, nil

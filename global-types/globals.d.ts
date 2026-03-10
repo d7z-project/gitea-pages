@@ -120,6 +120,7 @@ declare global {
     // KV 存储相关类型
     interface KVListResult {
         keys: string[];
+        items: { key: string; value: string }[];
         cursor: string;
         hasNext: boolean;
     }
@@ -148,6 +149,8 @@ declare global {
 
     // localStorage 模拟
     interface Storage {
+        readonly length: number;
+
         getItem(key: string): string | null;
 
         setItem(key: string, value: string): void;
