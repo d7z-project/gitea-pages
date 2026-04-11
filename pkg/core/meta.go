@@ -102,7 +102,7 @@ func NewServerMeta(
 
 func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
 	key := fmt.Sprintf("%s/%s", owner, repo)
-	if cache, found := s.cache.Load(ctx, key); found {
+	if cache, found, _ := s.cache.Load(ctx, key); found {
 		if time.Now().After(cache.RefreshAt) {
 			if s.refresh == 0 {
 				return s.updateMeta(ctx, owner, repo)
@@ -145,7 +145,7 @@ func (s *ServerMeta) updateMeta(ctx context.Context, owner, repo string) (*PageM
 func (s *ServerMeta) updateMetaWithLock(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
 	key := fmt.Sprintf("%s/%s", owner, repo)
 	// 再次检查缓存
-	if cache, found := s.cache.Load(ctx, key); found && time.Now().Before(cache.RefreshAt) {
+	if cache, found, _ := s.cache.Load(ctx, key); found && time.Now().Before(cache.RefreshAt) {
 		if cache.IsPage {
 			return &cache, nil
 		}
