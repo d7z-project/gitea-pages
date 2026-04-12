@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/buffer"
 	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/dop251/goja_nodejs/url"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
@@ -23,6 +24,7 @@ func initRuntime(
 	closers *Closers,
 	jsLoop *eventloop.EventLoop,
 ) (*goja.Object, error) {
+	buffer.Enable(vm)
 	url.Enable(vm)
 	if err := installHandlerRegistration(vm); err != nil {
 		return nil, err
