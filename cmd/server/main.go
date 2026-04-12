@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
+	_ "gopkg.d7z.net/gitea-pages/pkg/providers"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/subscribe"
