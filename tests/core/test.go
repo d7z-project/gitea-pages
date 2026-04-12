@@ -33,6 +33,11 @@ func NewTestServer(domain string) *TestServer {
 }
 
 func NewTestServerOptions(domain string, opts ...pkg.ServerOption) *TestServer {
+	memoryKV, _ := kv.NewMemory("")
+	return NewTestServerWithKVOptions(domain, memoryKV, memoryKV, opts...)
+}
+
+func NewTestServerWithKVOptions(domain string, db, userDB kv.KV, opts ...pkg.ServerOption) *TestServer {
 	atom := zap.NewAtomicLevel()
 	getenv := os.Getenv("BM")
 	if getenv != "" {
@@ -52,15 +57,15 @@ func NewTestServerOptions(domain string, opts ...pkg.ServerOption) *TestServer {
 		MaxCapacity: 256,
 		CleanupInt:  time.Minute,
 	})
-	memoryKV, _ := kv.NewMemory("")
 	server, err := pkg.NewPageServer(
 		dummy,
 		domain,
-		memoryKV,
+		db,
+		userDB,
 		append([]pkg.ServerOption{
 			pkg.WithClient(http.DefaultClient),
 			pkg.WithEvent(subscribe.NewMemorySubscriber()),
-			pkg.WithMetaCache(memoryKV.Child("cache"), 0, 0, 0),
+			pkg.WithMetaCache(db.Child("cache"), 0, 0, 0),
 			pkg.WithBlobCache(memoryCache, 0),
 			pkg.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
 				if errors.Is(err, os.ErrNotExist) {

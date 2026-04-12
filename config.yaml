@@ -2,10 +2,12 @@
 bind: 127.0.0.1:18080
 # 基础域名
 domain: example.com
-# 持久化存储
-database:
-  # 持久化存储配置
+# 程序内部使用的存储
+db:
   url: "memory://"
+# 用户脚本使用的存储，可省略；省略时回退到 db
+user_db:
+  url: ""
 # 事件传递配置
 event:
   url: "memory://"

@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	testcore "gopkg.d7z.net/gitea-pages/tests/core"
+	"gopkg.d7z.net/middleware/kv"
 )
 
 func Test_GoJa_HandlerResponse(t *testing.T) {
@@ -277,6 +278,66 @@ routes:
 	}
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func Test_GoJa_KVUsesUserDBWhenConfigured(t *testing.T) {
+	db, _ := kv.NewMemory("")
+	userDB, _ := kv.NewMemory("")
+	server := testcore.NewTestServerWithKVOptions("example.com", db, userDB)
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(async function() {
+  const store = kv.repo("group")
+  store.set("key", "value")
+  return new Response(store.get("key"))
+})
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "api/**"
+  js:
+    exec: "index.js"
+`)
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/test")
+	assert.NoError(t, err)
+	assert.Equal(t, "value", string(data))
+
+	got, err := userDB.Child("repo", "org1", "repo1", "group").Get(context.Background(), "key")
+	assert.NoError(t, err)
+	assert.Equal(t, "value", got)
+
+	_, err = db.Child("repo", "org1", "repo1", "group").Get(context.Background(), "key")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func Test_GoJa_KVFallsBackToDBWhenUserDBMissing(t *testing.T) {
+	db, _ := kv.NewMemory("")
+	server := testcore.NewTestServerWithKVOptions("example.com", db, nil)
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(async function() {
+  const store = kv.repo("group")
+  store.set("key", "value")
+  return new Response(store.get("key"))
+})
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "api/**"
+  js:
+    exec: "index.js"
+`)
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/test")
+	assert.NoError(t, err)
+	assert.Equal(t, "value", string(data))
+
+	got, err := db.Child("repo", "org1", "repo1", "group").Get(context.Background(), "key")
+	assert.NoError(t, err)
+	assert.Equal(t, "value", got)
 }
 
 func Test_GoJa_Fetch(t *testing.T) {

@@ -66,16 +66,20 @@ func main() {
 		marshal, _ := yaml.Marshal(info)
 		provider.AddOverlay(".pages.yaml", marshal)
 	}
-	memory, err := kv.NewMemory("")
+	db, err := kv.NewMemory("")
 	if err != nil {
 		zap.L().Fatal("failed to init memory provider", zap.Error(err))
 	}
+	userDB, err := kv.NewMemory("")
+	if err != nil {
+		zap.L().Fatal("failed to init user memory provider", zap.Error(err))
+	}
 	subscriber := subscribe.NewMemorySubscriber()
 	server, err := pkg.NewPageServer(
-		provider, domain, memory,
+		provider, domain, db, userDB,
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(subscriber),
-		pkg.WithMetaCache(memory, 0, 0, 0),
+		pkg.WithMetaCache(db, 0, 0, 0),
 		pkg.WithBlobCache(&nopCache{}, 0),
 		pkg.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, os.ErrNotExist) {

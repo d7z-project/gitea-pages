@@ -75,11 +75,19 @@ func main() {
 		config.Cache.DirNotFoundTTL,
 	)
 	defer backend.Close()
-	db, err := kv.NewKVFromURL(config.Database.URL)
+	db, err := kv.NewKVFromURL(config.DB.URL)
 	if err != nil {
 		log.Fatalln(err)
 	}
 	defer db.Close()
+	userDB := db
+	if config.UserDB.URL != "" {
+		userDB, err = kv.NewKVFromURL(config.UserDB.URL)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		defer userDB.Close()
+	}
 	event, err := subscribe.NewSubscriberFromURL(config.Event.URL)
 	if err != nil {
 		log.Fatalln(err)
@@ -120,6 +128,7 @@ func main() {
 		backend,
 		config.Domain,
 		db,
+		userDB,
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(event),
 		pkg.WithMetaCache(cacheMeta, config.Cache.MetaTTL, config.Cache.MetaRefresh, config.Cache.MetaRefreshConcurrent),

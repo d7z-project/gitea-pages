@@ -22,8 +22,9 @@ type Config struct {
 	Bind   string `yaml:"bind"`   // HTTP 绑定
 	Domain string `yaml:"domain"` // 基础域名
 
-	// todo: 拆分 alias 和 db
-	Database ConfigDatabase `yaml:"database"` // 配置
+	DB             ConfigDatabase `yaml:"db"`       // 程序内部使用的存储
+	UserDB         ConfigDatabase `yaml:"user_db"`  // 用户脚本使用的存储
+	LegacyDatabase ConfigDatabase `yaml:"database"` // 兼容旧配置
 
 	Event ConfigEvent `yaml:"event"` // 事件传递
 
@@ -157,8 +158,14 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	if c.Database.URL == "" {
-		return nil, errors.New("database.url is required")
+	if c.DB.URL == "" {
+		c.DB = c.LegacyDatabase
+		if c.DB.URL != "" {
+			zap.L().Warn("config key 'database' is deprecated; use 'db' and optional 'user_db' instead")
+		}
+	}
+	if c.DB.URL == "" {
+		return nil, errors.New("db.url is required")
 	}
 	if c.Provider.Type == "" {
 		return nil, errors.New("provider.type is required")

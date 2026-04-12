@@ -29,6 +29,7 @@ type Server struct {
 	backend   core.Backend
 	meta      *core.PageDomain
 	db        kv.KV
+	userDB    kv.KV
 	filterMgr map[string]core.FilterInstance
 
 	globCache *lru.Cache[string, glob.Glob]
@@ -107,6 +108,7 @@ func NewPageServer(
 	backend core.Backend,
 	domain string,
 	db kv.KV,
+	userDB kv.KV,
 	opts ...ServerOption,
 ) (*Server, error) {
 	cfg := &serverConfig{
@@ -153,6 +155,9 @@ func NewPageServer(
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}
+	if userDB == nil {
+		userDB = db
+	}
 
 	alias := core.NewDomainAlias(db.Child("config", "alias"))
 	svcMeta := core.NewServerMeta(cfg.client, backend, domain, alias, cfg.cacheMeta, cfg.cacheMetaTTL, cfg.cacheMetaRefresh, cfg.cacheMetaRefreshConcurrent)
@@ -169,6 +174,7 @@ func NewPageServer(
 		backend:      backend,
 		meta:         pageMeta,
 		db:           db,
+		userDB:       userDB,
 		globCache:    globCache,
 		filterMgr:    defaultFilters,
 		errorHandler: cfg.errorHandler,
@@ -239,8 +245,8 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		Context:     cancelCtx,
 		PageVFS:     core.NewPageVFS(s.backend, meta.Owner, meta.Repo, meta.CommitID),
 		Cache:       tools.NewTTLCache(s.cacheBlob.Child("filter", meta.Owner, meta.Repo, meta.CommitID), s.cacheBlobTTL),
-		OrgDB:       s.db.Child("org", meta.Owner),
-		RepoDB:      s.db.Child("repo", meta.Owner, meta.Repo),
+		OrgDB:       s.userDB.Child("org", meta.Owner),
+		RepoDB:      s.userDB.Child("repo", meta.Owner, meta.Repo),
 		Event:       s.event.Child("domain", meta.Owner, meta.Repo),
 		Auth:        core.AuthInfoFromContext(request.Context()),
 
