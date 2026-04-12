@@ -1,6 +1,6 @@
 {
   "name": "@d7z-project/gitea-pages",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "types": "globals.d.ts",
   "repository": {
     "type": "git",
