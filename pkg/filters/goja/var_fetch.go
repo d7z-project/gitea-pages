@@ -3,19 +3,30 @@ package goja
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
 )
 
-func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.EventLoop, client *http.Client) error {
+func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.EventLoop, client *http.Client, cfg FetchConfig) error {
 	return jsCtx.GlobalObject().Set("fetch", func(url string, options ...map[string]interface{}) *goja.Promise {
 		promise, resolve, reject := jsCtx.NewPromise()
 
 		go func() {
+			if !cfg.Enabled {
+				loop.RunOnLoop(func(*goja.Runtime) {
+					_ = reject(errors.New("fetch is disabled"))
+				})
+				return
+			}
+
 			method := "GET"
 			var body io.Reader
 			headers := make(http.Header)
@@ -37,6 +48,13 @@ func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.Event
 				}
 			}
 
+			if err := validateFetchTarget(url, cfg); err != nil {
+				loop.RunOnLoop(func(*goja.Runtime) {
+					_ = reject(err)
+				})
+				return
+			}
+
 			req, err := http.NewRequestWithContext(ctx, method, url, body)
 			if err != nil {
 				loop.RunOnLoop(func(*goja.Runtime) {
@@ -55,10 +73,20 @@ func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.Event
 			}
 			defer resp.Body.Close()
 
-			respBody, err := io.ReadAll(resp.Body)
+			reader := io.Reader(resp.Body)
+			if cfg.MaxResponseBodyBytes > 0 {
+				reader = io.LimitReader(resp.Body, cfg.MaxResponseBodyBytes+1)
+			}
+			respBody, err := io.ReadAll(reader)
 			if err != nil {
 				loop.RunOnLoop(func(*goja.Runtime) {
 					_ = reject(err)
+				})
+				return
+			}
+			if cfg.MaxResponseBodyBytes > 0 && int64(len(respBody)) > cfg.MaxResponseBodyBytes {
+				loop.RunOnLoop(func(*goja.Runtime) {
+					_ = reject(errors.New("fetch response body exceeds limit"))
 				})
 				return
 			}
@@ -96,4 +124,24 @@ func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.Event
 
 		return promise
 	})
+}
+
+func validateFetchTarget(rawURL string, cfg FetchConfig) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return errors.New("missing fetch host")
+	}
+	if len(cfg.AllowedHosts) > 0 && !slices.Contains(cfg.AllowedHosts, host) {
+		return errors.New("fetch target host is not allowed")
+	}
+	if cfg.BlockPrivateNetwork {
+		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
+			return errors.New("fetch target ip is not allowed")
+		}
+	}
+	return nil
 }

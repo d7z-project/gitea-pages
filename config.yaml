@@ -43,3 +43,21 @@ page:
   404: /path/to/html.gotmpl
   # 默认 500 页面模板
   500: /path/to/html.gotmpl
+filters:
+  js:
+    # 是否启用 debug 页面
+    debug: true
+    # 是否允许 websocket 注入
+    websocket: true
+    # 请求体读取限制，0 表示不限制
+    request:
+      max_body_bytes: 0
+    # fetch 能力限制
+    fetch:
+      enabled: true
+      # 0 表示不限制
+      max_response_body_bytes: 0
+      # 留空表示不限制 host
+      allowed_hosts: []
+      # 开启后拒绝直连私网/环回 IP
+      block_private_network: false

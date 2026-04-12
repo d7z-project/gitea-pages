@@ -32,6 +32,7 @@ type PageContent struct {
 
 func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path string) (*PageContent, error) {
 	pathArr := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	defaultRepo := domain
 	if !strings.HasSuffix(domain, "."+p.baseDomain) {
 		alias, err := p.Alias.Query(ctx, domain) // 确定 alias 是否存在内容
 		if err != nil {
@@ -48,7 +49,7 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path string) (
 	if repo == "" {
 		// 回退到默认仓库 (路径未包含仓库)
 		zap.L().Debug("fail back to default repo", zap.String("repo", domain))
-		returnMeta, err = p.returnMeta(ctx, owner, domain, pathArr)
+		returnMeta, err = p.returnMeta(ctx, owner, defaultRepo, pathArr)
 	} else {
 		returnMeta, err = p.returnMeta(ctx, owner, repo, pathArr[1:])
 	}
@@ -58,7 +59,7 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path string) (
 		return returnMeta, nil
 	}
 	// 发现 repo 的情况下回退到默认页面
-	return p.returnMeta(ctx, owner, domain, pathArr)
+	return p.returnMeta(ctx, owner, defaultRepo, pathArr)
 }
 
 func (p *PageDomain) returnMeta(ctx context.Context, owner, repo string, path []string) (*PageContent, error) {

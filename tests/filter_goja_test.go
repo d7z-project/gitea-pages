@@ -1,9 +1,12 @@
 package tests
 
 import (
+	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"gopkg.d7z.net/gitea-pages/tests/core"
@@ -62,6 +65,27 @@ routes:
 	assert.Equal(t, "POST /api/v1/fetch", string(data))
 }
 
+func Test_GoJa_RequestReadBodyReusable(t *testing.T) {
+	server := core.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+const first = String.fromCharCode.apply(null, request.readBody())
+const second = String.fromCharCode.apply(null, request.readBody())
+response.write(first + "|" + second)
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "api/v1/**"
+  js:
+    exec: "index.js"
+`)
+
+	data, _, err := server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/api/v1/fetch", bytes.NewBufferString("payload"))
+	assert.NoError(t, err)
+	assert.Equal(t, "payload|payload", string(data))
+}
+
 func Test_GoJa_Async(t *testing.T) {
 	server := core.NewDefaultTestServer()
 	defer server.Close()
@@ -86,6 +110,39 @@ routes:
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/fetch")
 	assert.NoError(t, err)
 	assert.Equal(t, "abc", string(data))
+}
+
+func Test_GoJa_CancelPendingPromise(t *testing.T) {
+	server := core.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "dummy")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+(async()=>{
+    await new Promise(() => {})
+})()
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "**"
+  js:
+    exec: "index.js"
+`)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := server.OpenRequestWithContext(ctx, http.MethodGet, "https://org1.example.com/repo1/api/v1/pending", nil)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		assert.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("request did not stop after context cancellation")
+	}
 }
 
 func Test_GoJa_Fetch(t *testing.T) {

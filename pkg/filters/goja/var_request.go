@@ -1,6 +1,7 @@
 package goja
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -10,7 +11,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
-func RequestInject(ctx core.FilterContext, jsCtx *goja.Runtime, req *http.Request) error {
+func RequestInject(ctx core.FilterContext, jsCtx *goja.Runtime, req *http.Request, cfg RequestConfig) error {
 	url := *req.URL
 	url.Path = ctx.Path
 
@@ -71,10 +72,18 @@ func RequestInject(ctx core.FilterContext, jsCtx *goja.Runtime, req *http.Reques
 			return req.Header.Get(name) != ""
 		},
 		"readBody": func() []byte {
-			body, err := io.ReadAll(req.Body)
+			var reader io.Reader = req.Body
+			if cfg.MaxBodyBytes > 0 {
+				reader = io.LimitReader(req.Body, cfg.MaxBodyBytes+1)
+			}
+			body, err := io.ReadAll(reader)
 			if err != nil {
 				panic(err)
 			}
+			if cfg.MaxBodyBytes > 0 && int64(len(body)) > cfg.MaxBodyBytes {
+				panic(fmt.Errorf("request body exceeds limit: %d", cfg.MaxBodyBytes))
+			}
+			req.Body = cloneBody(body)
 			return body
 		},
 		"protocol": req.Proto,

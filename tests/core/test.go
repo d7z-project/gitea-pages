@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -90,8 +91,12 @@ func (t *TestServer) OpenFile(url string) ([]byte, *http.Response, error) {
 }
 
 func (t *TestServer) OpenRequest(method, url string, body io.Reader) ([]byte, *http.Response, error) {
+	return t.OpenRequestWithContext(context.Background(), method, url, body)
+}
+
+func (t *TestServer) OpenRequestWithContext(ctx context.Context, method, url string, body io.Reader) ([]byte, *http.Response, error) {
 	recorder := httptest.NewRecorder()
-	t.server.ServeHTTP(recorder, httptest.NewRequest(method, url, body))
+	t.server.ServeHTTP(recorder, httptest.NewRequest(method, url, body).WithContext(ctx))
 	response := recorder.Result()
 	if response.Body != nil {
 		defer response.Body.Close()

@@ -54,6 +54,7 @@ func main() {
 	backend := providers.NewProviderCache(gitea,
 		cacheBlob.Child("backend"),
 		uint64(config.Cache.BlobLimit),
+		config.Cache.BlobTTL,
 		config.Cache.BlobConcurrent,
 		config.Cache.BackendConcurrent,
 		config.Cache.BlobNotFoundTTL,
