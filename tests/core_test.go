@@ -58,6 +58,20 @@ alias:
 	assert.Equal(t, "https://zzz.example.top/get/some", resp.Header.Get("Location"))
 }
 
+func Test_page_repo_without_index_html(t *testing.T) {
+	server := core.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+alias:
+  - zzz.example.top
+`)
+
+	_, resp, err := server.OpenFile("https://org1.example.com/repo1/")
+	assert.NoError(t, err)
+	assert.Equal(t, 302, resp.StatusCode)
+	assert.Equal(t, "https://zzz.example.top/", resp.Header.Get("Location"))
+}
+
 func Test_fail_back(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		server := core.NewDefaultTestServer()

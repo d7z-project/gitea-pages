@@ -213,8 +213,10 @@ func (s *ServerMeta) refreshMeta(ctx context.Context, owner, repo string) (*Page
 	rel.LastModified = info.LastModified
 	rel.RefreshAt = time.Now().Add(s.refresh)
 
-	// 检查是否存在 index.html
-	if exists, _ := vfs.Exists(ctx, "index.html"); !exists {
+	// 存在 index.html 或 .pages.yaml 任一即可视为 page 仓库
+	hasIndex, _ := vfs.Exists(ctx, "index.html")
+	hasConfig, _ := vfs.Exists(ctx, ".pages.yaml")
+	if !hasIndex && !hasConfig {
 		rel.IsPage = false
 		_ = s.cache.Store(ctx, key, *rel)
 		return nil, os.ErrNotExist
