@@ -17,6 +17,7 @@ This project focuses on providing a high-performance, secure, and extensible Git
 - [x] **Template Engine**: Secure template rendering with include support.
 - [x] **Programmable**: Extensible logic using JavaScript (Goja).
 - [x] **Reverse Proxy**: Support for proxying requests to backends.
+- [x] OAuth2 authorization for accessing private pages
 
 > [!WARNING]
 > **Security Note**: This project is designed for self-hosted/private environments. It does not perform domain ownership verification for CNAME aliases. In a multi-user environment, users could potentially "hijack" domains by claiming them in their `.pages.yaml`.
@@ -56,7 +57,6 @@ routes:
 
 - [ ] Support CORS
 - [ ] Support custom caching strategies (HTTP cache-control)
-- [ ] OAuth2 authorization for accessing private pages
 - [ ] ~~http01 automatic certificate issuance~~: Handled by Caddy
 - [ ] ~~Web hook triggers for updates~~: Not a high priority for real-time needs
 
