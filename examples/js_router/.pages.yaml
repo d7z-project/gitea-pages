@@ -1,0 +1,9 @@
+routes:
+  - path: "api"
+    js:
+      exec: "index.js"
+      debug: true
+  - path: "api/**"
+    js:
+      exec: "index.js"
+      debug: true
