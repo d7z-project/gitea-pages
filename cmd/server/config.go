@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"encoding/json"
 	"net/http"
 	"os"
 	"text/template"
@@ -26,7 +27,9 @@ type Config struct {
 
 	Event ConfigEvent `yaml:"event"` // 事件传递
 
-	Auth ConfigAuth `yaml:"auth"` // 后端认证配置
+	Provider ConfigProvider `yaml:"provider"` // 内容 Provider 配置
+
+	Auth *ConfigAuth `yaml:"auth"` // 页面认证配置，可选
 
 	Cache ConfigCache `yaml:"cache"` // 缓存配置
 
@@ -36,43 +39,74 @@ type Config struct {
 
 	Filters map[string]map[string]any `yaml:"filters"` // 渲染器配置
 
-	pageErrNotFound, pageErrUnknown *template.Template
+	pageErrUnauthorized, pageErrForbidden, pageErrNotFound, pageErrMethodDenied, pageErrUnknown *template.Template
+}
+
+type ConfigProvider struct {
+	Type      string `yaml:"type"`
+	providers map[string]json.RawMessage
 }
 
 func (c *Config) ErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	status := http.StatusInternalServerError
 	if errors.Is(err, os.ErrNotExist) {
-		w.WriteHeader(http.StatusNotFound)
-		if err = c.pageErrNotFound.Execute(w, utils.NewTemplateInject(r, map[string]any{
-			"UUID":  r.Header.Get("Session-ID"),
-			"Error": err,
-			"Path":  r.URL.Path,
-			"Code":  404,
-		})); err != nil {
-			zap.L().Error("failed to render error page", zap.Error(err))
-		}
-	} else {
-		w.WriteHeader(http.StatusInternalServerError)
-		if err = c.pageErrUnknown.Execute(w, utils.NewTemplateInject(r, map[string]any{
-			"UUID":  r.Header.Get("Session-ID"),
-			"Error": err,
-			"Path":  r.URL.Path,
-			"Code":  500,
-		})); err != nil {
-			zap.L().Error("failed to render error page", zap.Error(err))
-		}
+		status = http.StatusNotFound
+	}
+	c.RenderStatusPage(w, r, status, err)
+}
+
+func (c *Config) RenderStatusPage(w http.ResponseWriter, r *http.Request, status int, err error) {
+	page := c.statusTemplate(status)
+	if page == nil {
+		http.Error(w, http.StatusText(status), status)
+		return
+	}
+	w.WriteHeader(status)
+	if renderErr := page.Execute(w, utils.NewTemplateInject(r, map[string]any{
+		"UUID":  r.Header.Get("Session-ID"),
+		"Error": err,
+		"Path":  r.URL.Path,
+		"Code":  status,
+	})); renderErr != nil {
+		zap.L().Error("failed to render error page", zap.Error(renderErr))
+	}
+}
+
+func (c *Config) statusTemplate(status int) *template.Template {
+	switch status {
+	case http.StatusUnauthorized:
+		return c.pageErrUnauthorized
+	case http.StatusForbidden:
+		return c.pageErrForbidden
+	case http.StatusNotFound:
+		return c.pageErrNotFound
+	case http.StatusMethodNotAllowed:
+		return c.pageErrMethodDenied
+	default:
+		return c.pageErrUnknown
 	}
 }
 
 type ConfigAuth struct {
-	// 服务器地址
-	Server string `yaml:"server"`
-	// 会话 Id
-	Token string `yaml:"token"`
+	SessionTTL    time.Duration    `yaml:"session_ttl"`
+	StateTTL      time.Duration    `yaml:"state_ttl"`
+	AuthzCacheTTL time.Duration    `yaml:"authz_cache_ttl"`
+	Cookie        ConfigAuthCookie `yaml:"cookie"`
+}
+
+type ConfigAuthCookie struct {
+	Name     string `yaml:"name"`
+	Secure   bool   `yaml:"secure"`
+	Domain   string `yaml:"domain"`
+	SameSite string `yaml:"same_site"`
 }
 
 type ConfigPage struct {
 	DefaultBranch   string `yaml:"default_branch"`
+	ErrUnauthorized string `yaml:"401"`
+	ErrForbidden    string `yaml:"403"`
 	ErrNotFoundPage string `yaml:"404"`
+	ErrMethodDenied string `yaml:"405"`
 	ErrUnknownPage  string `yaml:"500"`
 }
 
@@ -99,21 +133,38 @@ type ConfigCache struct {
 	BackendConcurrent uint64           `yaml:"backend_concurrent"` // 并发后端请求限制
 }
 
+func (c ConfigProvider) ProviderConfig(name string) (json.RawMessage, bool) {
+	if c.providers == nil {
+		return nil, false
+	}
+	value, ok := c.providers[name]
+	return value, ok
+}
+
 func LoadConfig(path string) (*Config, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 	var c Config
-	decoder := yaml.NewDecoder(f)
-	err = decoder.Decode(&c)
+	if err = yaml.Unmarshal(data, &c); err != nil {
+		return nil, err
+	}
+	c.Provider.providers, err = loadProviderConfigs(data, "provider", map[string]struct{}{
+		"type": {},
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	if c.Database.URL == "" {
 		return nil, errors.New("database.url is required")
+	}
+	if c.Provider.Type == "" {
+		return nil, errors.New("provider.type is required")
+	}
+	if _, ok := c.Provider.ProviderConfig(c.Provider.Type); !ok {
+		return nil, errors.Errorf("provider.%s config is required", c.Provider.Type)
 	}
 	if c.Event.URL == "" {
 		c.Event.URL = "memory://"
@@ -131,23 +182,87 @@ func LoadConfig(path string) (*Config, error) {
 		c.Page.DefaultBranch = "gh-pages"
 	}
 	defaultErr := utils.MustTemplate(defaultErrPage)
-	if c.Page.ErrUnknownPage != "" {
-		data, err := os.ReadFile(c.Page.ErrUnknownPage)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read file %s", string(data))
-		}
-		c.pageErrUnknown = utils.MustTemplate(string(data))
-	} else {
-		c.pageErrUnknown = defaultErr
+	c.pageErrUnauthorized, err = loadErrorTemplate(c.Page.ErrUnauthorized, defaultErr)
+	if err != nil {
+		return nil, err
 	}
-	if c.Page.ErrNotFoundPage != "" {
-		data, err := os.ReadFile(c.Page.ErrNotFoundPage)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read file %s", c.Page.ErrNotFoundPage)
-		}
-		c.pageErrNotFound = utils.MustTemplate(string(data))
-	} else {
-		c.pageErrNotFound = defaultErr
+	c.pageErrForbidden, err = loadErrorTemplate(c.Page.ErrForbidden, defaultErr)
+	if err != nil {
+		return nil, err
+	}
+	c.pageErrNotFound, err = loadErrorTemplate(c.Page.ErrNotFoundPage, defaultErr)
+	if err != nil {
+		return nil, err
+	}
+	c.pageErrMethodDenied, err = loadErrorTemplate(c.Page.ErrMethodDenied, defaultErr)
+	if err != nil {
+		return nil, err
+	}
+	c.pageErrUnknown, err = loadErrorTemplate(c.Page.ErrUnknownPage, defaultErr)
+	if err != nil {
+		return nil, err
 	}
 	return &c, nil
+}
+
+func loadErrorTemplate(path string, fallback *template.Template) (*template.Template, error) {
+	if path == "" {
+		return fallback, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read file %s", path)
+	}
+	return utils.MustTemplate(string(data)), nil
+}
+
+func loadProviderConfigs(data []byte, section string, commonKeys map[string]struct{}) (map[string]json.RawMessage, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, err
+	}
+	if len(root.Content) == 0 {
+		return nil, nil
+	}
+	sectionNode := findMappingValue(root.Content[0], section)
+	if sectionNode == nil || sectionNode.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	configs := make(map[string]json.RawMessage)
+	for i := 0; i < len(sectionNode.Content); i += 2 {
+		key := sectionNode.Content[i].Value
+		if _, ok := commonKeys[key]; ok {
+			continue
+		}
+		value, err := yamlNodeToJSON(sectionNode.Content[i+1])
+		if err != nil {
+			return nil, err
+		}
+		configs[key] = value
+	}
+	return configs, nil
+}
+
+func findMappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func yamlNodeToJSON(node *yaml.Node) (json.RawMessage, error) {
+	var value any
+	if err := node.Decode(&value); err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }

@@ -1,4 +1,4 @@
-package providers
+package core
 
 import (
 	"bytes"
@@ -13,13 +13,12 @@ import (
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 )
 
 type ProviderCache struct {
-	parent core.Backend
+	parent Backend
 
 	cacheBlob      cache.Cache
 	cacheBlobLimit uint64
@@ -36,7 +35,7 @@ func (c *ProviderCache) Close() error {
 }
 
 func NewProviderCache(
-	backend core.Backend,
+	backend Backend,
 	cacheBlob cache.Cache,
 	cacheBlobLimit uint64,
 	cacheBlobTTL time.Duration,
@@ -74,7 +73,7 @@ func NewProviderCache(
 	}
 }
 
-func (c *ProviderCache) Meta(ctx context.Context, owner, repo string) (*core.Metadata, error) {
+func (c *ProviderCache) Meta(ctx context.Context, owner, repo string) (*Metadata, error) {
 	// 获取后端并发锁
 	select {
 	case c.backendSem <- struct{}{}:
@@ -85,7 +84,7 @@ func (c *ProviderCache) Meta(ctx context.Context, owner, repo string) (*core.Met
 	return c.parent.Meta(ctx, owner, repo)
 }
 
-func (c *ProviderCache) List(ctx context.Context, owner, repo, id, path string) ([]core.DirEntry, error) {
+func (c *ProviderCache) List(ctx context.Context, owner, repo, id, path string) ([]DirEntry, error) {
 	key := c.cacheDirKey(owner, repo, id, path)
 	if entries, err := c.loadCachedDirEntries(ctx, key); entries != nil || err != nil {
 		return entries, err
@@ -175,7 +174,7 @@ func (c *ProviderCache) loadCachedResponse(ctx context.Context, key string) (*ht
 	}, nil
 }
 
-func (c *ProviderCache) loadCachedDirEntries(ctx context.Context, key string) ([]core.DirEntry, error) {
+func (c *ProviderCache) loadCachedDirEntries(ctx context.Context, key string) ([]DirEntry, error) {
 	content, err := c.cacheBlob.Get(ctx, key)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -191,7 +190,7 @@ func (c *ProviderCache) loadCachedDirEntries(ctx context.Context, key string) ([
 	}
 
 	defer content.Close()
-	var entries []core.DirEntry
+	var entries []DirEntry
 	if err = json.NewDecoder(content).Decode(&entries); err != nil {
 		return nil, err
 	}
@@ -307,7 +306,7 @@ func (c *ProviderCache) cacheResponse(ctx context.Context, key string, resp *htt
 	return resp, nil
 }
 
-func (c *ProviderCache) cacheDirEntries(ctx context.Context, key string, entries []core.DirEntry) {
+func (c *ProviderCache) cacheDirEntries(ctx context.Context, key string, entries []DirEntry) {
 	if !c.tryAcquireCacheSlot() {
 		zap.L().Debug("跳过目录缓存，并发限制已达", zap.String("key", key))
 		return

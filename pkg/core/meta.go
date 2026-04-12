@@ -39,6 +39,7 @@ type PageMetaContent struct {
 	CommitID     string    `json:"commit_id"`     // 提交 COMMIT ID
 	LastModified time.Time `json:"last_modified"` // 上次更新时间
 	IsPage       bool      `json:"is_page"`       // 是否为 Page
+	Private      bool      `json:"private"`       // 是否私有页面
 	ErrorMsg     string    `json:"error"`         // 错误消息 (作为 500 错误日志暴露至前端)
 	RefreshAt    time.Time `json:"refresh_at"`    // 下次刷新时间
 
@@ -250,6 +251,7 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 		})
 	}
 	meta.Alias = alias
+	meta.Private = cfg.Private
 	// 处理自定义路由
 	for _, r := range cfg.Routes {
 		for _, item := range strings.Split(r.Path, ",") {

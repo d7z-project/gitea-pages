@@ -8,11 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
-	"gopkg.d7z.net/gitea-pages/pkg/providers"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/subscribe"
@@ -37,10 +38,21 @@ func main() {
 		log.Fatalf("fail to load config file: %v", err)
 	}
 
-	gitea, err := providers.NewGitea(http.DefaultClient, config.Auth.Server, config.Auth.Token, config.Page.DefaultBranch)
+	factory, ok := core.GetProviderFactory(config.Provider.Type)
+	if !ok {
+		log.Fatalf("unsupported provider type: %s", config.Provider.Type)
+	}
+	rawProviderConfig, ok := config.Provider.ProviderConfig(config.Provider.Type)
+	if !ok {
+		log.Fatalf("missing provider config for type: %s", config.Provider.Type)
+	}
+	provider, err := factory(http.DefaultClient, rawProviderConfig, core.ProviderOptions{
+		DefaultBranch: config.Page.DefaultBranch,
+	})
 	if err != nil {
 		log.Fatalln(err)
 	}
+	defer provider.Close()
 	cacheMeta, err := kv.NewKVFromURL(config.Cache.Meta)
 	if err != nil {
 		log.Fatalln(err)
@@ -51,7 +63,7 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer cacheBlob.Close()
-	backend := providers.NewProviderCache(gitea,
+	backend := core.NewProviderCache(provider,
 		cacheBlob.Child("backend"),
 		uint64(config.Cache.BlobLimit),
 		config.Cache.BlobTTL,
@@ -72,6 +84,34 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer event.Close()
+	var authService *core.AuthService
+	if config.Auth != nil {
+		authProvider, ok := provider.(core.ProviderWithAuth)
+		if !ok {
+			log.Fatalf("provider %s does not support auth", config.Provider.Type)
+		}
+		if !authProvider.AuthEnabled() {
+			log.Fatalf("provider %s auth is not fully configured", config.Provider.Type)
+		}
+		authService = core.NewAuthService(authProvider, db.Child("auth"), core.AuthServiceConfig{
+			SessionTTL:     config.Auth.SessionTTL,
+			StateTTL:       config.Auth.StateTTL,
+			AuthzCacheTTL:  config.Auth.AuthzCacheTTL,
+			CookieName:     config.Auth.Cookie.Name,
+			CookieSecure:   config.Auth.Cookie.Secure,
+			CookieDomain:   config.Auth.Cookie.Domain,
+			CookieSameSite: parseSameSite(config.Auth.Cookie.SameSite),
+			OnUnauthorized: func(w http.ResponseWriter, r *http.Request, err error) {
+				config.RenderStatusPage(w, r, http.StatusUnauthorized, err)
+			},
+			OnForbidden: func(w http.ResponseWriter, r *http.Request, err error) {
+				config.RenderStatusPage(w, r, http.StatusForbidden, err)
+			},
+			OnMethodDenied: func(w http.ResponseWriter, r *http.Request, err error) {
+				config.RenderStatusPage(w, r, http.StatusMethodNotAllowed, err)
+			},
+		})
+	}
 	if config.Filters == nil {
 		config.Filters = make(map[string]map[string]any)
 	}
@@ -85,6 +125,7 @@ func main() {
 		pkg.WithBlobCache(cacheBlob.Child("filter"), config.Cache.BlobTTL),
 		pkg.WithErrorHandler(config.ErrorHandler),
 		pkg.WithFilterConfig(config.Filters),
+		pkg.WithAuth(authService),
 	)
 	if err != nil {
 		log.Fatalln(err)
@@ -99,6 +140,19 @@ func main() {
 		_ = svc.Close()
 	}()
 	_ = svc.ListenAndServe()
+}
+
+func parseSameSite(value string) http.SameSite {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "none":
+		return http.SameSiteNoneMode
+	case "default":
+		return http.SameSiteDefaultMode
+	default:
+		return http.SameSiteLaxMode
+	}
 }
 
 func logInject() func() {

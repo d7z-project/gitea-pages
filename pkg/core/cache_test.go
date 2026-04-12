@@ -1,4 +1,4 @@
-package providers
+package core
 
 import (
 	"bytes"
@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 )
@@ -20,7 +19,7 @@ type cacheTestBackend struct{}
 
 func (cacheTestBackend) Close() error { return nil }
 
-func (cacheTestBackend) Meta(context.Context, string, string) (*core.Metadata, error) {
+func (cacheTestBackend) Meta(context.Context, string, string) (*Metadata, error) {
 	return nil, nil
 }
 
@@ -36,8 +35,8 @@ func (cacheTestBackend) Open(context.Context, string, string, string, string, ht
 	}, nil
 }
 
-func (cacheTestBackend) List(context.Context, string, string, string, string) ([]core.DirEntry, error) {
-	return []core.DirEntry{{Name: "index.html", Path: "index.html", Type: "file", Size: 5}}, nil
+func (cacheTestBackend) List(context.Context, string, string, string, string) ([]DirEntry, error) {
+	return []DirEntry{{Name: "index.html", Path: "index.html", Type: "file", Size: 5}}, nil
 }
 
 type cacheRecorder struct {
@@ -114,11 +113,11 @@ type countingListBackend struct {
 	listCalls int
 }
 
-func (b *countingListBackend) List(context.Context, string, string, string, string) ([]core.DirEntry, error) {
+func (b *countingListBackend) List(context.Context, string, string, string, string) ([]DirEntry, error) {
 	b.mu.Lock()
 	b.listCalls++
 	b.mu.Unlock()
-	return []core.DirEntry{
+	return []DirEntry{
 		{Name: "docs", Path: "docs", Type: "dir"},
 		{Name: "index.html", Path: "index.html", Type: "file", Size: 5},
 	}, nil
@@ -144,7 +143,7 @@ type notFoundListBackend struct {
 	listCalls int
 }
 
-func (b *notFoundListBackend) List(context.Context, string, string, string, string) ([]core.DirEntry, error) {
+func (b *notFoundListBackend) List(context.Context, string, string, string, string) ([]DirEntry, error) {
 	b.mu.Lock()
 	b.listCalls++
 	b.mu.Unlock()

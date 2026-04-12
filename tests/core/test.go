@@ -19,8 +19,9 @@ import (
 )
 
 type TestServer struct {
-	server *pkg.Server
-	dummy  *ProviderDummy
+	server  *pkg.Server
+	dummy   *ProviderDummy
+	cookies map[string]*http.Cookie
 }
 
 func NewDefaultTestServer() *TestServer {
@@ -28,6 +29,10 @@ func NewDefaultTestServer() *TestServer {
 }
 
 func NewTestServer(domain string) *TestServer {
+	return NewTestServerOptions(domain)
+}
+
+func NewTestServerOptions(domain string, opts ...pkg.ServerOption) *TestServer {
 	atom := zap.NewAtomicLevel()
 	getenv := os.Getenv("BM")
 	if getenv != "" {
@@ -52,25 +57,28 @@ func NewTestServer(domain string) *TestServer {
 		dummy,
 		domain,
 		memoryKV,
-		pkg.WithClient(http.DefaultClient),
-		pkg.WithEvent(subscribe.NewMemorySubscriber()),
-		pkg.WithMetaCache(memoryKV.Child("cache"), 0, 0, 0),
-		pkg.WithBlobCache(memoryCache, 0),
-		pkg.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
-			if errors.Is(err, os.ErrNotExist) {
-				http.Error(w, "page not found.", http.StatusNotFound)
-			} else if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-			}
-		}),
-		pkg.WithFilterConfig(make(map[string]map[string]any)),
+		append([]pkg.ServerOption{
+			pkg.WithClient(http.DefaultClient),
+			pkg.WithEvent(subscribe.NewMemorySubscriber()),
+			pkg.WithMetaCache(memoryKV.Child("cache"), 0, 0, 0),
+			pkg.WithBlobCache(memoryCache, 0),
+			pkg.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
+				if errors.Is(err, os.ErrNotExist) {
+					http.Error(w, "page not found.", http.StatusNotFound)
+				} else if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+			}),
+			pkg.WithFilterConfig(make(map[string]map[string]any)),
+		}, opts...)...,
 	)
 	if err != nil {
 		panic(err)
 	}
 	return &TestServer{
-		dummy:  dummy,
-		server: server,
+		dummy:   dummy,
+		server:  server,
+		cookies: map[string]*http.Cookie{},
 	}
 }
 
@@ -96,8 +104,19 @@ func (t *TestServer) OpenRequest(method, url string, body io.Reader) ([]byte, *h
 
 func (t *TestServer) OpenRequestWithContext(ctx context.Context, method, url string, body io.Reader) ([]byte, *http.Response, error) {
 	recorder := httptest.NewRecorder()
-	t.server.ServeHTTP(recorder, httptest.NewRequest(method, url, body).WithContext(ctx))
+	req := httptest.NewRequest(method, url, body).WithContext(ctx)
+	for _, cookie := range t.cookies {
+		req.AddCookie(cookie)
+	}
+	t.server.ServeHTTP(recorder, req)
 	response := recorder.Result()
+	for _, cookie := range response.Cookies() {
+		if cookie.MaxAge < 0 || cookie.Value == "" {
+			delete(t.cookies, cookie.Name)
+			continue
+		}
+		t.cookies[cookie.Name] = cookie
+	}
 	if response.Body != nil {
 		defer response.Body.Close()
 	}

@@ -34,6 +34,14 @@ func RequestInject(ctx core.FilterContext, jsCtx *goja.Runtime, req *http.Reques
 			queryParams[key] = values[0]
 		}
 	}
+	authInfo := core.AuthInfoFromContext(req.Context())
+	authIdentity := any(nil)
+	if authInfo.Identity != nil {
+		authIdentity = map[string]any{
+			"subject": authInfo.Identity.Subject,
+			"name":    authInfo.Identity.Name,
+		}
+	}
 	return jsCtx.GlobalObject().Set("request", map[string]any{
 		"method":      req.Method,
 		"url":         url.String(),
@@ -45,7 +53,11 @@ func RequestInject(ctx core.FilterContext, jsCtx *goja.Runtime, req *http.Reques
 		"httpVersion": req.Proto,
 		"path":        url.Path,
 		"query":       queryParams,
-		"headers":     headers,
+		"auth": map[string]any{
+			"authenticated": authInfo.Authenticated,
+			"identity":      authIdentity,
+		},
+		"headers": headers,
 		"get": func(key string) any {
 			get := req.Header.Get(key)
 			if get != "" {

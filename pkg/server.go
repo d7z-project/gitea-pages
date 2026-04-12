@@ -37,6 +37,7 @@ type Server struct {
 	cacheBlobTTL time.Duration
 
 	event        subscribe.Subscriber
+	auth         *core.AuthService
 	errorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -51,6 +52,7 @@ type serverConfig struct {
 	cacheBlobTTL               time.Duration
 	errorHandler               func(w http.ResponseWriter, r *http.Request, err error)
 	filterConfig               map[string]map[string]any
+	authService                *core.AuthService
 }
 
 type ServerOption func(*serverConfig)
@@ -92,6 +94,12 @@ func WithErrorHandler(handler func(w http.ResponseWriter, r *http.Request, err e
 func WithFilterConfig(config map[string]map[string]any) ServerOption {
 	return func(c *serverConfig) {
 		c.filterConfig = config
+	}
+}
+
+func WithAuth(authService *core.AuthService) ServerOption {
+	return func(c *serverConfig) {
+		c.authService = authService
 	}
 }
 
@@ -167,6 +175,7 @@ func NewPageServer(
 		cacheBlob:    cfg.cacheBlob,
 		cacheBlobTTL: cfg.cacheBlobTTL,
 		event:        cfg.event,
+		auth:         cfg.authService,
 	}, nil
 }
 
@@ -196,11 +205,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Request) error {
+	if core.IsReservedPath(request.URL.Path) {
+		if s.auth == nil {
+			http.NotFound(writer, request)
+			return nil
+		}
+		return s.auth.Handle(writer, request)
+	}
 	ctx := request.Context()
 	domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
 	meta, err := s.meta.ParseDomainMeta(ctx, domain, request.URL.Path)
 	if err != nil {
 		return err
+	}
+	if s.auth != nil {
+		if err = s.auth.AttachAuth(request); err != nil {
+			return err
+		}
+	}
+	if meta.Private {
+		if s.auth == nil {
+			return errors.New("private repo requires auth provider")
+		}
+		allowed, authErr := s.auth.RequireRepoAccess(writer, request, meta)
+		if authErr != nil || !allowed {
+			return authErr
+		}
 	}
 	writer.Header().Set("X-Page-ID", meta.CommitID)
 	cancelCtx, cancelFunc := context.WithCancel(request.Context())

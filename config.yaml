@@ -9,11 +9,31 @@ database:
 # 事件传递配置
 event:
   url: "memory://"
-auth:
+provider:
   type: gitea
-  server: https://gitea.com
-  # 需要 user , org , repo 的 read 权限
-  token: token
+  gitea:
+    server: https://gitea.com
+    # 服务端访问 Gitea API 的 token,需要 user , org , repo 的 read 权限
+    token: token
+    client_id: client-id
+    client_secret: client-secret
+    redirect_url: https://pages.example.com/.pages/auth/callback
+    scopes:
+      - read:user
+      - read:repository
+    # 测试环境可开启 http，生产环境保持 false
+    allow_insecure_http: false
+auth:
+  # 省略整个 auth 配置表示禁用页面鉴权；public repo 不走 auth
+  # private: true 的 repo 会要求登录，并以当前用户的 repo read 权限判定是否放行
+  session_ttl: 24h
+  state_ttl: 5m
+  authz_cache_ttl: 30s
+  cookie:
+    name: gitea_pages_session
+    secure: true
+    domain: ""
+    same_site: lax
 cache:
   # 元数据缓存
   meta: "memory://"
@@ -43,8 +63,14 @@ cache:
 page:
   # 默认页面分支
   default_branch: gh-pages
+  # 默认 401 页面模板
+  401: /path/to/html.gotmpl
+  # 默认 403 页面模板
+  403: /path/to/html.gotmpl
   # 默认 404 页面模板
   404: /path/to/html.gotmpl
+  # 默认 405 页面模板
+  405: /path/to/html.gotmpl
   # 默认 500 页面模板
   500: /path/to/html.gotmpl
 filters:

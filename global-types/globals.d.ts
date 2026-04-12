@@ -56,6 +56,7 @@ declare global {
         path: string;
         query: Record<string, string>;
         headers: Record<string, string>;
+        auth: RequestAuth;
 
         get(key: string): string | null;
 
@@ -74,6 +75,16 @@ declare global {
         readBody(): Uint8Array;
 
         protocol: string;
+    }
+
+    interface RequestAuthIdentity {
+        subject: string;
+        name: string;
+    }
+
+    interface RequestAuth {
+        authenticated: boolean;
+        identity: RequestAuthIdentity | null;
     }
 
     const request: RequestObject;
