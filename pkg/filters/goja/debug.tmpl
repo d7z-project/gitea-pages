@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh">
 <head>
-    <title>调试控制台</title>
+    <title>Debug Console</title>
     <meta charset="UTF-8">
     <meta name="viewport"
           content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
@@ -65,33 +65,33 @@
 <h1>Debug Output</h1>
 
 <div class="section">
-    <div class="section-header">执行结果</div>
+    <div class="section-header">Execution Output</div>
     <div class="section-content">
         <pre class="output"><code>{{ .Output }}</code></pre>
     </div>
 </div>
 
 <div class="section">
-    <div class="section-header">控制台日志</div>
+    <div class="section-header">Console Logs</div>
     <div class="section-content">
         <div class="log">{{- range .Logs }}<p class="clear">{{ .Time.Format "2006/01/02 15:04:05" }} - {{ .Level }} : {{ .Message }}</p>{{- end }}</div>
     </div>
 </div>
 
 <div class="section">
-    <div class="section-header">响应头</div>
+    <div class="section-header">Response Headers</div>
     <div class="section-content">
         <div class="log">{{- range  $key, $value := .Headers }}<p>{{ $key }} = {{ $value }}</p>{{- end }}</div>
     </div>
 </div>
 
 <div class="section">
-    <div class="section-header">执行状态</div>
+    <div class="section-header">Execution Status</div>
     <div class="section-content">
         {{- if .Error }}
             <div class="error">{{ .Error }}</div>
         {{- else }}
-            <div class="success">执行成功</div>
+            <div class="success">Execution succeeded</div>
         {{- end }}
     </div>
 </div>

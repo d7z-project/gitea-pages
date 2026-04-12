@@ -40,7 +40,7 @@ func FilterInstProxy(_ core.Params) (core.FilterInstance, error) {
 			request.Header.Set("X-Page-IP", utils.GetRemoteIP(request))
 			request.Header.Set("X-Page-Refer", fmt.Sprintf("%s/%s/%s", ctx.Owner, ctx.Repo, ctx.Path))
 			request.Header.Set("X-Page-Host", request.Host)
-			zap.L().Debug("命中反向代理", zap.Any("prefix", param.Prefix), zap.Any("target", param.Target),
+			zap.L().Debug("proxy route matched", zap.Any("prefix", param.Prefix), zap.Any("target", param.Target),
 				zap.Any("path", proxyPath), zap.Any("target", fmt.Sprintf("%s%s", u, targetPath)))
 			// todo(security): 处理 websocket
 			proxy.ServeHTTP(writer, request)

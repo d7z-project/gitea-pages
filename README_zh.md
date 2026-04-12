@@ -39,6 +39,10 @@ make gitea-pages
 
 具体配置可查看 [`config.yaml`](./config.yaml)。
 
+## JavaScript Filter
+
+Goja filter 的使用方式、宿主 API 与 TypeScript 全局类型可查看 [pkg/filters/goja/README.md](./pkg/filters/goja/README.md)。
+
 ### Page Config
 
 在项目的 `gh-pages` 分支创建 `.pages.yaml`,填入如下内容

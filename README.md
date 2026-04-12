@@ -39,6 +39,10 @@ After that, you can start it with the following command:
 
 For specific configurations, see [`config.yaml`](./config.yaml).
 
+## JavaScript Filter
+
+Goja filter usage, host APIs, and TypeScript global types are documented in [pkg/filters/goja/README.md](./pkg/filters/goja/README.md).
+
 ### Page Config
 
 Create a `.pages.yaml` file in the `gh-pages` branch of your project and fill in the following content:

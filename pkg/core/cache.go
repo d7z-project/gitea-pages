@@ -240,7 +240,7 @@ func (c *ProviderCache) handleBackendResponse(ctx context.Context, key, path str
 		return c.streamResponse(resp, length), nil
 	}
 	if !c.tryAcquireCacheSlot() {
-		zap.L().Debug("跳过缓存，并发限制已达", zap.String("path", path))
+		zap.L().Debug("skip blob cache because the concurrency limit was reached", zap.String("path", path))
 		return c.streamResponse(resp, length), nil
 	}
 	defer c.releaseCacheSlot()
@@ -252,7 +252,7 @@ func (c *ProviderCache) cacheNotFound(ctx context.Context, key string) {
 	if err := c.cacheBlob.Put(ctx, key, map[string]string{
 		"404": "true",
 	}, bytes.NewBuffer(nil), c.notFoundTTL); err != nil {
-		zap.L().Warn("缓存404失败", zap.Error(err))
+		zap.L().Warn("failed to cache 404 response", zap.Error(err))
 	}
 }
 
@@ -260,7 +260,7 @@ func (c *ProviderCache) cacheDirNotFound(ctx context.Context, key string) {
 	if err := c.cacheBlob.Put(ctx, key, map[string]string{
 		"404": "true",
 	}, bytes.NewBuffer(nil), c.dirNotFoundTTL); err != nil {
-		zap.L().Warn("缓存目录404失败", zap.Error(err))
+		zap.L().Warn("failed to cache directory 404 response", zap.Error(err))
 	}
 }
 
@@ -297,7 +297,7 @@ func (c *ProviderCache) cacheResponse(ctx context.Context, key string, resp *htt
 		"Last-Modified":  resp.Header.Get("Last-Modified"),
 		"Content-Type":   resp.Header.Get("Content-Type"),
 	}, bytes.NewBuffer(allBytes), c.cacheBlobTTL); err != nil {
-		zap.L().Warn("缓存归档失败", zap.Error(err), zap.Int("Size", len(allBytes)), zap.Uint64("MaxSize", c.cacheBlobLimit))
+		zap.L().Warn("failed to cache blob response", zap.Error(err), zap.Int("Size", len(allBytes)), zap.Uint64("MaxSize", c.cacheBlobLimit))
 	}
 
 	resp.Body = utils.NopCloser{
@@ -308,17 +308,17 @@ func (c *ProviderCache) cacheResponse(ctx context.Context, key string, resp *htt
 
 func (c *ProviderCache) cacheDirEntries(ctx context.Context, key string, entries []DirEntry) {
 	if !c.tryAcquireCacheSlot() {
-		zap.L().Debug("跳过目录缓存，并发限制已达", zap.String("key", key))
+		zap.L().Debug("skip directory cache because the concurrency limit was reached", zap.String("key", key))
 		return
 	}
 	defer c.releaseCacheSlot()
 
 	payload, err := json.Marshal(entries)
 	if err != nil {
-		zap.L().Warn("目录缓存序列化失败", zap.Error(err))
+		zap.L().Warn("failed to serialize directory cache payload", zap.Error(err))
 		return
 	}
 	if err = c.cacheBlob.Put(ctx, key, nil, bytes.NewReader(payload), c.cacheDirTTL); err != nil {
-		zap.L().Warn("缓存目录失败", zap.Error(err))
+		zap.L().Warn("failed to cache directory entries", zap.Error(err))
 	}
 }
