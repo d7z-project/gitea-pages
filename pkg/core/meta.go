@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gobwas/glob"
@@ -17,8 +18,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/pkg/errors"
-
-	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
 type ServerMeta struct {
@@ -28,9 +27,16 @@ type ServerMeta struct {
 
 	client     *http.Client
 	cache      *tools.KVCache[PageMetaContent]
-	locker     *utils.Locker
 	refresh    time.Duration
 	refreshSem chan struct{}
+	updatesMu  sync.Mutex
+	updates    map[string]*metaUpdate
+}
+
+type metaUpdate struct {
+	done chan struct{}
+	meta *PageMetaContent
+	err  error
 }
 
 // PageConfig 配置
@@ -95,9 +101,9 @@ func NewServerMeta(
 		Alias:      alias,
 		client:     client,
 		cache:      tools.NewCache[PageMetaContent](cache, "meta", ttl),
-		locker:     utils.NewLocker(),
 		refresh:    refresh,
 		refreshSem: make(chan struct{}, refreshConcurrent),
+		updates:    make(map[string]*metaUpdate),
 	}
 }
 
@@ -106,44 +112,83 @@ func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo string) (*PageMeta
 	if cache, found, _ := s.cache.Load(ctx, key); found {
 		if time.Now().After(cache.RefreshAt) {
 			if s.refresh == 0 {
-				return s.updateMeta(ctx, owner, repo)
+				return s.waitForMetaUpdate(ctx, owner, repo)
 			}
-			// 异步刷新
-			mux := s.locker.Open(key)
-			if mux.TryLock() {
-				select {
-				case s.refreshSem <- struct{}{}:
-					go func() {
-						defer func() { <-s.refreshSem }()
-						defer mux.Unlock()
-						bgCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
-						defer cancel()
-						_, _ = s.updateMetaWithLock(bgCtx, owner, repo)
-					}()
-				default:
-					// 达到并发限制，跳过本次异步刷新，直接返回旧缓存
-					mux.Unlock()
-				}
-			}
+			s.triggerMetaRefresh(owner, repo)
 		}
 		if cache.IsPage {
 			return &cache, nil
 		}
 		return nil, os.ErrNotExist
 	}
-	return s.updateMeta(ctx, owner, repo)
+	return s.waitForMetaUpdate(ctx, owner, repo)
 }
 
-func (s *ServerMeta) updateMeta(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
+func (s *ServerMeta) waitForMetaUpdate(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
+	update := s.getOrStartMetaUpdate(owner, repo)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-update.done:
+		if update.err != nil {
+			return nil, update.err
+		}
+		return update.meta, nil
+	}
+}
+
+func (s *ServerMeta) triggerMetaRefresh(owner, repo string) {
 	key := fmt.Sprintf("%s/%s", owner, repo)
-	mux := s.locker.Open(key)
-	mux.Lock()
-	defer mux.Unlock()
+	s.updatesMu.Lock()
+	if _, ok := s.updates[key]; ok {
+		s.updatesMu.Unlock()
+		return
+	}
+	select {
+	case s.refreshSem <- struct{}{}:
+	default:
+		s.updatesMu.Unlock()
+		return
+	}
+	update := &metaUpdate{done: make(chan struct{})}
+	s.updates[key] = update
+	s.updatesMu.Unlock()
 
-	return s.updateMetaWithLock(ctx, owner, repo)
+	go func() {
+		defer func() { <-s.refreshSem }()
+		s.runMetaUpdate(owner, repo, update)
+	}()
 }
 
-func (s *ServerMeta) updateMetaWithLock(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
+func (s *ServerMeta) getOrStartMetaUpdate(owner, repo string) *metaUpdate {
+	key := fmt.Sprintf("%s/%s", owner, repo)
+	s.updatesMu.Lock()
+	if update, ok := s.updates[key]; ok {
+		s.updatesMu.Unlock()
+		return update
+	}
+	update := &metaUpdate{done: make(chan struct{})}
+	s.updates[key] = update
+	s.updatesMu.Unlock()
+
+	go s.runMetaUpdate(owner, repo, update)
+	return update
+}
+
+func (s *ServerMeta) runMetaUpdate(owner, repo string, update *metaUpdate) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	update.meta, update.err = s.refreshMeta(ctx, owner, repo)
+
+	key := fmt.Sprintf("%s/%s", owner, repo)
+	s.updatesMu.Lock()
+	delete(s.updates, key)
+	s.updatesMu.Unlock()
+	close(update.done)
+}
+
+func (s *ServerMeta) refreshMeta(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
 	key := fmt.Sprintf("%s/%s", owner, repo)
 	// 再次检查缓存
 	if cache, found, _ := s.cache.Load(ctx, key); found && time.Now().Before(cache.RefreshAt) {

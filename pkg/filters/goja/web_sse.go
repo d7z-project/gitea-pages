@@ -10,25 +10,32 @@ import (
 	"github.com/dop251/goja"
 	"github.com/pkg/errors"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
+type sseMessage struct {
+	payload string
+	result  chan error
+}
+
 type sseState struct {
-	ctx     core.FilterContext
-	writer  http.ResponseWriter
-	flusher http.Flusher
-	ready   chan struct{}
-	done    chan struct{}
-	once    sync.Once
-	writeMu sync.Mutex
+	ctx       core.FilterContext
+	ready     chan struct{}
+	done      chan struct{}
+	queue     chan sseMessage
+	closeCh   chan struct{}
+	closeOnce sync.Once
 }
 
 func installSSE(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWriter) (io.Closer, error) {
 	closers := NewClosers()
 	if err := vm.Set("createEventStream", func(_ ...goja.Value) *goja.Object {
 		state := &sseState{
-			ctx:   ctx,
-			ready: make(chan struct{}),
-			done:  make(chan struct{}),
+			ctx:     ctx,
+			ready:   make(chan struct{}),
+			done:    make(chan struct{}),
+			queue:   make(chan sseMessage),
+			closeCh: make(chan struct{}),
 		}
 		responseObj := newResponseObject(vm, &webResponseState{
 			status: http.StatusOK,
@@ -39,7 +46,7 @@ func installSSE(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWr
 				"X-Accel-Buffering": []string{"no"},
 			},
 			upgrade: func() error {
-				base := unwrapResponseWriter(writer)
+				base := utils.BaseWriterOf(writer)
 				flusher, ok := base.(http.Flusher)
 				if !ok {
 					return errors.New("response writer does not support streaming")
@@ -49,16 +56,28 @@ func installSSE(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWr
 				writer.Header().Set("Connection", "keep-alive")
 				writer.Header().Set("X-Accel-Buffering", "no")
 				writer.WriteHeader(http.StatusOK)
-				state.writer = writer
-				state.flusher = flusher
-				close(state.ready)
-				flusher.Flush()
-				select {
-				case <-ctx.Done():
+				if err := safeSSEFlush(flusher); err != nil {
 					state.finish()
-					return ctx.Err()
-				case <-state.done:
-					return nil
+					return err
+				}
+				close(state.ready)
+				for {
+					select {
+					case <-ctx.Done():
+						state.finish()
+						return ctx.Err()
+					case <-state.closeCh:
+						state.finish()
+						return nil
+					case msg := <-state.queue:
+						err := writeSSEMessage(writer, flusher, msg.payload)
+						msg.result <- err
+						close(msg.result)
+						if err != nil {
+							state.finish()
+							return err
+						}
+					}
 				}
 			},
 		})
@@ -87,14 +106,28 @@ func newSSEStreamObject(vm *goja.Runtime, state *sseState) *goja.Object {
 				resolveOrReject(vm, reject, resolve, errors.New("event stream is closed"))
 				return
 			}
-			payload := encodeSSEPayload(vm, data, options)
-			state.writeMu.Lock()
-			_, err := io.WriteString(state.writer, payload)
-			if err == nil {
-				state.flusher.Flush()
+			result := make(chan error, 1)
+			msg := sseMessage{
+				payload: encodeSSEPayload(vm, data, options),
+				result:  result,
 			}
-			state.writeMu.Unlock()
-			resolveOrReject(vm, reject, resolve, err)
+			select {
+			case <-state.ctx.Done():
+				resolveOrReject(vm, reject, resolve, state.ctx.Err())
+				return
+			case <-state.done:
+				resolveOrReject(vm, reject, resolve, errors.New("event stream is closed"))
+				return
+			case state.queue <- msg:
+			}
+			select {
+			case err := <-result:
+				resolveOrReject(vm, reject, resolve, err)
+			case <-state.ctx.Done():
+				resolveOrReject(vm, reject, resolve, state.ctx.Err())
+			case <-state.done:
+				resolveOrReject(vm, reject, resolve, errors.New("event stream is closed"))
+			}
 		}()
 		return promise
 	})
@@ -102,6 +135,23 @@ func newSSEStreamObject(vm *goja.Runtime, state *sseState) *goja.Object {
 		state.finish()
 	})
 	return obj
+}
+
+func writeSSEMessage(writer http.ResponseWriter, flusher http.Flusher, payload string) error {
+	if _, err := io.WriteString(writer, payload); err != nil {
+		return err
+	}
+	return safeSSEFlush(flusher)
+}
+
+func safeSSEFlush(flusher http.Flusher) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("sse flush panic: %v", r)
+		}
+	}()
+	flusher.Flush()
+	return nil
 }
 
 func encodeSSEPayload(vm *goja.Runtime, data string, options []goja.Value) string {
@@ -166,26 +216,10 @@ func splitSSELines(data string) []string {
 }
 
 func (s *sseState) finish() {
-	s.once.Do(func() {
+	s.closeOnce.Do(func() {
+		close(s.closeCh)
 		close(s.done)
 	})
-}
-
-func unwrapResponseWriter(writer http.ResponseWriter) http.ResponseWriter {
-	type unwrapper interface {
-		Unwrap() http.ResponseWriter
-	}
-	for {
-		item, ok := writer.(unwrapper)
-		if !ok {
-			return writer
-		}
-		next := item.Unwrap()
-		if next == nil || next == writer {
-			return writer
-		}
-		writer = next
-	}
 }
 
 func resolveOrReject(vm *goja.Runtime, reject, resolve func(any) error, err error) {

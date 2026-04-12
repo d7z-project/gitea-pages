@@ -36,6 +36,12 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path string) (
 	if !strings.HasSuffix(domain, "."+p.baseDomain) {
 		alias, err := p.Alias.Query(ctx, domain) // 确定 alias 是否存在内容
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
 			zap.L().Warn("unknown domain", zap.String("base", p.baseDomain), zap.String("domain", domain), zap.Error(err))
 			return nil, os.ErrNotExist
 		}
@@ -66,11 +72,13 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo string, path []
 	result := &PageContent{}
 	meta, err := p.GetMeta(ctx, owner, repo)
 	if err != nil {
-		zap.L().Debug("repo does not exists", zap.Error(err), zap.Strings("meta", []string{owner, repo}))
-		if meta != nil {
-			// 解析错误汇报
-			return nil, errors.New(meta.ErrorMsg)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
 		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		zap.L().Debug("repo does not exists", zap.Error(err), zap.Strings("meta", []string{owner, repo}))
 		return nil, errors.Wrap(os.ErrNotExist, strings.Join(path, "/"))
 	}
 	result.PageMetaContent = meta

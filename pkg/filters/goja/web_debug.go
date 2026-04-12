@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
 //go:embed debug.tmpl
@@ -26,6 +27,7 @@ type DebugData struct {
 
 	request *http.Request
 	parent  http.ResponseWriter
+	base    http.ResponseWriter
 }
 
 func NewDebug(debug bool, request *http.Request, writer http.ResponseWriter) *DebugData {
@@ -36,6 +38,7 @@ func NewDebug(debug bool, request *http.Request, writer http.ResponseWriter) *De
 		body:    new(bytes.Buffer),
 		logs:    []debugDataLog{},
 		parent:  writer,
+		base:    utils.BaseWriterOf(writer),
 		request: request,
 	}
 }
@@ -128,6 +131,6 @@ func (d *DebugData) Flush(err error) error {
 	return nil
 }
 
-func (d *DebugData) Unwrap() http.ResponseWriter {
-	return d.parent
+func (d *DebugData) BaseWriter() http.ResponseWriter {
+	return d.base
 }
