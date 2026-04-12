@@ -111,6 +111,37 @@ routes:
 	assert.JSONEq(t, `{"href":"http://org1.example.com/repo1/api/v1/fetch?q=ok","pathname":"/repo1/api/v1/fetch","search":"?q=ok"}`, string(body))
 }
 
+func Test_GoJa_RequestIP(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function(request) {
+  return Response.json({
+    ip: request.ip,
+    remoteIP: request.RemoteIP,
+  })
+})
+`, "api/v1/**")
+	defer server.Close()
+
+	httpServer := server.StartHTTPServer("org1.example.com")
+	defer httpServer.Close()
+
+	req, err := http.NewRequest(http.MethodGet, httpServer.URL+"/repo1/api/v1/fetch", nil)
+	assert.NoError(t, err)
+	req.Host = "org1.example.com"
+	req.Header.Set("X-Forwarded-For", "198.51.100.10, 10.0.0.1")
+
+	resp, err := http.DefaultClient.Do(req)
+	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"ip":"198.51.100.10","remoteIP":"198.51.100.10"}`, string(body))
+}
+
 func Test_GoJa_RequestBody(t *testing.T) {
 	server := newGoJaTestServer(`
 serve(async function(request) {

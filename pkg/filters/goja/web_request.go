@@ -10,17 +10,19 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
 const internalRequestKey = "__page_internal_request__"
 
 type webRequestState struct {
-	method  string
-	url     string
-	headers http.Header
-	body    []byte
-	used    bool
-	signal  *goja.Object
+	method   string
+	url      string
+	remoteIP string
+	headers  http.Header
+	body     []byte
+	used     bool
+	signal   *goja.Object
 }
 
 func installRequest(vm *goja.Runtime) error {
@@ -42,14 +44,17 @@ func newRequestObject(vm *goja.Runtime, state *webRequestState) *goja.Object {
 	_ = obj.Set("url", state.url)
 	_ = obj.Set("headers", newHeadersObject(vm, &webHeadersState{values: state.headers}))
 	_ = obj.Set("signal", state.signal)
+	_ = obj.Set("ip", state.remoteIP)
+	_ = obj.Set("RemoteIP", state.remoteIP)
 	attachBodyMethods(vm, obj, bodyState)
 	_ = obj.Set("clone", func() *goja.Object {
 		return newRequestObject(vm, &webRequestState{
-			method:  state.method,
-			url:     state.url,
-			headers: cloneHeaderValues(state.headers),
-			body:    append([]byte(nil), state.body...),
-			signal:  state.signal,
+			method:   state.method,
+			url:      state.url,
+			remoteIP: state.remoteIP,
+			headers:  cloneHeaderValues(state.headers),
+			body:     append([]byte(nil), state.body...),
+			signal:   state.signal,
 		})
 	})
 	return obj
@@ -68,11 +73,12 @@ func cloneRequestState(current *webRequestState) *webRequestState {
 		return nil
 	}
 	return &webRequestState{
-		method:  current.method,
-		url:     current.url,
-		headers: cloneHeaderValues(current.headers),
-		body:    append([]byte(nil), current.body...),
-		signal:  current.signal,
+		method:   current.method,
+		url:      current.url,
+		remoteIP: current.remoteIP,
+		headers:  cloneHeaderValues(current.headers),
+		body:     append([]byte(nil), current.body...),
+		signal:   current.signal,
 	}
 }
 
@@ -185,11 +191,12 @@ func newIncomingRequestObject(vm *goja.Runtime, req *http.Request, maxBodyBytes 
 	}
 	req.Body = cloneBody(body)
 	return newRequestObject(vm, &webRequestState{
-		method:  req.Method,
-		url:     absoluteRequestURL(req),
-		headers: cloneHeaderValues(req.Header),
-		body:    body,
-		signal:  newAbortSignalObject(vm),
+		method:   req.Method,
+		url:      absoluteRequestURL(req),
+		remoteIP: utils.GetRemoteIP(req),
+		headers:  cloneHeaderValues(req.Header),
+		body:     body,
+		signal:   newAbortSignalObject(vm),
 	}), nil
 }
 

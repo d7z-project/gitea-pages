@@ -5,6 +5,8 @@ declare global {
 
     interface Request {
         bytes(): Promise<Uint8Array>;
+        readonly ip: string;
+        readonly RemoteIP: string;
     }
 
     interface Response {
