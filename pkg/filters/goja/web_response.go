@@ -2,6 +2,7 @@ package goja
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -31,7 +32,11 @@ func installResponse(vm *goja.Runtime) error {
 	fn := vm.ToValue(ctor)
 	obj := fn.ToObject(vm)
 	_ = obj.Set("json", func(data goja.Value, init ...goja.Value) *goja.Object {
-		body, err := json.Marshal(data.Export())
+		exported := any(nil)
+		if data != nil && !goja.IsUndefined(data) && !goja.IsNull(data) {
+			exported = data.Export()
+		}
+		body, err := json.Marshal(exported)
 		if err != nil {
 			panic(err)
 		}
@@ -65,7 +70,11 @@ func newResponseObject(vm *goja.Runtime, state *webResponseState) *goja.Object {
 	if state.status == 0 {
 		state.status = http.StatusOK
 	}
+	if state.statusText == "" {
+		state.statusText = http.StatusText(state.status)
+	}
 	obj := vm.NewObject()
+	bodyState := newBodyState(state.body, state.headers, &state.used)
 	_ = obj.Set(internalResponseKey, state)
 	_ = obj.Set("status", state.status)
 	_ = obj.Set("statusText", state.statusText)
@@ -73,25 +82,7 @@ func newResponseObject(vm *goja.Runtime, state *webResponseState) *goja.Object {
 	_ = obj.DefineAccessorProperty("ok", vm.ToValue(func() bool {
 		return state.status >= 200 && state.status < 300
 	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
-	_ = obj.DefineAccessorProperty("bodyUsed", vm.ToValue(func() bool {
-		return state.used
-	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
-	_ = obj.Set("text", func() *goja.Promise {
-		state.used = true
-		return resolvedPromise(vm, string(state.body))
-	})
-	_ = obj.Set("json", func() *goja.Promise {
-		state.used = true
-		var decoded any
-		if err := json.Unmarshal(state.body, &decoded); err != nil {
-			return rejectedPromise(vm, err)
-		}
-		return resolvedPromise(vm, decoded)
-	})
-	_ = obj.Set("arrayBuffer", func() *goja.Promise {
-		state.used = true
-		return resolvedPromise(vm, vm.NewArrayBuffer(append([]byte(nil), state.body...)))
-	})
+	attachBodyMethods(vm, obj, bodyState)
 	_ = obj.Set("clone", func() *goja.Object {
 		return newResponseObject(vm, &webResponseState{
 			status:     state.status,
@@ -108,7 +99,7 @@ func responseStateFromConstructor(vm *goja.Runtime, call goja.ConstructorCall) (
 		status:  http.StatusOK,
 		headers: make(http.Header),
 	}
-	if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) && !goja.IsNull(call.Arguments[0]) {
+	if len(call.Arguments) > 0 && call.Arguments[0] != nil && !goja.IsUndefined(call.Arguments[0]) && !goja.IsNull(call.Arguments[0]) {
 		body, err := bodyBytesFromValue(vm, call.Arguments[0])
 		if err != nil {
 			return nil, err
@@ -129,30 +120,25 @@ func applyResponseInit(vm *goja.Runtime, state *webResponseState, value goja.Val
 	if obj == nil {
 		return
 	}
-	if next := obj.Get("status"); next != nil && !goja.IsUndefined(next) && !goja.IsNull(next) {
+	if next, ok := objectValue(obj, "status"); ok {
 		state.status = int(next.ToInteger())
+		if state.statusText == "" {
+			state.statusText = http.StatusText(state.status)
+		}
 	}
-	if next := obj.Get("statusText"); next != nil && !goja.IsUndefined(next) && !goja.IsNull(next) {
+	if next, ok := objectValue(obj, "statusText"); ok {
 		state.statusText = next.String()
 	}
-	if next := obj.Get("headers"); next != nil && !goja.IsUndefined(next) && !goja.IsNull(next) {
+	if next, ok := objectValue(obj, "headers"); ok {
 		state.headers = headersFromValue(vm, next)
 	}
 }
 
 func responseStateFromValue(vm *goja.Runtime, value goja.Value) (*webResponseState, bool) {
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+	exported, ok := internalExportedValue(vm, value, internalResponseKey)
+	if !ok {
 		return nil, false
 	}
-	obj := value.ToObject(vm)
-	if obj == nil {
-		return nil, false
-	}
-	internal := obj.Get(internalResponseKey)
-	if internal == nil || goja.IsUndefined(internal) || goja.IsNull(internal) {
-		return nil, false
-	}
-	exported := internal.Export()
 	state, ok := exported.(*webResponseState)
 	return state, ok
 }
@@ -160,6 +146,9 @@ func responseStateFromValue(vm *goja.Runtime, value goja.Value) (*webResponseSta
 func writeResponseValue(vm *goja.Runtime, writer http.ResponseWriter, value goja.Value) error {
 	state, ok := responseStateFromValue(vm, value)
 	if !ok {
+		if value == nil {
+			return errors.New("handler must return Response, got <nil>")
+		}
 		return fmt.Errorf("handler must return Response, got %s", reflect.TypeOf(value.Export()))
 	}
 	for key, values := range state.headers {

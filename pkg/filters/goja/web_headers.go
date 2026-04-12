@@ -3,6 +3,8 @@ package goja
 import (
 	"fmt"
 	"net/http"
+	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/dop251/goja"
@@ -79,18 +81,10 @@ func newHeadersObject(vm *goja.Runtime, state *webHeadersState) *goja.Object {
 }
 
 func headersStateFromValue(vm *goja.Runtime, value goja.Value) (*webHeadersState, bool) {
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+	exported, ok := internalExportedValue(vm, value, internalHeadersKey)
+	if !ok {
 		return nil, false
 	}
-	obj := value.ToObject(vm)
-	if obj == nil {
-		return nil, false
-	}
-	internal := obj.Get(internalHeadersKey)
-	if internal == nil || goja.IsUndefined(internal) || goja.IsNull(internal) {
-		return nil, false
-	}
-	exported := internal.Export()
 	state, ok := exported.(*webHeadersState)
 	return state, ok
 }
@@ -120,15 +114,68 @@ func mergeHeadersValue(vm *goja.Runtime, target http.Header, value goja.Value) {
 		}
 		return
 	}
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+	if isNilish(value) {
 		return
 	}
-	obj := value.ToObject(vm)
-	if obj == nil {
+	if isArrayValue(value) {
+		arr, ok := valueObject(vm, value)
+		if !ok {
+			return
+		}
+		lengthValue, ok := objectValue(arr, "length")
+		if !ok {
+			return
+		}
+		length := int(lengthValue.ToInteger())
+		for i := 0; i < length; i++ {
+			entry := arr.Get(strconv.Itoa(i))
+			if entry == nil || goja.IsUndefined(entry) || goja.IsNull(entry) {
+				continue
+			}
+			entryObj := entry.ToObject(vm)
+			if entryObj == nil {
+				continue
+			}
+			entryLength, ok := objectValue(entryObj, "length")
+			if !isArrayValue(entry) || !ok || int(entryLength.ToInteger()) < 2 {
+				continue
+			}
+			nameValue, ok := objectValue(entryObj, "0")
+			if !ok {
+				continue
+			}
+			name := nameValue.String()
+			item := entryObj.Get("1")
+			if item == nil || goja.IsUndefined(item) || goja.IsNull(item) {
+				target.Add(name, "")
+				continue
+			}
+			switch exported := item.Export().(type) {
+			case []any:
+				for _, v := range exported {
+					target.Add(name, fmt.Sprint(v))
+				}
+			case []string:
+				for _, v := range exported {
+					target.Add(name, v)
+				}
+			default:
+				target.Add(name, item.String())
+			}
+		}
+		return
+	}
+	obj, ok := valueObject(vm, value)
+	if !ok {
 		return
 	}
 	for _, key := range obj.Keys() {
-		exported := obj.Get(key).Export()
+		currentValue := obj.Get(key)
+		if currentValue == nil || goja.IsUndefined(currentValue) || goja.IsNull(currentValue) {
+			target.Set(key, "")
+			continue
+		}
+		exported := currentValue.Export()
 		switch current := exported.(type) {
 		case []any:
 			for _, item := range current {
@@ -142,4 +189,16 @@ func mergeHeadersValue(vm *goja.Runtime, target http.Header, value goja.Value) {
 			target.Set(key, fmt.Sprint(exported))
 		}
 	}
+}
+
+func isArrayValue(value goja.Value) bool {
+	if value == nil {
+		return false
+	}
+	typ := reflect.TypeOf(value.Export())
+	if typ == nil {
+		return false
+	}
+	kind := typ.Kind()
+	return kind == reflect.Slice || kind == reflect.Array
 }

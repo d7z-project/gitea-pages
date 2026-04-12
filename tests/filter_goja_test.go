@@ -20,24 +20,33 @@ import (
 	"gopkg.d7z.net/middleware/kv"
 )
 
-func Test_GoJa_HandlerResponse(t *testing.T) {
+func newGoJaTestServer(script string, routePath ...string) *testcore.TestServer {
 	server := testcore.NewDefaultTestServer()
-	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
-	server.AddFile("org1/repo1/gh-pages/index.js", `
+	server.AddFile("org1/repo1/gh-pages/index.js", "%s", script)
+	path := "**"
+	if len(routePath) > 0 && routePath[0] != "" {
+		path = routePath[0]
+	}
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: %q
+  js:
+    exec: "index.js"
+`, path)
+	return server
+}
+
+func Test_GoJa_HandlerResponse(t *testing.T) {
+	server := newGoJaTestServer(`
 serve(async function(request) {
   return new Response("512 + 512 = 1024", {
     status: 201,
     headers: { "X-Cache": "ignore" }
   })
 })
-`)
-	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
-routes:
-- path: "api/v1/**"
-  js:
-    exec: "index.js"
-`)
+`, "api/v1/**")
+	defer server.Close()
 
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/")
 	assert.NoError(t, err)
@@ -51,20 +60,12 @@ routes:
 }
 
 func Test_GoJa_Request(t *testing.T) {
-	server := testcore.NewDefaultTestServer()
-	defer server.Close()
-	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
-	server.AddFile("org1/repo1/gh-pages/index.js", `
+	server := newGoJaTestServer(`
 serve(async function(request) {
   return new Response(request.method + " " + new URL(request.url).pathname)
 })
-`)
-	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
-routes:
-- path: "api/v1/**"
-  js:
-    exec: "index.js"
-`)
+`, "api/v1/**")
+	defer server.Close()
 
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/fetch")
 	assert.NoError(t, err)
@@ -111,21 +112,13 @@ routes:
 }
 
 func Test_GoJa_RequestBody(t *testing.T) {
-	server := testcore.NewDefaultTestServer()
-	defer server.Close()
-	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
-	server.AddFile("org1/repo1/gh-pages/index.js", `
+	server := newGoJaTestServer(`
 serve(async function(request) {
   const body = await request.text()
   return new Response(body)
 })
-`)
-	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
-routes:
-- path: "api/v1/**"
-  js:
-    exec: "index.js"
-`)
+`, "api/v1/**")
+	defer server.Close()
 
 	data, _, err := server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/api/v1/fetch", bytes.NewBufferString("payload"))
 	assert.NoError(t, err)
@@ -158,6 +151,30 @@ routes:
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/list")
 	assert.NoError(t, err)
 	assert.JSONEq(t, `{"root":[".pages.yaml","docs","index.html","index.js"],"docs":["docs/a.txt","docs/b.txt"]}`, string(data))
+}
+
+func Test_GoJa_GiteaPagesFSRead(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  const syncText = fs.readTextSync("docs/a.txt")
+  const asyncText = await fs.readText("docs/b.txt")
+  const syncBytes = new TextDecoder().decode(fs.readSync("docs/a.txt"))
+  const asyncBytes = new TextDecoder().decode(await fs.read("docs/b.txt"))
+  return Response.json({
+    syncText,
+    asyncText,
+    syncBytes,
+    asyncBytes,
+  })
+})
+`, "api/v1/**")
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/docs/a.txt", "alpha")
+	server.AddFile("org1/repo1/gh-pages/docs/b.txt", "beta")
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/io")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"syncText":"alpha","asyncText":"beta","syncBytes":"alpha","asyncBytes":"beta"}`, string(data))
 }
 
 func Test_GoJa_HostAuth(t *testing.T) {
@@ -369,6 +386,171 @@ routes:
 	assert.NoError(t, err)
 	assert.Equal(t, "fetched-content", string(data))
 	assert.Equal(t, "test-header", resp.Header.Get("X-Fetched-Header"))
+}
+
+func Test_GoJa_FetchRequestObject(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Method", r.Method)
+		w.Header().Set("X-Value", r.Header.Get("X-Test"))
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(async function() {
+  const req = new Request('%s', {
+    method: 'post',
+    headers: [['X-Test', '123']],
+  })
+  const res = await fetch(req)
+  return Response.json({
+    body: await res.text(),
+    method: res.headers.get('X-Method'),
+    value: res.headers.get('X-Value'),
+    statusText: res.statusText,
+  })
+})
+`, ts.URL)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "**"
+  js:
+    exec: "index.js"
+`)
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/fetch")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"body":"ok","method":"POST","value":"123","statusText":"OK"}`, string(data))
+}
+
+func Test_GoJa_BodyUsed(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function(request) {
+  await request.text()
+  try {
+    await request.text()
+  } catch (err) {
+    return new Response(String(err))
+  }
+  return new Response("missing-error", { status: 500 })
+})
+`)
+	defer server.Close()
+
+	data, _, err := server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/body", bytes.NewBufferString("payload"))
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), "body stream already read")
+}
+
+func Test_GoJa_HeadersArrayInit(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  const headers = new Headers([
+    ['X-Test', '1'],
+    ['X-Test-2', '2'],
+  ])
+  return new Response(headers.get('X-Test') + ':' + headers.get('X-Test-2'))
+})
+`)
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/headers")
+	assert.NoError(t, err)
+	assert.Equal(t, "1:2", string(data))
+}
+
+func Test_GoJa_BodyStreamAndBytes(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function(request) {
+  const reader = request.body.getReader()
+  const first = await reader.read()
+  const second = await reader.read()
+  return Response.json({
+    first: new TextDecoder().decode(first.value),
+    done: second.done,
+    bytes: new TextDecoder().decode(await new Response("abc").bytes()),
+  })
+})
+`)
+	defer server.Close()
+
+	data, _, err := server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/body-stream", bytes.NewBufferString("payload"))
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"first":"payload","done":true,"bytes":"abc"}`, string(data))
+}
+
+func Test_GoJa_BlobAndFormData(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function(request) {
+  const blob = await new Response("hello", {
+    headers: { "Content-Type": "text/plain" }
+  }).blob()
+  const form = await request.formData()
+  return Response.json({
+    blobText: await blob.text(),
+    blobType: blob.type,
+    a: form.get("a"),
+    b: form.get("b"),
+  })
+})
+`)
+	defer server.Close()
+
+	body := bytes.NewBufferString("a=1&b=two")
+	data, _, err := server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/form", body)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"blobText":"hello","blobType":"text/plain","a":"1","b":"two"}`, string(data))
+}
+
+func Test_GoJa_NullishInputsDoNotCrash(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  const headers = new Headers(undefined)
+  headers.set("x-one", "1")
+
+  const req = new Request("https://example.com", undefined)
+  const req2 = new Request("https://example.com", {
+    headers: null,
+    body: null,
+    signal: null,
+  })
+
+  const resp = new Response(null, undefined)
+  const decoder = new TextDecoder()
+
+  return Response.json({
+    header: headers.get("x-one"),
+    reqMethod: req.method,
+    req2Method: req2.method,
+    req2BodyUsed: req2.bodyUsed,
+    respStatus: resp.status,
+    decodeNull: decoder.decode(null),
+    decodeUndefined: decoder.decode(undefined),
+  })
+})
+`)
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/nullish")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"header":"1","reqMethod":"GET","req2Method":"GET","req2BodyUsed":false,"respStatus":200,"decodeNull":"","decodeUndefined":""}`, string(data))
+}
+
+func Test_GoJa_NullishHandlerRejectionIsGraceful(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  return Promise.reject(undefined)
+})
+`)
+	defer server.Close()
+
+	_, resp, err := server.OpenFile("https://org1.example.com/repo1/reject")
+	assert.Error(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
 func Test_GoJa_FrameworkHelpers(t *testing.T) {

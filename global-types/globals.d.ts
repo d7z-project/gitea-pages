@@ -1,72 +1,24 @@
 declare global {
-    interface Headers {
-        get(name: string): string | null;
-        set(name: string, value: string): void;
-        append(name: string, value: string): void;
-        has(name: string): boolean;
-        delete(name: string): void;
-        keys(): string[];
-        values(): string[];
-        entries(): [string, string][];
-        forEach(callback: (value: string, key: string, parent: Headers) => void): void;
-    }
-
-    interface RequestInit {
-        method?: string;
-        headers?: Headers | Record<string, string>;
-        body?: string | Uint8Array | ArrayBuffer;
-        signal?: AbortSignal;
+    interface Blob {
+        bytes(): Promise<Uint8Array>;
     }
 
     interface Request {
-        readonly method: string;
-        readonly url: string;
-        readonly headers: Headers;
-        readonly bodyUsed: boolean;
-        readonly signal: AbortSignal;
-        text(): Promise<string>;
-        json<T = any>(): Promise<T>;
-        arrayBuffer(): Promise<ArrayBuffer>;
-        clone(): Request;
-    }
-
-    interface ResponseInit {
-        status?: number;
-        statusText?: string;
-        headers?: Headers | Record<string, string>;
+        bytes(): Promise<Uint8Array>;
     }
 
     interface Response {
-        readonly status: number;
-        readonly statusText: string;
-        readonly headers: Headers;
-        readonly ok: boolean;
-        readonly bodyUsed: boolean;
-        text(): Promise<string>;
-        json<T = any>(): Promise<T>;
-        arrayBuffer(): Promise<ArrayBuffer>;
-        clone(): Response;
+        bytes(): Promise<Uint8Array>;
     }
 
-    var Request: {
-        new(input: string | Request, init?: RequestInit): Request;
-    };
-
-    var Response: {
-        new(body?: string | Uint8Array | ArrayBuffer | null, init?: ResponseInit): Response;
-        json(data: any, init?: ResponseInit): Response;
-        redirect(location: string, status?: number): Response;
-    };
-
-    interface FetchOptions extends RequestInit {}
-
-    function fetch(url: string, options?: FetchOptions): Promise<Response>;
-
     type RequestHandler = (request: Request) => Response | Promise<Response>;
-    type FetchHandlerObject = {
+
+    interface FetchHandlerObject {
         fetch(request: Request): Response | Promise<Response>;
-    };
+    }
+
     type PageHandler = RequestHandler | FetchHandlerObject;
+
     function serve(handler: PageHandler): void;
 
     interface RouteContext {
@@ -161,6 +113,10 @@ declare global {
 
     interface PageFS {
         list(path?: string): PageEntry[];
+        read(path: string): Promise<Uint8Array>;
+        readText(path: string): Promise<string>;
+        readSync(path: string): Uint8Array;
+        readTextSync(path: string): string;
     }
 
     interface KVListResult {
@@ -197,9 +153,15 @@ declare global {
     const page: PageHost;
     const fs: PageFS;
     const kv: KVSystem;
+    // @ts-ignore
     const event: EventSystem;
+
+    interface PageWebSocket extends WebSocket {
+        send(data: string | Uint8Array | ArrayBuffer): Promise<void>;
+    }
+
     function upgradeWebSocket(request?: Request): {
-        socket: WebSocket;
+        socket: PageWebSocket;
         response: Response;
     };
 
@@ -211,52 +173,6 @@ declare global {
         }): Promise<void>;
         close(): void;
     }
-
-    interface WebSocketEventMap {
-        open: Event;
-        message: MessageEvent<string | Uint8Array>;
-        close: CloseEvent;
-        error: Event;
-    }
-
-    interface Event {
-        type: string;
-    }
-
-    interface MessageEvent<T = any> extends Event {
-        data: T;
-    }
-
-    interface CloseEvent extends Event {
-        code?: number;
-        reason?: string;
-        wasClean?: boolean;
-    }
-
-    interface WebSocket {
-        readonly CONNECTING: 0;
-        readonly OPEN: 1;
-        readonly CLOSING: 2;
-        readonly CLOSED: 3;
-        readonly readyState: number;
-        onopen: ((event: Event) => void) | null;
-        onmessage: ((event: MessageEvent<string | Uint8Array>) => void) | null;
-        onerror: ((event: Event) => void) | null;
-        onclose: ((event: CloseEvent) => void) | null;
-        addEventListener<K extends keyof WebSocketEventMap>(type: K, listener: (event: WebSocketEventMap[K]) => void): void;
-        send(data: string | Uint8Array | ArrayBuffer): Promise<void>;
-        close(code?: number): void;
-    }
-
-    interface Console {
-        log(...args: any[]): void;
-        warn(...args: any[]): void;
-        error(...args: any[]): void;
-        info(...args: any[]): void;
-        debug(...args: any[]): void;
-    }
-
-    const console: Console;
 }
 
 export {};

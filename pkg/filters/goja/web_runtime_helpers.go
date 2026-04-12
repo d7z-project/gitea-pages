@@ -4,6 +4,60 @@ import (
 	"github.com/dop251/goja"
 )
 
+func isNilish(value goja.Value) bool {
+	return value == nil || goja.IsUndefined(value) || goja.IsNull(value)
+}
+
+func valueObject(vm *goja.Runtime, value goja.Value) (*goja.Object, bool) {
+	if isNilish(value) {
+		return nil, false
+	}
+	obj := value.ToObject(vm)
+	if obj == nil {
+		return nil, false
+	}
+	return obj, true
+}
+
+func objectValue(obj *goja.Object, key string) (goja.Value, bool) {
+	if obj == nil {
+		return nil, false
+	}
+	value := obj.Get(key)
+	if isNilish(value) {
+		return nil, false
+	}
+	return value, true
+}
+
+func objectString(obj *goja.Object, key string) (string, bool) {
+	value, ok := objectValue(obj, key)
+	if !ok {
+		return "", false
+	}
+	return value.String(), true
+}
+
+func objectInt64(obj *goja.Object, key string) (int64, bool) {
+	value, ok := objectValue(obj, key)
+	if !ok {
+		return 0, false
+	}
+	return value.ToInteger(), true
+}
+
+func internalExportedValue(vm *goja.Runtime, value goja.Value, key string) (any, bool) {
+	obj, ok := valueObject(vm, value)
+	if !ok {
+		return nil, false
+	}
+	internal, ok := objectValue(obj, key)
+	if !ok {
+		return nil, false
+	}
+	return internal.Export(), true
+}
+
 func resolvedPromise(vm *goja.Runtime, value any) *goja.Promise {
 	promise, resolve, _ := vm.NewPromise()
 	_ = resolve(vm.ToValue(value))
@@ -29,6 +83,14 @@ func installTextCodecs(vm *goja.Runtime) error {
 		_ = obj.Set("decode", func(input goja.Value) string {
 			if bytes, ok := uint8ArrayBytes(vm, input); ok {
 				return string(bytes)
+			}
+			if !isNilish(input) {
+				if buffer, ok := input.Export().(goja.ArrayBuffer); ok {
+					return string(buffer.Bytes())
+				}
+			}
+			if isNilish(input) {
+				return ""
 			}
 			if buffer, ok := input.Export().(goja.ArrayBuffer); ok {
 				return string(buffer.Bytes())
@@ -68,14 +130,17 @@ func newAbortSignalObject(vm *goja.Runtime) *goja.Object {
 }
 
 func uint8ArrayBytes(vm *goja.Runtime, value goja.Value) ([]byte, bool) {
-	obj := value.ToObject(vm)
-	if obj == nil {
+	obj, ok := valueObject(vm, value)
+	if !ok {
 		return nil, false
 	}
-	if bufferValue := obj.Get("buffer"); !goja.IsUndefined(bufferValue) && !goja.IsNull(bufferValue) {
+	if bufferValue, ok := objectValue(obj, "buffer"); ok {
 		if buffer, ok := bufferValue.Export().(goja.ArrayBuffer); ok {
 			return append([]byte(nil), buffer.Bytes()...), true
 		}
+	}
+	if _, ok := objectValue(obj, "byteLength"); !ok {
+		return nil, false
 	}
 	return nil, false
 }

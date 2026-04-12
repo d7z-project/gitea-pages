@@ -1,7 +1,7 @@
 package goja
 
 import (
-	"encoding/json"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -36,28 +36,13 @@ func installRequest(vm *goja.Runtime) error {
 
 func newRequestObject(vm *goja.Runtime, state *webRequestState) *goja.Object {
 	obj := vm.NewObject()
+	bodyState := newBodyState(state.body, state.headers, &state.used)
 	_ = obj.Set(internalRequestKey, state)
 	_ = obj.Set("method", state.method)
 	_ = obj.Set("url", state.url)
 	_ = obj.Set("headers", newHeadersObject(vm, &webHeadersState{values: state.headers}))
 	_ = obj.Set("signal", state.signal)
-	_ = obj.DefineAccessorProperty("bodyUsed", vm.ToValue(func() bool {
-		return state.used
-	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
-	_ = obj.Set("text", func() *goja.Promise {
-		return resolvedPromise(vm, string(consumeBody(state)))
-	})
-	_ = obj.Set("json", func() *goja.Promise {
-		data := consumeBody(state)
-		var decoded any
-		if err := json.Unmarshal(data, &decoded); err != nil {
-			return rejectedPromise(vm, err)
-		}
-		return resolvedPromise(vm, decoded)
-	})
-	_ = obj.Set("arrayBuffer", func() *goja.Promise {
-		return resolvedPromise(vm, vm.NewArrayBuffer(consumeBody(state)))
-	})
+	attachBodyMethods(vm, obj, bodyState)
 	_ = obj.Set("clone", func() *goja.Object {
 		return newRequestObject(vm, &webRequestState{
 			method:  state.method,
@@ -70,80 +55,102 @@ func newRequestObject(vm *goja.Runtime, state *webRequestState) *goja.Object {
 	return obj
 }
 
+func newDefaultRequestState(vm *goja.Runtime) *webRequestState {
+	return &webRequestState{
+		method:  http.MethodGet,
+		headers: make(http.Header),
+		signal:  newAbortSignalObject(vm),
+	}
+}
+
+func cloneRequestState(current *webRequestState) *webRequestState {
+	if current == nil {
+		return nil
+	}
+	return &webRequestState{
+		method:  current.method,
+		url:     current.url,
+		headers: cloneHeaderValues(current.headers),
+		body:    append([]byte(nil), current.body...),
+		signal:  current.signal,
+	}
+}
+
+func requestStateFromInput(vm *goja.Runtime, input goja.Value) *webRequestState {
+	if current, ok := requestStateFromValue(vm, input); ok {
+		state := cloneRequestState(current)
+		state.used = false
+		return state
+	}
+
+	state := newDefaultRequestState(vm)
+	state.url = input.String()
+	return state
+}
+
+func applyRequestInit(vm *goja.Runtime, state *webRequestState, init goja.Value) error {
+	if state == nil || isNilish(init) {
+		return nil
+	}
+
+	initObj, ok := valueObject(vm, init)
+	if !ok {
+		return nil
+	}
+
+	if method, ok := objectString(initObj, "method"); ok {
+		state.method = strings.ToUpper(method)
+	}
+	if value, ok := objectValue(initObj, "headers"); ok {
+		state.headers = headersFromValue(vm, value)
+	}
+	if value, ok := objectValue(initObj, "body"); ok {
+		body, err := bodyBytesFromValue(vm, value)
+		if err != nil {
+			return err
+		}
+		state.body = body
+	}
+	if value, ok := objectValue(initObj, "signal"); ok {
+		if signal, ok := valueObject(vm, value); ok {
+			state.signal = signal
+		}
+	}
+
+	return nil
+}
+
 func requestStateFromConstructor(vm *goja.Runtime, call goja.ConstructorCall) (*webRequestState, error) {
 	if len(call.Arguments) == 0 {
 		return nil, errors.New("request requires input")
 	}
 
-	state := &webRequestState{
-		method:  http.MethodGet,
-		headers: make(http.Header),
-		body:    nil,
-		signal:  newAbortSignalObject(vm),
-	}
-
-	if current, ok := requestStateFromValue(vm, call.Arguments[0]); ok {
-		*state = *current
-		state.headers = cloneHeaderValues(current.headers)
-		state.body = append([]byte(nil), current.body...)
-		state.used = false
-		state.signal = current.signal
-	} else {
-		state.url = call.Arguments[0].String()
-	}
+	state := requestStateFromInput(vm, call.Arguments[0])
 
 	if len(call.Arguments) > 1 {
-		initObj := call.Arguments[1].ToObject(vm)
-		if initObj != nil {
-			if value := initObj.Get("method"); !goja.IsUndefined(value) && !goja.IsNull(value) {
-				state.method = strings.ToUpper(value.String())
-			}
-			if value := initObj.Get("headers"); !goja.IsUndefined(value) && !goja.IsNull(value) {
-				state.headers = headersFromValue(vm, value)
-			}
-			if value := initObj.Get("body"); !goja.IsUndefined(value) && !goja.IsNull(value) {
-				body, err := bodyBytesFromValue(vm, value)
-				if err != nil {
-					return nil, err
-				}
-				state.body = body
-			}
-			if value := initObj.Get("signal"); !goja.IsUndefined(value) && !goja.IsNull(value) {
-				if signal := value.ToObject(vm); signal != nil {
-					state.signal = signal
-				}
-			}
+		if err := applyRequestInit(vm, state, call.Arguments[1]); err != nil {
+			return nil, err
 		}
 	}
 	if state.url == "" {
-		return nil, errors.New("Request url is required")
+		return nil, errors.New("request url is required")
 	}
 	return state, nil
 }
 
 func requestStateFromValue(vm *goja.Runtime, value goja.Value) (*webRequestState, bool) {
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+	exported, ok := internalExportedValue(vm, value, internalRequestKey)
+	if !ok {
 		return nil, false
 	}
-	obj := value.ToObject(vm)
-	if obj == nil {
-		return nil, false
-	}
-	internal := obj.Get(internalRequestKey)
-	if internal == nil || goja.IsUndefined(internal) || goja.IsNull(internal) {
-		return nil, false
-	}
-	exported := internal.Export()
 	state, ok := exported.(*webRequestState)
 	return state, ok
 }
 
-func consumeBody(state *webRequestState) []byte {
-	state.used = true
-	return append([]byte(nil), state.body...)
-}
-
 func bodyBytesFromValue(vm *goja.Runtime, value goja.Value) ([]byte, error) {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return nil, nil
+	}
 	switch current := value.Export().(type) {
 	case nil:
 		return nil, nil
@@ -154,15 +161,18 @@ func bodyBytesFromValue(vm *goja.Runtime, value goja.Value) ([]byte, error) {
 	case goja.ArrayBuffer:
 		return append([]byte(nil), current.Bytes()...), nil
 	default:
-		if bytes, ok := uint8ArrayBytes(vm, value); ok {
-			return bytes, nil
+		if bs, ok := uint8ArrayBytes(vm, value); ok {
+			return bs, nil
 		}
 		return nil, fmt.Errorf("unsupported body type: %T", current)
 	}
 }
 
 func newIncomingRequestObject(vm *goja.Runtime, req *http.Request, maxBodyBytes int64) (*goja.Object, error) {
-	var reader io.Reader = req.Body
+	var reader io.Reader = bytes.NewReader(nil)
+	if req.Body != nil {
+		reader = req.Body
+	}
 	if maxBodyBytes > 0 && req.Body != nil {
 		reader = io.LimitReader(req.Body, maxBodyBytes+1)
 	}

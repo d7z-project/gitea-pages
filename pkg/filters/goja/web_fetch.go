@@ -1,6 +1,7 @@
 package goja
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -8,7 +9,7 @@ import (
 	"net/http"
 	nurl "net/url"
 	"slices"
-	"strings"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
@@ -26,48 +27,53 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 				return
 			}
 
-			requestURL := resource.String()
-			method := http.MethodGet
-			headers := make(http.Header)
-			var body io.Reader
-
-			if len(init) > 0 && !goja.IsUndefined(init[0]) && !goja.IsNull(init[0]) {
-				initObj := init[0].ToObject(vm)
-				if initObj != nil {
-					if value := initObj.Get("method"); !goja.IsUndefined(value) && !goja.IsNull(value) {
-						method = strings.ToUpper(value.String())
-					}
-					if value := initObj.Get("headers"); !goja.IsUndefined(value) && !goja.IsNull(value) {
-						headers = headersFromValue(vm, value)
-					}
-					if value := initObj.Get("body"); !goja.IsUndefined(value) && !goja.IsNull(value) {
-						payload, err := bodyBytesFromValue(vm, value)
-						if err != nil {
-							loop.RunOnLoop(func(*goja.Runtime) {
-								_ = reject(err)
-							})
-							return
-						}
-						body = strings.NewReader(string(payload))
-					}
-				}
-			}
-
-			if err := validateFetchTarget(requestURL, cfg); err != nil {
-				loop.RunOnLoop(func(*goja.Runtime) {
-					_ = reject(err)
-				})
-				return
-			}
-
-			req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
+			requestState, err := fetchRequestState(vm, resource, init)
 			if err != nil {
 				loop.RunOnLoop(func(*goja.Runtime) {
 					_ = reject(err)
 				})
 				return
 			}
-			req.Header = headers
+			if isAbortedSignal(requestState.signal) {
+				loop.RunOnLoop(func(*goja.Runtime) {
+					_ = reject(errors.New("fetch aborted"))
+				})
+				return
+			}
+
+			if err = validateFetchTarget(requestState.url, cfg); err != nil {
+				loop.RunOnLoop(func(*goja.Runtime) {
+					_ = reject(err)
+				})
+				return
+			}
+
+			reqCtx := ctx
+			if requestState.signal != nil {
+				var cancel context.CancelFunc
+				reqCtx, cancel = context.WithCancel(ctx)
+				defer cancel()
+				go func() {
+					ticker := time.NewTicker(10 * time.Millisecond)
+					defer ticker.Stop()
+					for reqCtx.Err() == nil {
+						if isAbortedSignal(requestState.signal) {
+							cancel()
+							return
+						}
+						<-ticker.C
+					}
+				}()
+			}
+
+			req, err := http.NewRequestWithContext(reqCtx, requestState.method, requestState.url, bytesReader(requestState.body))
+			if err != nil {
+				loop.RunOnLoop(func(*goja.Runtime) {
+					_ = reject(err)
+				})
+				return
+			}
+			req.Header = cloneHeaderValues(requestState.headers)
 
 			resp, err := client.Do(req)
 			if err != nil {
@@ -99,7 +105,7 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 			loop.RunOnLoop(func(runtime *goja.Runtime) {
 				_ = resolve(newResponseObject(runtime, &webResponseState{
 					status:     resp.StatusCode,
-					statusText: resp.Status,
+					statusText: http.StatusText(resp.StatusCode),
 					headers:    cloneHeaderValues(resp.Header),
 					body:       respBody,
 				}))
@@ -108,6 +114,38 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 
 		return promise
 	})
+}
+
+func fetchRequestState(vm *goja.Runtime, resource goja.Value, init []goja.Value) (*webRequestState, error) {
+	state := requestStateFromInput(vm, resource)
+	if len(init) == 0 || isNilish(init[0]) {
+		return state, nil
+	}
+	if err := applyRequestInit(vm, state, init[0]); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+func isAbortedSignal(signal *goja.Object) bool {
+	if signal == nil {
+		return false
+	}
+	value, ok := objectValue(signal, "aborted")
+	if !ok {
+		return false
+	}
+	if aborted, ok := value.Export().(bool); ok {
+		return aborted
+	}
+	return false
+}
+
+func bytesReader(body []byte) io.Reader {
+	if len(body) == 0 {
+		return nil
+	}
+	return bytes.NewReader(body)
 }
 
 func validateFetchTarget(rawURL string, cfg FetchConfig) error {

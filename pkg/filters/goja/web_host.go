@@ -48,6 +48,44 @@ func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloo
 				}
 				return vm.ToValue(items), nil
 			},
+			"read": func(path string) *goja.Promise {
+				promise, resolve, reject := vm.NewPromise()
+				go func() {
+					data, err := ctx.PageVFS.Read(ctx, path)
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						if err != nil {
+							_ = reject(runtime.ToValue(err))
+							return
+						}
+						_ = resolve(uint8ArrayValue(runtime, data))
+					})
+				}()
+				return promise
+			},
+			"readText": func(path string) *goja.Promise {
+				promise, resolve, reject := vm.NewPromise()
+				go func() {
+					data, err := ctx.PageVFS.ReadString(ctx, path)
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						if err != nil {
+							_ = reject(runtime.ToValue(err))
+							return
+						}
+						_ = resolve(runtime.ToValue(data))
+					})
+				}()
+				return promise
+			},
+			"readSync": func(path string) (goja.Value, error) {
+				data, err := ctx.PageVFS.Read(ctx, path)
+				if err != nil {
+					return nil, err
+				}
+				return uint8ArrayValue(vm, data), nil
+			},
+			"readTextSync": func(path string) (string, error) {
+				return ctx.PageVFS.ReadString(ctx, path)
+			},
 		}); err != nil {
 			return nil, err
 		}

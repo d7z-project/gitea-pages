@@ -116,7 +116,9 @@ func newWebSocketObject(vm *goja.Runtime, state *webSocketState) *goja.Object {
 				})
 				return
 			}
-			if _, ok := data.Export().(string); !ok {
+			if isNilish(data) {
+				messageType = websocket.BinaryMessage
+			} else if _, ok := data.Export().(string); !ok {
 				messageType = websocket.BinaryMessage
 			}
 			state.writeMu.Lock()
@@ -277,7 +279,7 @@ func (s *webSocketState) dispatch(name string, payload map[string]any) {
 }
 
 func callableFromValue(value goja.Value) goja.Callable {
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+	if isNilish(value) {
 		return nil
 	}
 	fn, ok := goja.AssertFunction(value)

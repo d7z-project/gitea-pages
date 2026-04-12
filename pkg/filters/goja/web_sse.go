@@ -158,17 +158,16 @@ func encodeSSEPayload(vm *goja.Runtime, data string, options []goja.Value) strin
 	eventName := ""
 	eventID := ""
 	retry := int64(0)
-	if len(options) > 0 && options[0] != nil && !goja.IsUndefined(options[0]) && !goja.IsNull(options[0]) {
-		obj := options[0].ToObject(vm)
-		if obj != nil {
-			if value := obj.Get("event"); value != nil && !goja.IsUndefined(value) && !goja.IsNull(value) {
-				eventName = value.String()
+	if len(options) > 0 && !isNilish(options[0]) {
+		if obj, ok := valueObject(vm, options[0]); ok {
+			if value, ok := objectString(obj, "event"); ok {
+				eventName = value
 			}
-			if value := obj.Get("id"); value != nil && !goja.IsUndefined(value) && !goja.IsNull(value) {
-				eventID = value.String()
+			if value, ok := objectString(obj, "id"); ok {
+				eventID = value
 			}
-			if value := obj.Get("retry"); value != nil && !goja.IsUndefined(value) && !goja.IsNull(value) {
-				retry = value.ToInteger()
+			if value, ok := objectInt64(obj, "retry"); ok {
+				retry = value
 			}
 		}
 	}

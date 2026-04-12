@@ -185,7 +185,7 @@ func runProgram(
 }
 
 func exportPromise(result goja.Value) (*goja.Promise, bool) {
-	if result == nil {
+	if isNilish(result) {
 		return nil, false
 	}
 	promise, ok := result.Export().(*goja.Promise)
@@ -195,7 +195,13 @@ func exportPromise(result goja.Value) (*goja.Promise, bool) {
 func finishPromise(vm *goja.Runtime, promise *goja.Promise, resolveValue func(goja.Value), finish func(error)) {
 	if err := errors.Join(
 		vm.Set("__internal_resolve", func(value goja.Value) { resolveValue(value) }),
-		vm.Set("__internal_reject", func(reason goja.Value) { finish(errors.New(reason.String())) }),
+		vm.Set("__internal_reject", func(reason goja.Value) {
+			if isNilish(reason) {
+				finish(errors.New("promise rejected"))
+				return
+			}
+			finish(errors.New(reason.String()))
+		}),
 		vm.Set("__internal_promise", promise),
 	); err != nil {
 		finish(err)
