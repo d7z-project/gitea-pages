@@ -47,6 +47,24 @@ func newAuthTestServer(t *testing.T, provider core.AuthProvider) *testcore.TestS
 	})))
 }
 
+func authSession(subject, name string) *core.AuthSession {
+	return &core.AuthSession{
+		ID:       "sess-1",
+		Identity: core.AuthIdentity{Subject: subject, Name: name},
+		ExpireAt: time.Now().Add(time.Hour),
+	}
+}
+
+func loginThroughAuth(t *testing.T, server *testcore.TestServer, returnTo string) {
+	t.Helper()
+	_, resp, err := server.OpenRequest(http.MethodGet, "https://org1.example.com/.pages/auth/login?return_to="+url.QueryEscape(returnTo), nil)
+	assert.NoError(t, err)
+	state := resp.Header.Get("Location")[len("/provider-login?state="):]
+	_, resp, err = server.OpenRequest(http.MethodGet, "https://org1.example.com/.pages/auth/callback?state="+state+"&code=ok", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusFound, resp.StatusCode)
+}
+
 func Test_PrivateRepoRedirectsToLogin(t *testing.T) {
 	server := newAuthTestServer(t, &fakeAuthProvider{})
 	defer server.Close()
@@ -61,11 +79,7 @@ func Test_PrivateRepoRedirectsToLogin(t *testing.T) {
 
 func Test_PrivateRepoCallbackCreatesSession(t *testing.T) {
 	server := newAuthTestServer(t, &fakeAuthProvider{
-		session: &core.AuthSession{
-			ID:       "sess-1",
-			Identity: core.AuthIdentity{Subject: "u1", Name: "dragon"},
-			ExpireAt: time.Now().Add(time.Hour),
-		},
+		session:    authSession("u1", "dragon"),
 		authorized: true,
 	})
 	defer server.Close()
@@ -90,11 +104,7 @@ func Test_PrivateRepoCallbackCreatesSession(t *testing.T) {
 
 func Test_PrivateRepoDeniedReturnsForbidden(t *testing.T) {
 	server := newAuthTestServer(t, &fakeAuthProvider{
-		session: &core.AuthSession{
-			ID:       "sess-1",
-			Identity: core.AuthIdentity{Subject: "u1", Name: "dragon"},
-			ExpireAt: time.Now().Add(time.Hour),
-		},
+		session:    authSession("u1", "dragon"),
 		authorized: false,
 	})
 	defer server.Close()

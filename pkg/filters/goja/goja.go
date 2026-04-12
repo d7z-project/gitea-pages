@@ -7,16 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/buffer"
-	"github.com/dop251/goja_nodejs/console"
 	"github.com/dop251/goja_nodejs/eventloop"
-	"github.com/dop251/goja_nodejs/require"
-	"github.com/dop251/goja_nodejs/url"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
@@ -38,12 +33,17 @@ type FSConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+type RealtimeConfig struct {
+	WebSocket bool `json:"websocket"`
+	SSE       bool `json:"sse"`
+}
+
 type Config struct {
-	EnableDebug     bool          `json:"debug"`
-	EnableWebsocket bool          `json:"websocket"`
-	Fetch           FetchConfig   `json:"fetch"`
-	Request         RequestConfig `json:"request"`
-	FS              FSConfig      `json:"fs"`
+	EnableDebug bool           `json:"debug"`
+	Realtime    RealtimeConfig `json:"realtime"`
+	Fetch       FetchConfig    `json:"fetch"`
+	Request     RequestConfig  `json:"request"`
+	FS          FSConfig       `json:"fs"`
 }
 
 func init() {
@@ -57,7 +57,8 @@ func init() {
 func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	var global Config
 	global.EnableDebug = true
-	global.EnableWebsocket = true
+	global.Realtime.WebSocket = true
+	global.Realtime.SSE = true
 	global.Fetch.Enabled = true
 	global.FS.Enabled = true
 	if err := gl.Unmarshal(&global); err != nil {
@@ -91,9 +92,7 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 				return debug.Flush(err)
 			}
 
-			registry := newRegistry(ctx, debug)
-			jsLoop := eventloop.NewEventLoop(eventloop.WithRegistry(registry),
-				eventloop.EnableConsole(true))
+			jsLoop := eventloop.NewEventLoop(eventloop.EnableConsole(true))
 
 			jsLoop.Start()
 			defer jsLoop.Stop()
@@ -101,7 +100,7 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 			closers := NewClosers()
 			defer closers.Close()
 
-			return debug.Flush(runProgram(ctx, jsLoop, program, request, global, sharedClient, debug, closers))
+			return debug.Flush(runProgram(ctx, jsLoop, program, request, w, global, sharedClient, debug, closers))
 		}, nil
 	}, nil
 }
@@ -125,6 +124,7 @@ func runProgram(
 	jsLoop *eventloop.EventLoop,
 	program *goja.Program,
 	request *http.Request,
+	writer http.ResponseWriter,
 	global Config,
 	sharedClient *http.Client,
 	debug *DebugData,
@@ -145,69 +145,43 @@ func runProgram(
 			finish(ctx.Err())
 		}()
 
-		if err := initRuntime(ctx, vm, request, global, sharedClient, debug, closers, jsLoop); err != nil {
+		requestObj, err := initRuntime(ctx, vm, request, global, sharedClient, debug, closers, jsLoop)
+		if err != nil {
 			finish(errors.Join(err, errors.New("js init failed")))
 			return
 		}
 
-		result, err := vm.RunProgram(program)
+		if _, err = vm.RunProgram(program); err != nil {
+			finish(err)
+			return
+		}
+		result, err := callHandler(vm, requestObj)
 		if err != nil {
 			finish(err)
 			return
 		}
-		if promise, ok := exportPromise(result); ok {
-			finishPromise(vm, promise, finish)
+		if upgrade, ok := upgradeResponseValue(vm, result); ok {
+			go func() {
+				finish(upgrade())
+			}()
 			return
 		}
-		finish(nil)
+		if promise, ok := exportPromise(result); ok {
+			finishPromise(vm, promise, func(value goja.Value) {
+				if upgrade, ok := upgradeResponseValue(vm, value); ok {
+					go func() {
+						finish(upgrade())
+					}()
+					return
+				}
+				finish(writeResponseValue(vm, writer, value))
+			}, finish)
+			return
+		}
+		finish(writeResponseValue(vm, writer, result))
 	})
 
 	return <-resultCh
-}
-
-func initRuntime(
-	ctx core.FilterContext,
-	vm *goja.Runtime,
-	request *http.Request,
-	global Config,
-	sharedClient *http.Client,
-	debug *DebugData,
-	closers *Closers,
-	jsLoop *eventloop.EventLoop,
-) error {
-	url.Enable(vm)
-	buffer.Enable(vm)
-	if err := MetaInject(ctx, vm); err != nil {
-		return err
-	}
-	if err := RequestInject(ctx, vm, request, global.Request); err != nil {
-		return err
-	}
-	if global.FS.Enabled {
-		if err := FSInject(ctx, vm); err != nil {
-			return err
-		}
-	}
-	if err := ResponseInject(vm, debug, request); err != nil {
-		return err
-	}
-	if err := KVInject(ctx, vm); err != nil {
-		return err
-	}
-	if err := EventInject(ctx, vm, jsLoop); err != nil {
-		return err
-	}
-	if err := FetchInject(ctx, vm, jsLoop, sharedClient, global.Fetch); err != nil {
-		return err
-	}
-	if global.EnableWebsocket {
-		closer, err := WebsocketInject(ctx, vm, debug, request, jsLoop)
-		if err != nil {
-			return err
-		}
-		closers.AddCloser(closer.Close)
-	}
-	return nil
 }
 
 func exportPromise(result goja.Value) (*goja.Promise, bool) {
@@ -218,9 +192,9 @@ func exportPromise(result goja.Value) (*goja.Promise, bool) {
 	return promise, ok
 }
 
-func finishPromise(vm *goja.Runtime, promise *goja.Promise, finish func(error)) {
+func finishPromise(vm *goja.Runtime, promise *goja.Promise, resolveValue func(goja.Value), finish func(error)) {
 	if err := errors.Join(
-		vm.Set("__internal_resolve", func(goja.Value) { finish(nil) }),
+		vm.Set("__internal_resolve", func(value goja.Value) { resolveValue(value) }),
 		vm.Set("__internal_reject", func(reason goja.Value) { finish(errors.New(reason.String())) }),
 		vm.Set("__internal_promise", promise),
 	); err != nil {
@@ -230,19 +204,6 @@ func finishPromise(vm *goja.Runtime, promise *goja.Promise, finish func(error)) 
 	if _, err := vm.RunString(`__internal_promise.then(__internal_resolve).catch(__internal_reject)`); err != nil {
 		finish(err)
 	}
-}
-
-func newRegistry(ctx core.FilterContext, printer console.Printer) *require.Registry {
-	registry := require.NewRegistry(
-		require.WithLoader(func(path string) ([]byte, error) {
-			return ctx.PageVFS.Read(ctx, path)
-		}),
-		require.WithPathResolver(func(base, path string) string {
-			return filepath.Join(base, filepath.FromSlash(path))
-		}))
-	registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(printer))
-
-	return registry
 }
 
 type Closers struct {

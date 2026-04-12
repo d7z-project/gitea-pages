@@ -242,6 +242,7 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		OrgDB:       s.db.Child("org", meta.Owner),
 		RepoDB:      s.db.Child("repo", meta.Owner, meta.Repo),
 		Event:       s.event.Child("domain", meta.Owner, meta.Repo),
+		Auth:        core.AuthInfoFromContext(request.Context()),
 
 		Kill: cancelFunc,
 	}

@@ -45,3 +45,7 @@ func (w *WrittenResponseWriter) WriteHeader(statusCode int) {
 func (w *WrittenResponseWriter) IsWritten() bool {
 	return w.write
 }
+
+func (w *WrittenResponseWriter) Unwrap() http.ResponseWriter {
+	return w.base
+}

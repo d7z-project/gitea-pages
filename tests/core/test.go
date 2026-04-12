@@ -130,3 +130,10 @@ func (t *TestServer) OpenRequestWithContext(ctx context.Context, method, url str
 func (t *TestServer) Close() error {
 	return nil
 }
+
+func (t *TestServer) StartHTTPServer(host string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Host = host
+		t.server.ServeHTTP(w, r)
+	}))
+}

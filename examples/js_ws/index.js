@@ -1,7 +1,7 @@
-(async ()=>{
-    let ws = websocket();
-    while (true) {
-        let data = await ws.readText();
-        await ws.writeText("ECHO: " + data)
-    }
-})()
+serve(function(request) {
+    const { socket, response } = upgradeWebSocket(request);
+    socket.addEventListener("message", async (event) => {
+        await socket.send("ECHO: " + event.data);
+    });
+    return response;
+});

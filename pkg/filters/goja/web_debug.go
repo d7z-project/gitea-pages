@@ -127,3 +127,7 @@ func (d *DebugData) Flush(err error) error {
 	_ = errorPage.Execute(d.parent, data)
 	return nil
 }
+
+func (d *DebugData) Unwrap() http.ResponseWriter {
+	return d.parent
+}

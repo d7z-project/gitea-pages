@@ -22,6 +22,7 @@ type FilterContext struct {
 	OrgDB  kv.KV
 	RepoDB kv.KV
 	Event  subscribe.Subscriber
+	Auth   AuthInfo
 
 	Kill func()
 }

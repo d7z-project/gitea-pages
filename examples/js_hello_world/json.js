@@ -1,4 +1,5 @@
-response.setHeader("content-type", "application/json");
-response.write(JSON.stringify({
-    'method': request.method,
-}))
+serve(async function(request) {
+    return Response.json({
+        method: request.method,
+    });
+});

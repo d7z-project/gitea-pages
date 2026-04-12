@@ -1,7 +1,4 @@
-response.write("hello world")
-console.log("hello world")
-function testError(){
-    throw Error("Method not implemented")
-}
-response.setHeader("content-type", "application/json")
-testError()
+serve(async function() {
+    console.log("hello world");
+    return new Response("hello world");
+});

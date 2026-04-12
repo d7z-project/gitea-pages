@@ -2,12 +2,11 @@ package goja
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
+	nurl "net/url"
 	"slices"
 	"strings"
 
@@ -15,9 +14,9 @@ import (
 	"github.com/dop251/goja_nodejs/eventloop"
 )
 
-func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.EventLoop, client *http.Client, cfg FetchConfig) error {
-	return jsCtx.GlobalObject().Set("fetch", func(url string, options ...map[string]interface{}) *goja.Promise {
-		promise, resolve, reject := jsCtx.NewPromise()
+func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLoop, client *http.Client, cfg FetchConfig) error {
+	return vm.Set("fetch", func(resource goja.Value, init ...goja.Value) *goja.Promise {
+		promise, resolve, reject := vm.NewPromise()
 
 		go func() {
 			if !cfg.Enabled {
@@ -27,35 +26,41 @@ func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.Event
 				return
 			}
 
-			method := "GET"
-			var body io.Reader
+			requestURL := resource.String()
+			method := http.MethodGet
 			headers := make(http.Header)
+			var body io.Reader
 
-			if len(options) > 0 {
-				opts := options[0]
-				if m, ok := opts["method"].(string); ok {
-					method = strings.ToUpper(m)
-				}
-				if h, ok := opts["headers"].(map[string]interface{}); ok {
-					for k, v := range h {
-						if strVal, ok := v.(string); ok {
-							headers.Set(k, strVal)
-						}
+			if len(init) > 0 && !goja.IsUndefined(init[0]) && !goja.IsNull(init[0]) {
+				initObj := init[0].ToObject(vm)
+				if initObj != nil {
+					if value := initObj.Get("method"); !goja.IsUndefined(value) && !goja.IsNull(value) {
+						method = strings.ToUpper(value.String())
 					}
-				}
-				if b, ok := opts["body"].(string); ok {
-					body = strings.NewReader(b)
+					if value := initObj.Get("headers"); !goja.IsUndefined(value) && !goja.IsNull(value) {
+						headers = headersFromValue(vm, value)
+					}
+					if value := initObj.Get("body"); !goja.IsUndefined(value) && !goja.IsNull(value) {
+						payload, err := bodyBytesFromValue(vm, value)
+						if err != nil {
+							loop.RunOnLoop(func(*goja.Runtime) {
+								_ = reject(err)
+							})
+							return
+						}
+						body = strings.NewReader(string(payload))
+					}
 				}
 			}
 
-			if err := validateFetchTarget(url, cfg); err != nil {
+			if err := validateFetchTarget(requestURL, cfg); err != nil {
 				loop.RunOnLoop(func(*goja.Runtime) {
 					_ = reject(err)
 				})
 				return
 			}
 
-			req, err := http.NewRequestWithContext(ctx, method, url, body)
+			req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 			if err != nil {
 				loop.RunOnLoop(func(*goja.Runtime) {
 					_ = reject(err)
@@ -91,34 +96,13 @@ func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.Event
 				return
 			}
 
-			headersMap := make(map[string]interface{})
-			for k, v := range resp.Header {
-				headersMap[k] = v
-			}
-
-			loop.RunOnLoop(func(vm *goja.Runtime) {
-				responseObj := map[string]interface{}{
-					"ok":         resp.StatusCode >= 200 && resp.StatusCode < 300,
-					"status":     resp.StatusCode,
-					"statusText": resp.Status,
-					"headers":    headersMap,
-					"text": func() *goja.Promise {
-						p, res, _ := vm.NewPromise()
-						_ = res(string(respBody))
-						return p
-					},
-					"json": func() *goja.Promise {
-						p, res, rej := vm.NewPromise()
-						var data interface{}
-						if err := json.Unmarshal(respBody, &data); err != nil {
-							_ = rej(err)
-						} else {
-							_ = res(data)
-						}
-						return p
-					},
-				}
-				_ = resolve(responseObj)
+			loop.RunOnLoop(func(runtime *goja.Runtime) {
+				_ = resolve(newResponseObject(runtime, &webResponseState{
+					status:     resp.StatusCode,
+					statusText: resp.Status,
+					headers:    cloneHeaderValues(resp.Header),
+					body:       respBody,
+				}))
 			})
 		}()
 
@@ -127,7 +111,7 @@ func FetchInject(ctx context.Context, jsCtx *goja.Runtime, loop *eventloop.Event
 }
 
 func validateFetchTarget(rawURL string, cfg FetchConfig) error {
-	parsed, err := url.Parse(rawURL)
+	parsed, err := nurl.Parse(rawURL)
 	if err != nil {
 		return err
 	}

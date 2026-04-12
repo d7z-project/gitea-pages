@@ -1,147 +1,168 @@
-// global.d.ts
-
-
 declare global {
-    // WebSocket 相关类型
-    interface WebSocketConnection {
-        TypeTextMessage: number;
-        TypeBinaryMessage: number;
-
-        readText(): Promise<string>;
-
-        read(): Promise<{
-            type: number;
-            data: Uint8Array;
-        }>;
-
-        writeText(data: string): Promise<void>;
-
-        write(mType: number, data: string | Uint8Array): Promise<void>;
+    interface Headers {
+        get(name: string): string | null;
+        set(name: string, value: string): void;
+        append(name: string, value: string): void;
+        has(name: string): boolean;
+        delete(name: string): void;
+        keys(): string[];
+        values(): string[];
+        entries(): [string, string][];
+        forEach(callback: (value: string, key: string, parent: Headers) => void): void;
     }
 
-    function websocket(): WebSocketConnection;
-
-    // Event 相关类型
-    interface EventSystem {
-        load(key: string): Promise<any>;
-
-        put(key: string, value: string): Promise<void>;
+    interface RequestInit {
+        method?: string;
+        headers?: Headers | Record<string, string>;
+        body?: string | Uint8Array | ArrayBuffer;
+        signal?: AbortSignal;
     }
 
-    // @ts-ignore
-    const event: EventSystem;
-
-    //元数据
-    const meta:Meta;
-
-    interface Meta {
-        // 组织名称
-        org:string;
-        // 仓库名称
-        repo:string;
-        // 提交 id
-        commit:string;
+    interface Request {
+        readonly method: string;
+        readonly url: string;
+        readonly headers: Headers;
+        readonly bodyUsed: boolean;
+        readonly signal: AbortSignal;
+        text(): Promise<string>;
+        json<T = any>(): Promise<T>;
+        arrayBuffer(): Promise<ArrayBuffer>;
+        clone(): Request;
     }
 
-    // Request 相关类型
-    interface RequestObject {
-        method: string;
-        url: string;
-        rawPath: string;
-        host: string;
-        remoteAddr: string;
-        remoteIP: string;
-        proto: string;
-        httpVersion: string;
-        path: string;
-        query: Record<string, string>;
-        headers: Record<string, string>;
-        auth: RequestAuth;
-
-        get(key: string): string | null;
-
-        getQuery(key: string): string;
-
-        getHeader(name: string): string;
-
-        getHeaderNames(): string[];
-
-        getHeaders(): Record<string, string>;
-
-        getRawHeaderNames(): string[];
-
-        hasHeader(name: string): boolean;
-
-        readBody(): Uint8Array;
-
-        protocol: string;
+    interface ResponseInit {
+        status?: number;
+        statusText?: string;
+        headers?: Headers | Record<string, string>;
     }
 
-    interface RequestAuthIdentity {
+    interface Response {
+        readonly status: number;
+        readonly statusText: string;
+        readonly headers: Headers;
+        readonly ok: boolean;
+        readonly bodyUsed: boolean;
+        text(): Promise<string>;
+        json<T = any>(): Promise<T>;
+        arrayBuffer(): Promise<ArrayBuffer>;
+        clone(): Response;
+    }
+
+    var Request: {
+        new(input: string | Request, init?: RequestInit): Request;
+    };
+
+    var Response: {
+        new(body?: string | Uint8Array | ArrayBuffer | null, init?: ResponseInit): Response;
+        json(data: any, init?: ResponseInit): Response;
+        redirect(location: string, status?: number): Response;
+    };
+
+    interface FetchOptions extends RequestInit {}
+
+    function fetch(url: string, options?: FetchOptions): Promise<Response>;
+
+    type RequestHandler = (request: Request) => Response | Promise<Response>;
+    type FetchHandlerObject = {
+        fetch(request: Request): Response | Promise<Response>;
+    };
+    type PageHandler = RequestHandler | FetchHandlerObject;
+    function serve(handler: PageHandler): void;
+
+    interface RouteContext {
+        params: Record<string, string>;
+        query: URLSearchParams;
+        url: URL;
+    }
+
+    type RouteHandler = (request: Request, ctx: RouteContext) => Response | Promise<Response>;
+
+    interface Router {
+        on(method: string, path: string, handler: RouteHandler): Router;
+        all(path: string, handler: RouteHandler): Router;
+        get(path: string, handler: RouteHandler): Router;
+        post(path: string, handler: RouteHandler): Router;
+        put(path: string, handler: RouteHandler): Router;
+        patch(path: string, handler: RouteHandler): Router;
+        delete(path: string, handler: RouteHandler): Router;
+        options(path: string, handler: RouteHandler): Router;
+        head(path: string, handler: RouteHandler): Router;
+        fetch(request: Request): Promise<Response>;
+        handle(request: Request): Promise<Response>;
+    }
+
+    interface HttpHelpers {
+        text(body: string, init?: ResponseInit): Response;
+        html(body: string, init?: ResponseInit): Response;
+        json(data: any, init?: ResponseInit): Response;
+        read<T = any>(request: Request, kind?: "json" | "form" | "text" | "bytes" | string): Promise<T | string | ArrayBuffer | Record<string, string>>;
+        redirect(location: string, status?: number): Response;
+        error(status: number, message?: string): Response;
+        noContent(): Response;
+        notFound(message?: string): Response;
+        methodNotAllowed(methods?: string | string[]): Response;
+        cookie(request: Request, name: string): string | null;
+        cookie(request: Request): Record<string, string>;
+        withHeaders(response: Response, headers: Record<string, string>): Promise<Response>;
+        cors(response: Response, options?: {
+            origin?: string;
+            methods?: string | string[];
+            headers?: string | string[];
+            exposeHeaders?: string | string[];
+            credentials?: boolean;
+        }): Promise<Response>;
+        setCookie(response: Response, name: string, value: string, options?: {
+            maxAge?: number;
+            domain?: string;
+            path?: string;
+            expires?: string;
+            sameSite?: string;
+            httpOnly?: boolean;
+            secure?: boolean;
+        }): Promise<Response>;
+        clearCookie(response: Response, name: string, options?: {
+            domain?: string;
+            path?: string;
+            sameSite?: string;
+            httpOnly?: boolean;
+            secure?: boolean;
+        }): Promise<Response>;
+        sse(): {
+            stream: EventStream;
+            response: Response;
+        };
+        router(): Router;
+    }
+
+    const http: HttpHelpers;
+
+    interface PageMeta {
+        org: string;
+        repo: string;
+        commit: string;
+    }
+
+    interface PageAuthIdentity {
         subject: string;
         name: string;
     }
 
-    interface RequestAuth {
+    interface PageAuth {
         authenticated: boolean;
-        identity: RequestAuthIdentity | null;
+        identity: PageAuthIdentity | null;
     }
 
-    const request: RequestObject;
-
-    interface FSEntry {
+    interface PageEntry {
         name: string;
         path: string;
         type: "file" | "dir" | "symlink" | "submodule";
         size?: number;
     }
 
-    interface FileSystem {
-        list(path?: string): FSEntry[];
+    interface PageFS {
+        list(path?: string): PageEntry[];
     }
 
-    const fs: FileSystem;
-
-    // Response 相关类型
-    interface CookieOptions {
-        maxAge?: number;
-        expires?: number;
-        path?: string;
-        domain?: string;
-        secure?: boolean;
-        httpOnly?: boolean;
-        sameSite?: "lax" | "strict" | "none";
-    }
-
-    interface ResponseObject {
-        setHeader(key: string, value: string): void;
-
-        getHeader(key: string): string;
-
-        removeHeader(key: string): void;
-
-        hasHeader(key: string): boolean;
-
-        setStatus(statusCode: number): void;
-
-        statusCode(statusCode: number): void;
-
-        write(data: string): void;
-
-        writeHead(statusCode: number, headers?: Record<string, string>): void;
-
-        end(data?: string): void;
-
-        redirect(location: string, statusCode?: number): void;
-
-        json(data: any): void;
-
-        setCookie(name: string, value: string, options?: CookieOptions): void;
-    }
-
-    const response: ResponseObject;
-
-    // KV 存储相关类型
     interface KVListResult {
         keys: string[];
         items: { key: string; value: string }[];
@@ -151,76 +172,91 @@ declare global {
 
     interface KVOps {
         get(key: string): string | null;
-
         set(key: string, value: string, ttl?: number): void;
-
         delete(key: string): boolean;
-
         putIfNotExists(key: string, value: string, ttl?: number): boolean;
-
         compareAndSwap(key: string, oldValue: string, newValue: string): boolean;
-
         list(limit?: number, cursor?: string): KVListResult;
     }
 
     interface KVSystem {
         repo(...group: string[]): KVOps;
-
         org(...group: string[]): KVOps;
     }
 
-    const kv: KVSystem;
-
-    // localStorage 模拟
-    interface Storage {
-        readonly length: number;
-
-        getItem(key: string): string | null;
-
-        setItem(key: string, value: string): void;
-
-        removeItem(key: string): void;
-
-        clear(): void;
-
-        key(index: number): string | null;
+    interface EventSystem {
+        load(key: string): Promise<any>;
+        put(key: string, value: string): Promise<void>;
     }
 
-    const localStorage: Storage;
+    interface PageHost {
+        meta: PageMeta;
+        auth: PageAuth;
+    }
 
-    // Console 相关 (假设通过 require 引入)
+    const page: PageHost;
+    const fs: PageFS;
+    const kv: KVSystem;
+    const event: EventSystem;
+    function upgradeWebSocket(request?: Request): {
+        socket: WebSocket;
+        response: Response;
+    };
+
+    interface EventStream {
+        send(data: string, options?: {
+            event?: string;
+            id?: string;
+            retry?: number;
+        }): Promise<void>;
+        close(): void;
+    }
+
+    interface WebSocketEventMap {
+        open: Event;
+        message: MessageEvent<string | Uint8Array>;
+        close: CloseEvent;
+        error: Event;
+    }
+
+    interface Event {
+        type: string;
+    }
+
+    interface MessageEvent<T = any> extends Event {
+        data: T;
+    }
+
+    interface CloseEvent extends Event {
+        code?: number;
+        reason?: string;
+        wasClean?: boolean;
+    }
+
+    interface WebSocket {
+        readonly CONNECTING: 0;
+        readonly OPEN: 1;
+        readonly CLOSING: 2;
+        readonly CLOSED: 3;
+        readonly readyState: number;
+        onopen: ((event: Event) => void) | null;
+        onmessage: ((event: MessageEvent<string | Uint8Array>) => void) | null;
+        onerror: ((event: Event) => void) | null;
+        onclose: ((event: CloseEvent) => void) | null;
+        addEventListener<K extends keyof WebSocketEventMap>(type: K, listener: (event: WebSocketEventMap[K]) => void): void;
+        send(data: string | Uint8Array | ArrayBuffer): Promise<void>;
+        close(code?: number): void;
+    }
+
     interface Console {
         log(...args: any[]): void;
-
         warn(...args: any[]): void;
-
         error(...args: any[]): void;
-
         info(...args: any[]): void;
-
         debug(...args: any[]): void;
     }
 
-    // @ts-ignore
     const console: Console;
-
-    // Fetch API 相关类型
-    interface FetchResponse {
-        ok: boolean;
-        status: number;
-        statusText: string;
-        headers: Record<string, string>;
-        text(): Promise<string>;
-        json<T = any>(): Promise<T>;
-    }
-
-    interface FetchOptions {
-        method?: string;
-        headers?: Record<string, string>;
-        body?: string;
-    }
-
-    function fetch(url: string, options?: FetchOptions): Promise<FetchResponse>;
 }
 
 export {};

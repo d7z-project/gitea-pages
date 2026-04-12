@@ -77,8 +77,10 @@ filters:
   js:
     # 是否启用 debug 页面
     debug: true
-    # 是否允许 websocket 注入
-    websocket: true
+    # 实时能力
+    realtime:
+      websocket: true
+      sse: true
     # 请求体读取限制，0 表示不限制
     request:
       max_body_bytes: 0

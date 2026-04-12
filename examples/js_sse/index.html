@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSE Example</title>
+</head>
+<body>
+    <h1>Server-Sent Events</h1>
+    <div id="messages"></div>
+
+    <script>
+        const messages = document.getElementById("messages");
+        const source = new EventSource("/events");
+
+        source.addEventListener("message", (event) => {
+            const div = document.createElement("div");
+            div.textContent = event.data;
+            messages.appendChild(div);
+        });
+
+        source.onerror = () => {
+            const div = document.createElement("div");
+            div.textContent = "stream closed";
+            messages.appendChild(div);
+            source.close();
+        };
+    </script>
+</body>
+</html>

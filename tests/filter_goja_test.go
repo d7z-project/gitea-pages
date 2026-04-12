@@ -1,28 +1,32 @@
 package tests
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
-	"gopkg.d7z.net/gitea-pages/tests/core"
+	testcore "gopkg.d7z.net/gitea-pages/tests/core"
 )
 
-func Test_GoJaJS(t *testing.T) {
-	server := core.NewDefaultTestServer()
+func Test_GoJa_HandlerResponse(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/index.js", `
-function get(a,b) {
-  return a + b;
-}
-response.writeHead(201,{'X-Cache': 'ignore'});
-console.log('hello world')
-response.write('512 + 512 = ' + get(512,512))
+serve(async function(request) {
+  return new Response("512 + 512 = 1024", {
+    status: 201,
+    headers: { "X-Cache": "ignore" }
+  })
+})
 `)
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
@@ -30,6 +34,7 @@ routes:
   js:
     exec: "index.js"
 `)
+
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/")
 	assert.NoError(t, err)
 	assert.Equal(t, "hello world", string(data))
@@ -42,37 +47,74 @@ routes:
 }
 
 func Test_GoJa_Request(t *testing.T) {
-	server := core.NewDefaultTestServer()
+	server := testcore.NewDefaultTestServer()
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
-	server.AddFile("org1/repo1/gh-pages/index.js", `response.write(request.method+' /'+request.path)`)
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(async function(request) {
+  return new Response(request.method + " " + new URL(request.url).pathname)
+})
+`)
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
 - path: "api/v1/**"
   js:
     exec: "index.js"
 `)
-	data, _, err := server.OpenFile("https://org1.example.com/repo1/")
-	assert.NoError(t, err)
-	assert.Equal(t, "hello world", string(data))
 
-	data, _, err = server.OpenFile("https://org1.example.com/repo1/api/v1/fetch")
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/fetch")
 	assert.NoError(t, err)
-	assert.Equal(t, "GET /api/v1/fetch", string(data))
+	assert.Equal(t, "GET /repo1/api/v1/fetch", string(data))
 
 	data, _, err = server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/api/v1/fetch", nil)
 	assert.NoError(t, err)
-	assert.Equal(t, "POST /api/v1/fetch", string(data))
+	assert.Equal(t, "POST /repo1/api/v1/fetch", string(data))
 }
 
-func Test_GoJa_RequestReadBodyReusable(t *testing.T) {
-	server := core.NewDefaultTestServer()
+func Test_GoJa_RequestURLIsAbsoluteOnRealHTTP(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/index.js", `
-const first = String.fromCharCode.apply(null, request.readBody())
-const second = String.fromCharCode.apply(null, request.readBody())
-response.write(first + "|" + second)
+serve(async function(request) {
+  const url = new URL(request.url)
+  return Response.json({
+    href: url.href,
+    pathname: url.pathname,
+    search: url.search,
+  })
+})
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "api/v1/**"
+  js:
+    exec: "index.js"
+`)
+
+	httpServer := server.StartHTTPServer("org1.example.com")
+	defer httpServer.Close()
+
+	resp, err := http.Get(httpServer.URL + "/repo1/api/v1/fetch?q=ok")
+	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"href":"http://org1.example.com/repo1/api/v1/fetch?q=ok","pathname":"/repo1/api/v1/fetch","search":"?q=ok"}`, string(body))
+}
+
+func Test_GoJa_RequestBody(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(async function(request) {
+  const body = await request.text()
+  return new Response(body)
+})
 `)
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
@@ -83,19 +125,21 @@ routes:
 
 	data, _, err := server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/api/v1/fetch", bytes.NewBufferString("payload"))
 	assert.NoError(t, err)
-	assert.Equal(t, "payload|payload", string(data))
+	assert.Equal(t, "payload", string(data))
 }
 
-func Test_GoJa_FSList(t *testing.T) {
-	server := core.NewDefaultTestServer()
+func Test_GoJa_GiteaPagesFS(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/index.js", `
-const root = fs.list()
-const docs = fs.list("docs")
-response.json({
-  root: root.map(item => item.name).sort(),
-  docs: docs.map(item => item.path).sort(),
+serve(async function() {
+  const root = fs.list()
+  const docs = fs.list("docs")
+  return Response.json({
+    root: root.map(item => item.name).sort(),
+    docs: docs.map(item => item.path).sort(),
+  })
 })
 `)
 	server.AddFile("org1/repo1/gh-pages/docs/a.txt", "a")
@@ -112,19 +156,45 @@ routes:
 	assert.JSONEq(t, `{"root":[".pages.yaml","docs","index.html","index.js"],"docs":["docs/a.txt","docs/b.txt"]}`, string(data))
 }
 
-func Test_GoJa_Async(t *testing.T) {
-	server := core.NewDefaultTestServer()
+func Test_GoJa_HostAuth(t *testing.T) {
+	server := newAuthTestServer(t, &fakeAuthProvider{
+		session:    authSession("u1", "dragon"),
+		authorized: true,
+	})
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/index.js", `
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-(async()=>{
-    await sleep(1000)
-    response.write('abc')
-})()
+serve(async function() {
+  return Response.json({
+    authenticated: page.auth.authenticated,
+    subject: page.auth.identity.subject,
+    name: page.auth.identity.name,
+  })
+})
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+private: true
+routes:
+- path: "api/v1/**"
+  js:
+    exec: "index.js"
+`)
 
+	loginThroughAuth(t, server, "/repo1/api/v1/whoami")
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/whoami")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"authenticated":true,"subject":"u1","name":"dragon"}`, string(data))
+}
+
+func Test_GoJa_Async(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(async function() {
+  await new Promise(resolve => setTimeout(resolve, 50))
+  return new Response("abc")
+})
 `)
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
@@ -139,13 +209,13 @@ routes:
 }
 
 func Test_GoJa_CancelPendingPromise(t *testing.T) {
-	server := core.NewDefaultTestServer()
+	server := testcore.NewDefaultTestServer()
 	defer server.Close()
-	server.AddFile("org1/repo1/gh-pages/index.html", "dummy")
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/index.js", `
-(async()=>{
-    await new Promise(() => {})
-})()
+serve(async function() {
+  await new Promise(() => {})
+})
 `)
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
@@ -178,17 +248,17 @@ func Test_GoJa_Fetch(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	server := core.NewDefaultTestServer()
+	server := testcore.NewDefaultTestServer()
 	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/index.js", `
-(async()=>{
-    const res = await fetch('%s')
-    response.setHeader('X-Fetched-Header', res.headers['X-Test'] || res.headers['x-test'])
-    const text = await res.text()
-    response.write(text)
-})()
+serve(async function() {
+  const res = await fetch('%s')
+  return new Response(await res.text(), {
+    headers: { "X-Fetched-Header": res.headers.get("X-Test") || res.headers.get("x-test") }
+  })
+})
 `, ts.URL)
-	server.AddFile("org1/repo1/gh-pages/index.html", "dummy")
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
 - path: "**"
@@ -202,12 +272,28 @@ routes:
 	assert.Equal(t, "test-header", resp.Header.Get("X-Fetched-Header"))
 }
 
-func Benchmark_GoJa_Request(b *testing.B) {
-	b.Setenv("BM", "1")
-	server := core.NewDefaultTestServer()
+func Test_GoJa_FrameworkHelpers(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
 	defer server.Close()
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
-	server.AddFile("org1/repo1/gh-pages/index.js", `response.write(request.method+' /'+request.path)`)
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+const app = http.router()
+
+app.get("/repo1/api/v1/users/:id", async (request, ctx) => {
+  return http.json({
+    id: ctx.params.id,
+    page: page.meta.repo,
+    q: ctx.query.get("q"),
+    method: request.method,
+  })
+})
+
+app.get("/repo1/api/v1/plain", async () => {
+  return http.text("plain")
+})
+
+serve(app)
+`)
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
 - path: "api/v1/**"
@@ -215,41 +301,207 @@ routes:
     exec: "index.js"
 `)
 
-	b.ResetTimer() // 重置计时器，只测量下面的操作
+	data, resp, err := server.OpenFile("https://org1.example.com/repo1/api/v1/users/42?q=ok")
+	assert.NoError(t, err)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	assert.JSONEq(t, `{"id":"42","page":"repo1","q":"ok","method":"GET"}`, string(data))
 
-	b.Run("OpenFile_root", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			data, _, err := server.OpenFile("https://org1.example.com/repo1/")
-			if err != nil {
-				b.Fatal(err)
-			}
-			if string(data) != "hello world" {
-				b.Fatalf("expected 'hello world', got '%s'", string(data))
-			}
-		}
-	})
+	data, resp, err = server.OpenFile("https://org1.example.com/repo1/api/v1/plain")
+	assert.NoError(t, err)
+	assert.Equal(t, "text/plain; charset=utf-8", resp.Header.Get("Content-Type"))
+	assert.Equal(t, "plain", string(data))
+}
 
-	b.Run("OpenFile_api", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/fetch")
-			if err != nil {
-				b.Fatal(err)
-			}
-			if string(data) != "GET /api/v1/fetch" {
-				b.Fatalf("expected 'GET /api/v1/fetch', got '%s'", string(data))
-			}
-		}
-	})
+func Test_GoJa_FrameworkReadAndCors(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+const app = http.router()
 
-	b.Run("OpenRequest_post", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			data, _, err := server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/api/v1/fetch", nil)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if string(data) != "POST /api/v1/fetch" {
-				b.Fatalf("expected 'POST /api/v1/fetch', got '%s'", string(data))
-			}
-		}
-	})
+app.post("/repo1/api/v1/json", async (request) => {
+  const body = await http.read(request, "json")
+  return await http.cors(http.json(body), {
+    origin: "https://example.com",
+    credentials: true,
+  })
+})
+
+app.post("/repo1/api/v1/form", async (request) => {
+  const body = await http.read(request, "form")
+  return await http.withHeaders(http.json(body), {
+    "x-mode": "form",
+  })
+})
+
+serve(app)
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "api/v1/**"
+  js:
+    exec: "index.js"
+`)
+
+	data, resp, err := server.OpenRequest(
+		http.MethodPost,
+		"https://org1.example.com/repo1/api/v1/json",
+		bytes.NewBufferString(`{"ok":true}`),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, "https://example.com", resp.Header.Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "true", resp.Header.Get("Access-Control-Allow-Credentials"))
+	assert.JSONEq(t, `{"ok":true}`, string(data))
+
+	data, resp, err = server.OpenRequest(
+		http.MethodPost,
+		"https://org1.example.com/repo1/api/v1/form",
+		bytes.NewBufferString("name=dragon&lang=go"),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, "form", resp.Header.Get("X-Mode"))
+	assert.JSONEq(t, `{"name":"dragon","lang":"go"}`, string(data))
+}
+
+func Test_GoJa_FrameworkCookiesAndStatusHelpers(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+const app = http.router()
+
+app.get("/repo1/api/v1/cookie", async (request) => {
+  const token = http.cookie(request, "token")
+  return await http.setCookie(http.json({ token }), "session", "abc", {
+    path: "/",
+    httpOnly: true,
+    sameSite: "Lax",
+  })
+})
+
+app.get("/repo1/api/v1/empty", async () => {
+  return http.noContent()
+})
+
+app.get("/repo1/api/v1/clear", async () => {
+  return await http.clearCookie(http.text("bye"), "session", { path: "/" })
+})
+
+app.get("/repo1/api/v1/items/:id", async (request, ctx) => {
+  return http.text("item:" + ctx.params.id)
+})
+
+serve(app)
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "api/v1/**"
+  js:
+    exec: "index.js"
+`)
+
+	_, _, err := server.OpenRequest(http.MethodGet, "https://org1.example.com/repo1/api/v1/cookie", nil)
+	assert.NoError(t, err)
+
+	data, resp, err := server.OpenRequest(http.MethodGet, "https://org1.example.com/repo1/api/v1/cookie", nil)
+	assert.NoError(t, err)
+	assert.Contains(t, resp.Header.Get("Set-Cookie"), "session=abc")
+	assert.JSONEq(t, `{"token":null}`, string(data))
+
+	data, resp, err = server.OpenRequest(http.MethodGet, "https://org1.example.com/repo1/api/v1/empty", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Empty(t, string(data))
+
+	data, resp, err = server.OpenRequest(http.MethodGet, "https://org1.example.com/repo1/api/v1/clear", nil)
+	assert.NoError(t, err)
+	assert.Contains(t, resp.Header.Get("Set-Cookie"), "session=")
+	assert.Contains(t, resp.Header.Get("Set-Cookie"), "Max-Age=0")
+	assert.Equal(t, "bye", string(data))
+
+	_, resp, err = server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/api/v1/items/42", nil)
+	assert.Error(t, err)
+	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+	assert.Equal(t, "GET", resp.Header.Get("Allow"))
+}
+
+func Test_GoJa_WebSocket(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(function(request) {
+  const { socket, response } = upgradeWebSocket(request)
+  socket.addEventListener("message", async (event) => {
+    await socket.send("ECHO: " + event.data)
+    socket.close()
+  })
+  return response
+})
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "ws"
+  js:
+    exec: "index.js"
+`)
+
+	httpServer := server.StartHTTPServer("org1.example.com")
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/repo1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	assert.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte("hello")))
+	messageType, payload, err := conn.ReadMessage()
+	assert.NoError(t, err)
+	assert.Equal(t, websocket.TextMessage, messageType)
+	assert.Equal(t, "ECHO: hello", string(payload))
+}
+
+func Test_GoJa_SSE(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(function() {
+  const { stream, response } = http.sse()
+  ;(async () => {
+    await stream.send(JSON.stringify({ ok: true }), { event: "message", id: "1" })
+    stream.close()
+  })()
+  return response
+})
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "sse"
+  js:
+    exec: "index.js"
+`)
+
+	httpServer := server.StartHTTPServer("org1.example.com")
+	defer httpServer.Close()
+
+	resp, err := http.Get(httpServer.URL + "/repo1/sse")
+	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	assert.Contains(t, resp.Header.Get("Content-Type"), "text/event-stream")
+
+	reader := bufio.NewReader(resp.Body)
+	line1, _ := reader.ReadString('\n')
+	line2, _ := reader.ReadString('\n')
+	line3, _ := reader.ReadString('\n')
+	assert.Equal(t, "event: message\n", line1)
+	assert.Equal(t, "id: 1\n", line2)
+	assert.Equal(t, "data: {\"ok\":true}\n", line3)
 }

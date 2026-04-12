@@ -1,0 +1,4 @@
+routes:
+  - path: "events"
+    js:
+      exec: "index.js"
