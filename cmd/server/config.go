@@ -92,8 +92,10 @@ type ConfigCache struct {
 	Blob              string           `yaml:"blob"`               // 缓存归档位置
 	BlobTTL           time.Duration    `yaml:"blob_ttl"`           // 缓存归档位置
 	BlobLimit         units.Base2Bytes `yaml:"blob_limit"`         // 单个文件最大大小
+	DirTTL            time.Duration    `yaml:"dir_ttl"`            // 目录列表缓存时间
 	BlobConcurrent    uint64           `yaml:"blob_concurrent"`    // 并发缓存限制
 	BlobNotFoundTTL   time.Duration    `yaml:"blob_not_found_ttl"` // 404 缓存时间
+	DirNotFoundTTL    time.Duration    `yaml:"dir_not_found_ttl"`  // 目录 404 缓存时间
 	BackendConcurrent uint64           `yaml:"backend_concurrent"` // 并发后端请求限制
 }
 

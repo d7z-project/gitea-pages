@@ -70,6 +70,26 @@ func (g *ProviderGitea) Open(ctx context.Context, owner, repo, commit, path stri
 	return g.client.Do(req)
 }
 
+func (g *ProviderGitea) List(_ context.Context, owner, repo, commit, path string) ([]core.DirEntry, error) {
+	items, resp, err := g.gitea.ListContents(owner, repo, commit, path)
+	if err != nil {
+		if resp != nil && resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return nil, errors.Join(err, os.ErrNotExist)
+		}
+		return nil, err
+	}
+	entries := make([]core.DirEntry, len(items))
+	for i, item := range items {
+		entries[i] = core.DirEntry{
+			Name: item.Name,
+			Path: item.Path,
+			Type: item.Type,
+			Size: item.Size,
+		}
+	}
+	return entries, nil
+}
+
 func (g *ProviderGitea) Close() error {
 	return nil
 }

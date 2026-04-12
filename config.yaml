@@ -30,10 +30,14 @@ cache:
   blob_ttl: 1m
   # 最大单个响应数据缓存大小
   blob_limit: 10MB
+  # 目录列表缓存时长
+  dir_ttl: 1m
   # 并发缓存写入限制
   blob_concurrent: 16
   # 404 响应缓存时长
   blob_not_found_ttl: 1h
+  # 目录 404 缓存时长
+  dir_not_found_ttl: 1h
   # 并发后端请求限制
   backend_concurrent: 64
 page:
@@ -61,3 +65,7 @@ filters:
       allowed_hosts: []
       # 开启后拒绝直连私网/环回 IP
       block_private_network: false
+    # 仓库文件系统 API
+    fs:
+      # 是否允许脚本列目录
+      enabled: true

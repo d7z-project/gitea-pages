@@ -34,11 +34,16 @@ type RequestConfig struct {
 	MaxBodyBytes int64 `json:"max_body_bytes"`
 }
 
+type FSConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 type Config struct {
 	EnableDebug     bool          `json:"debug"`
 	EnableWebsocket bool          `json:"websocket"`
 	Fetch           FetchConfig   `json:"fetch"`
 	Request         RequestConfig `json:"request"`
+	FS              FSConfig      `json:"fs"`
 }
 
 func init() {
@@ -54,6 +59,7 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	global.EnableDebug = true
 	global.EnableWebsocket = true
 	global.Fetch.Enabled = true
+	global.FS.Enabled = true
 	if err := gl.Unmarshal(&global); err != nil {
 		return nil, err
 	}
@@ -176,6 +182,11 @@ func initRuntime(
 	}
 	if err := RequestInject(ctx, vm, request, global.Request); err != nil {
 		return err
+	}
+	if global.FS.Enabled {
+		if err := FSInject(ctx, vm); err != nil {
+			return err
+		}
 	}
 	if err := ResponseInject(vm, debug, request); err != nil {
 		return err

@@ -86,6 +86,32 @@ routes:
 	assert.Equal(t, "payload|payload", string(data))
 }
 
+func Test_GoJa_FSList(t *testing.T) {
+	server := core.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+const root = fs.list()
+const docs = fs.list("docs")
+response.json({
+  root: root.map(item => item.name).sort(),
+  docs: docs.map(item => item.path).sort(),
+})
+`)
+	server.AddFile("org1/repo1/gh-pages/docs/a.txt", "a")
+	server.AddFile("org1/repo1/gh-pages/docs/b.txt", "b")
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "api/v1/**"
+  js:
+    exec: "index.js"
+`)
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/list")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"root":[".pages.yaml","docs","index.html","index.js"],"docs":["docs/a.txt","docs/b.txt"]}`, string(data))
+}
+
 func Test_GoJa_Async(t *testing.T) {
 	server := core.NewDefaultTestServer()
 	defer server.Close()

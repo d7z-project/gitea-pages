@@ -55,9 +55,11 @@ func main() {
 		cacheBlob.Child("backend"),
 		uint64(config.Cache.BlobLimit),
 		config.Cache.BlobTTL,
+		config.Cache.DirTTL,
 		config.Cache.BlobConcurrent,
 		config.Cache.BackendConcurrent,
 		config.Cache.BlobNotFoundTTL,
+		config.Cache.DirNotFoundTTL,
 	)
 	defer backend.Close()
 	db, err := kv.NewKVFromURL(config.Database.URL)

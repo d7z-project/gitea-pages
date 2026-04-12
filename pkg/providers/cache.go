@@ -3,6 +3,7 @@ package providers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,9 +24,11 @@ type ProviderCache struct {
 	cacheBlob      cache.Cache
 	cacheBlobLimit uint64
 	cacheBlobTTL   time.Duration
+	cacheDirTTL    time.Duration
 	cacheSem       chan struct{}
 	backendSem     chan struct{}
 	notFoundTTL    time.Duration
+	dirNotFoundTTL time.Duration
 }
 
 func (c *ProviderCache) Close() error {
@@ -37,9 +40,11 @@ func NewProviderCache(
 	cacheBlob cache.Cache,
 	cacheBlobLimit uint64,
 	cacheBlobTTL time.Duration,
+	cacheDirTTL time.Duration,
 	cacheConcurrent uint64,
 	backendConcurrent uint64,
 	notFoundTTL time.Duration,
+	dirNotFoundTTL time.Duration,
 ) *ProviderCache {
 	if cacheConcurrent == 0 {
 		cacheConcurrent = 16 // 默认限制 16 个并发缓存操作
@@ -50,14 +55,22 @@ func NewProviderCache(
 	if notFoundTTL == 0 {
 		notFoundTTL = time.Hour // 默认 404 缓存 1 小时
 	}
+	if cacheDirTTL == 0 {
+		cacheDirTTL = cacheBlobTTL
+	}
+	if dirNotFoundTTL == 0 {
+		dirNotFoundTTL = notFoundTTL
+	}
 	return &ProviderCache{
 		parent:         backend,
 		cacheBlob:      cacheBlob,
 		cacheBlobLimit: cacheBlobLimit,
 		cacheBlobTTL:   cacheBlobTTL,
+		cacheDirTTL:    cacheDirTTL,
 		cacheSem:       make(chan struct{}, cacheConcurrent),
 		backendSem:     make(chan struct{}, backendConcurrent),
 		notFoundTTL:    notFoundTTL,
+		dirNotFoundTTL: dirNotFoundTTL,
 	}
 }
 
@@ -70,6 +83,26 @@ func (c *ProviderCache) Meta(ctx context.Context, owner, repo string) (*core.Met
 		return nil, ctx.Err()
 	}
 	return c.parent.Meta(ctx, owner, repo)
+}
+
+func (c *ProviderCache) List(ctx context.Context, owner, repo, id, path string) ([]core.DirEntry, error) {
+	key := c.cacheDirKey(owner, repo, id, path)
+	if entries, err := c.loadCachedDirEntries(ctx, key); entries != nil || err != nil {
+		return entries, err
+	}
+
+	releaseBackend, err := c.acquireBackend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseBackend()
+
+	entries, err := c.parent.List(ctx, owner, repo, id, path)
+	if err != nil {
+		return nil, c.handleDirBackendError(ctx, key, err)
+	}
+	c.cacheDirEntries(ctx, key, entries)
+	return entries, nil
 }
 
 func (c *ProviderCache) Open(ctx context.Context, owner, repo, id, path string, headers http.Header) (*http.Response, error) {
@@ -100,6 +133,10 @@ func (c *ProviderCache) Open(ctx context.Context, owner, repo, id, path string, 
 
 func (c *ProviderCache) cacheKey(owner, repo, id, path string) string {
 	return fmt.Sprintf("%s/%s/%s/%s", owner, repo, id, path)
+}
+
+func (c *ProviderCache) cacheDirKey(owner, repo, id, path string) string {
+	return "dir:" + c.cacheKey(owner, repo, id, path)
 }
 
 func (c *ProviderCache) loadCachedResponse(ctx context.Context, key string) (*http.Response, error) {
@@ -138,6 +175,29 @@ func (c *ProviderCache) loadCachedResponse(ctx context.Context, key string) (*ht
 	}, nil
 }
 
+func (c *ProviderCache) loadCachedDirEntries(ctx context.Context, key string) ([]core.DirEntry, error) {
+	content, err := c.cacheBlob.Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if content == nil {
+		return nil, os.ErrNotExist
+	}
+	if content.Metadata["404"] == "true" {
+		return nil, os.ErrNotExist
+	}
+
+	defer content.Close()
+	var entries []core.DirEntry
+	if err = json.NewDecoder(content).Decode(&entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 func (c *ProviderCache) acquireBackend(ctx context.Context) (func(), error) {
 	select {
 	case c.backendSem <- struct{}{}:
@@ -150,6 +210,13 @@ func (c *ProviderCache) acquireBackend(ctx context.Context) (func(), error) {
 func (c *ProviderCache) handleBackendError(ctx context.Context, key string, err error) error {
 	if errors.Is(err, os.ErrNotExist) {
 		c.cacheNotFound(ctx, key)
+	}
+	return err
+}
+
+func (c *ProviderCache) handleDirBackendError(ctx context.Context, key string, err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		c.cacheDirNotFound(ctx, key)
 	}
 	return err
 }
@@ -187,6 +254,14 @@ func (c *ProviderCache) cacheNotFound(ctx context.Context, key string) {
 		"404": "true",
 	}, bytes.NewBuffer(nil), c.notFoundTTL); err != nil {
 		zap.L().Warn("缓存404失败", zap.Error(err))
+	}
+}
+
+func (c *ProviderCache) cacheDirNotFound(ctx context.Context, key string) {
+	if err := c.cacheBlob.Put(ctx, key, map[string]string{
+		"404": "true",
+	}, bytes.NewBuffer(nil), c.dirNotFoundTTL); err != nil {
+		zap.L().Warn("缓存目录404失败", zap.Error(err))
 	}
 }
 
@@ -230,4 +305,21 @@ func (c *ProviderCache) cacheResponse(ctx context.Context, key string, resp *htt
 		ReadSeeker: bytes.NewReader(allBytes),
 	}
 	return resp, nil
+}
+
+func (c *ProviderCache) cacheDirEntries(ctx context.Context, key string, entries []core.DirEntry) {
+	if !c.tryAcquireCacheSlot() {
+		zap.L().Debug("跳过目录缓存，并发限制已达", zap.String("key", key))
+		return
+	}
+	defer c.releaseCacheSlot()
+
+	payload, err := json.Marshal(entries)
+	if err != nil {
+		zap.L().Warn("目录缓存序列化失败", zap.Error(err))
+		return
+	}
+	if err = c.cacheBlob.Put(ctx, key, nil, bytes.NewReader(payload), c.cacheDirTTL); err != nil {
+		zap.L().Warn("缓存目录失败", zap.Error(err))
+	}
 }

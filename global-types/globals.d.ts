@@ -78,6 +78,19 @@ declare global {
 
     const request: RequestObject;
 
+    interface FSEntry {
+        name: string;
+        path: string;
+        type: "file" | "dir" | "symlink" | "submodule";
+        size?: number;
+    }
+
+    interface FileSystem {
+        list(path?: string): FSEntry[];
+    }
+
+    const fs: FileSystem;
+
     // Response 相关类型
     interface CookieOptions {
         maxAge?: number;

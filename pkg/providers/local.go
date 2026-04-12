@@ -57,6 +57,28 @@ func (l *LocalProvider) Meta(_ context.Context, owner, repo string) (*core.Metad
 	}, nil
 }
 
+func (l *LocalProvider) List(_ context.Context, _, _, _, path string) ([]core.DirEntry, error) {
+	list, err := os.ReadDir(filepath.Join(l.path, path))
+	if err != nil {
+		return nil, errors.Join(err, os.ErrNotExist)
+	}
+	entries := make([]core.DirEntry, 0, len(list))
+	for _, item := range list {
+		entry := core.DirEntry{
+			Name: item.Name(),
+			Path: filepath.ToSlash(filepath.Join(path, item.Name())),
+			Type: "file",
+		}
+		if item.IsDir() {
+			entry.Type = "dir"
+		} else if info, infoErr := item.Info(); infoErr == nil {
+			entry.Size = info.Size()
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
 func (l *LocalProvider) Open(_ context.Context, _, _, _, path string, _ http.Header) (*http.Response, error) {
 	var all []byte
 	recorder := httptest.NewRecorder()

@@ -36,6 +36,10 @@ func (p *PageVFS) NativeOpen(ctx context.Context, path string, headers http.Head
 	return p.backend.Open(ctx, p.org, p.repo, p.commitID, path, headers)
 }
 
+func (p *PageVFS) List(ctx context.Context, path string) ([]DirEntry, error) {
+	return p.backend.List(ctx, p.org, p.repo, p.commitID, path)
+}
+
 func (p *PageVFS) Exists(ctx context.Context, path string) (bool, error) {
 	open, err := p.NativeOpen(ctx, path, nil)
 	if open != nil {
