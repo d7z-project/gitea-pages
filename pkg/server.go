@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"slices"
@@ -13,7 +14,6 @@ import (
 	"github.com/gobwas/glob"
 	"github.com/google/uuid"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/filters"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
@@ -191,7 +191,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	writer := utils.NewWrittenResponseWriter(w)
 	defer func() {
 		if e := recover(); e != nil {
-			zap.L().Error("panic!", zap.Any("error", e), zap.Any("id", sessionID))
+			slog.Error("panic!", "error", e, "id", sessionID)
 			if !writer.IsWritten() {
 				if err, ok := e.(error); ok {
 					s.errorHandler(writer, request, err)
@@ -203,7 +203,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	}()
 	err := s.Serve(writer, request)
 	if err != nil {
-		zap.L().Debug("bad request", zap.Error(err), zap.Any("request", request.RequestURI), zap.Any("id", sessionID))
+		slog.Debug("bad request", "error", err, "request", request.RequestURI, "id", sessionID)
 		if !writer.IsWritten() {
 			s.errorHandler(writer, request, err)
 		}
@@ -253,7 +253,7 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		Kill: cancelFunc,
 	}
 
-	zap.L().Debug("new request", zap.Any("request path", meta.Path))
+	slog.Debug("new request", "request path", meta.Path)
 
 	if strings.HasSuffix(meta.Path, "/") || meta.Path == "" {
 		meta.Path += "index.html"
@@ -267,7 +267,7 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		if !ok {
 			value, err = glob.Compile(filter.Path)
 			if err != nil {
-				zap.L().Warn("invalid glob pattern", zap.String("pattern", filter.Path), zap.Error(err))
+				slog.Warn("invalid glob pattern", "pattern", filter.Path, "error", err)
 				continue
 			}
 			s.globCache.Add(filter.Path, value)
@@ -296,7 +296,7 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 			filtersRoute = append(filtersRoute, filtersRoute[i])
 		}
 	}
-	zap.L().Debug("active filters", zap.String("filters", strings.Join(filtersRoute, " -> ")))
+	slog.Debug("active filters", "filters", strings.Join(filtersRoute, " -> "))
 
 	var stack core.NextCall = core.NotFountNextCall
 	for i, filter := range activeFiltersCall {

@@ -2,6 +2,7 @@ package goja
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -9,7 +10,6 @@ import (
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/gorilla/websocket"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
@@ -203,7 +203,7 @@ func (s *webSocketState) pingLoop() {
 				return
 			}
 			if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
-				zap.L().Debug("websocket ping failed", zap.Error(err))
+				slog.Debug("websocket ping failed", "error", err)
 				s.dispatch("error", map[string]any{"error": err.Error()})
 				s.ctx.Kill()
 				s.finish()

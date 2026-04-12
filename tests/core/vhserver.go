@@ -2,10 +2,9 @@ package core
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
-
-	"go.uber.org/zap"
 )
 
 type VServer struct {
@@ -22,7 +21,7 @@ func NewServer() *VServer {
 	port := listener.Addr().(*net.TCPAddr).Port
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		zap.L().Debug("ServeHTTP", zap.String("url", r.URL.String()))
+		slog.Debug("ServeHTTP", "url", r.URL.String())
 		http.Error(w, "", http.StatusNotFound)
 	})
 	go func() {

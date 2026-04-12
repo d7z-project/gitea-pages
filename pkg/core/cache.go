@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 )
@@ -240,7 +240,7 @@ func (c *ProviderCache) handleBackendResponse(ctx context.Context, key, path str
 		return c.streamResponse(resp, length), nil
 	}
 	if !c.tryAcquireCacheSlot() {
-		zap.L().Debug("skip blob cache because the concurrency limit was reached", zap.String("path", path))
+		slog.Debug("skip blob cache because the concurrency limit was reached", "path", path)
 		return c.streamResponse(resp, length), nil
 	}
 	defer c.releaseCacheSlot()
@@ -252,7 +252,7 @@ func (c *ProviderCache) cacheNotFound(ctx context.Context, key string) {
 	if err := c.cacheBlob.Put(ctx, key, map[string]string{
 		"404": "true",
 	}, bytes.NewBuffer(nil), c.notFoundTTL); err != nil {
-		zap.L().Warn("failed to cache 404 response", zap.Error(err))
+		slog.Warn("failed to cache 404 response", "error", err)
 	}
 }
 
@@ -260,7 +260,7 @@ func (c *ProviderCache) cacheDirNotFound(ctx context.Context, key string) {
 	if err := c.cacheBlob.Put(ctx, key, map[string]string{
 		"404": "true",
 	}, bytes.NewBuffer(nil), c.dirNotFoundTTL); err != nil {
-		zap.L().Warn("failed to cache directory 404 response", zap.Error(err))
+		slog.Warn("failed to cache directory 404 response", "error", err)
 	}
 }
 
@@ -297,7 +297,7 @@ func (c *ProviderCache) cacheResponse(ctx context.Context, key string, resp *htt
 		"Last-Modified":  resp.Header.Get("Last-Modified"),
 		"Content-Type":   resp.Header.Get("Content-Type"),
 	}, bytes.NewBuffer(allBytes), c.cacheBlobTTL); err != nil {
-		zap.L().Warn("failed to cache blob response", zap.Error(err), zap.Int("Size", len(allBytes)), zap.Uint64("MaxSize", c.cacheBlobLimit))
+		slog.Warn("failed to cache blob response", "error", err, "size", len(allBytes), "max_size", c.cacheBlobLimit)
 	}
 
 	resp.Body = utils.NopCloser{
@@ -308,17 +308,17 @@ func (c *ProviderCache) cacheResponse(ctx context.Context, key string, resp *htt
 
 func (c *ProviderCache) cacheDirEntries(ctx context.Context, key string, entries []DirEntry) {
 	if !c.tryAcquireCacheSlot() {
-		zap.L().Debug("skip directory cache because the concurrency limit was reached", zap.String("key", key))
+		slog.Debug("skip directory cache because the concurrency limit was reached", "key", key)
 		return
 	}
 	defer c.releaseCacheSlot()
 
 	payload, err := json.Marshal(entries)
 	if err != nil {
-		zap.L().Warn("failed to serialize directory cache payload", zap.Error(err))
+		slog.Warn("failed to serialize directory cache payload", "error", err)
 		return
 	}
 	if err = c.cacheBlob.Put(ctx, key, nil, bytes.NewReader(payload), c.cacheDirTTL); err != nil {
-		zap.L().Warn("failed to cache directory entries", zap.Error(err))
+		slog.Warn("failed to cache directory entries", "error", err)
 	}
 }

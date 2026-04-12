@@ -3,6 +3,7 @@ package main
 import (
 	_ "embed"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"text/template"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/alecthomas/units"
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.in/yaml.v3"
 )
@@ -69,7 +69,7 @@ func (c *Config) RenderStatusPage(w http.ResponseWriter, r *http.Request, status
 		"Path":  r.URL.Path,
 		"Code":  status,
 	})); renderErr != nil {
-		zap.L().Error("failed to render error page", zap.Error(renderErr))
+		slog.Error("failed to render error page", "error", renderErr)
 	}
 }
 
@@ -161,7 +161,7 @@ func LoadConfig(path string) (*Config, error) {
 	if c.DB.URL == "" {
 		c.DB = c.LegacyDatabase
 		if c.DB.URL != "" {
-			zap.L().Warn("config key 'database' is deprecated; use 'db' and optional 'user_db' instead")
+			slog.Warn("config key 'database' is deprecated; use 'db' and optional 'user_db' instead")
 		}
 	}
 	if c.DB.URL == "" {

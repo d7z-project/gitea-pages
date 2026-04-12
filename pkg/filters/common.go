@@ -2,8 +2,8 @@ package filters
 
 import (
 	"errors"
+	"log/slog"
 
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/filters/goja"
 )
@@ -28,7 +28,7 @@ func DefaultFilters(config map[string]map[string]any) (map[string]core.FilterIns
 			item = make(map[string]any)
 		}
 		if it, ok := item["Enabled"]; ok && it == false {
-			zap.L().Debug("skip filter", zap.String("key", key))
+			slog.Debug("skip filter", "key", key)
 			continue
 		}
 		inst, err := instance(item)

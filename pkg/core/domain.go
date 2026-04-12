@@ -2,11 +2,11 @@ package core
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 )
 
 type PageDomain struct {
@@ -42,10 +42,10 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path string) (
 			if !errors.Is(err, os.ErrNotExist) {
 				return nil, err
 			}
-			zap.L().Warn("unknown domain", zap.String("base", p.baseDomain), zap.String("domain", domain), zap.Error(err))
+			slog.Warn("unknown domain", "base", p.baseDomain, "domain", domain, "error", err)
 			return nil, os.ErrNotExist
 		}
-		zap.L().Debug("alias hit", zap.String("domain", domain), zap.Any("alias", alias))
+		slog.Debug("alias hit", "domain", domain, "alias", alias)
 		return p.returnMeta(ctx, alias.Owner, alias.Repo, pathArr)
 	}
 	owner := strings.TrimSuffix(domain, "."+p.baseDomain)
@@ -54,7 +54,7 @@ func (p *PageDomain) ParseDomainMeta(ctx context.Context, domain, path string) (
 	var err error
 	if repo == "" {
 		// 回退到默认仓库 (路径未包含仓库)
-		zap.L().Debug("fail back to default repo", zap.String("repo", domain))
+		slog.Debug("fail back to default repo", "repo", domain)
 		returnMeta, err = p.returnMeta(ctx, owner, defaultRepo, pathArr)
 	} else {
 		returnMeta, err = p.returnMeta(ctx, owner, repo, pathArr[1:])
@@ -78,7 +78,7 @@ func (p *PageDomain) returnMeta(ctx context.Context, owner, repo string, path []
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-		zap.L().Debug("repo does not exists", zap.Error(err), zap.Strings("meta", []string{owner, repo}))
+		slog.Debug("repo does not exists", "error", err, "meta", []string{owner, repo})
 		return nil, errors.Wrap(os.ErrNotExist, strings.Join(path, "/"))
 	}
 	result.PageMetaContent = meta

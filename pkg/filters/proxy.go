@@ -2,13 +2,13 @@ package filters
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
@@ -40,8 +40,8 @@ func FilterInstProxy(_ core.Params) (core.FilterInstance, error) {
 			request.Header.Set("X-Page-IP", utils.GetRemoteIP(request))
 			request.Header.Set("X-Page-Refer", fmt.Sprintf("%s/%s/%s", ctx.Owner, ctx.Repo, ctx.Path))
 			request.Header.Set("X-Page-Host", request.Host)
-			zap.L().Debug("proxy route matched", zap.Any("prefix", param.Prefix), zap.Any("target", param.Target),
-				zap.Any("path", proxyPath), zap.Any("target", fmt.Sprintf("%s%s", u, targetPath)))
+			slog.Debug("proxy route matched", "prefix", param.Prefix, "target", param.Target,
+				"path", proxyPath, "resolved_target", fmt.Sprintf("%s%s", u, targetPath))
 			// todo(security): 处理 websocket
 			proxy.ServeHTTP(writer, request)
 			return nil

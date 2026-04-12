@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"regexp"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gobwas/glob"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/tools"
 	"gopkg.in/yaml.v3"
@@ -229,7 +229,7 @@ func (s *ServerMeta) refreshMeta(ctx context.Context, owner, repo string) (*Page
 	}
 	// todo: 优化保存逻辑 ，减少写入
 	if err = s.Alias.Bind(ctx, rel.Alias, owner, repo); err != nil {
-		zap.L().Warn("alias binding error.", zap.Error(err))
+		slog.Warn("alias binding error", "error", err)
 		return nil, err
 	}
 	_ = s.cache.Store(ctx, key, *rel)
@@ -256,7 +256,7 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 	}
 	data, err := vfs.ReadString(ctx, ".pages.yaml")
 	if err != nil {
-		zap.L().Debug("failed to read meta data", zap.String("error", err.Error()))
+		slog.Debug("failed to read meta data", "error", err.Error())
 		if len(alias) > 0 {
 			meta.Filters = append(meta.Filters, Filter{
 				Path: "**",

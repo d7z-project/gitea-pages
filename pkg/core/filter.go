@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 
-	"go.uber.org/zap"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/subscribe"
 	"gopkg.d7z.net/middleware/tools"
@@ -50,11 +50,9 @@ type Filter struct {
 
 func NextCallWrapper(call FilterCall, parentCall NextCall, stack Filter) NextCall {
 	return func(ctx FilterContext, writer http.ResponseWriter, request *http.Request) error {
-		zap.L().Debug(fmt.Sprintf("call filter(%s) before", stack.Type), zap.Any("filter", stack))
+		slog.Debug(fmt.Sprintf("call filter(%s) before", stack.Type), "filter", stack)
 		err := call(ctx, writer, request, parentCall)
-		zap.L().Debug(fmt.Sprintf("call filter(%s) after", stack.Type),
-			zap.Any("filter", stack),
-			zap.Error(err))
+		slog.Debug(fmt.Sprintf("call filter(%s) after", stack.Type), "filter", stack, "error", err)
 		return err
 	}
 }

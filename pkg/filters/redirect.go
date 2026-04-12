@@ -2,6 +2,7 @@ package filters
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -9,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
@@ -46,7 +46,7 @@ func FilterInstRedirect(g core.Params) (core.FilterInstance, error) {
 			domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
 			if len(param.Targets) > 0 && !slices.Contains(ctx.Alias, domain) {
 				// 重定向到配置的地址
-				zap.L().Debug("redirect", zap.Any("src", request.Host), zap.Any("dst", param.Targets[0]))
+				slog.Debug("redirect", "src", request.Host, "dst", param.Targets[0])
 				path := ctx.Path
 				if strings.HasSuffix(path, "/index.html") || path == "index.html" {
 					path = strings.TrimSuffix(path, "index.html")

@@ -3,18 +3,18 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	_ "gopkg.d7z.net/gitea-pages/pkg/providers"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/subscribe"
@@ -32,8 +32,7 @@ func init() {
 }
 
 func main() {
-	call := logInject()
-	defer call()
+	logInject()
 	config, err := LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("fail to load config file: %v", err)
@@ -140,13 +139,22 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
+	slog.Info("server initialized",
+		"mode", "server",
+		"bind", config.Bind,
+		"domain", config.Domain,
+		"db", config.DB.URL,
+		"user_db", effectiveUserDBURL(config),
+		"event", config.Event.URL,
+		"provider", config.Provider.Type,
+	)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	svc := http.Server{Addr: config.Bind, Handler: pageServer}
 	go func() {
 		<-ctx.Done()
-		zap.L().Debug("shutdown gracefully")
+		slog.Debug("shutdown gracefully")
 		_ = svc.Close()
 	}()
 	_ = svc.ListenAndServe()
@@ -165,22 +173,19 @@ func parseSameSite(value string) http.SameSite {
 	}
 }
 
-func logInject() func() {
-	atom := zap.NewAtomicLevel()
+func logInject() {
+	level := slog.LevelInfo
 	if debug {
-		atom.SetLevel(zap.DebugLevel)
-	} else {
-		atom.SetLevel(zap.InfoLevel)
+		level = slog.LevelDebug
 	}
-	cfg := zap.NewProductionConfig()
-	cfg.Level = atom
+	logger := utils.NewConsoleLogger(os.Stderr, level)
+	slog.SetDefault(logger)
+	slog.Debug("debug enabled")
+}
 
-	logger, _ := cfg.Build()
-	zap.ReplaceGlobals(logger)
-	zap.L().Debug("debug enabled")
-	return func() {
-		if err := logger.Sync(); err != nil {
-			fmt.Println(err)
-		}
+func effectiveUserDBURL(config *Config) string {
+	if config.UserDB.URL != "" {
+		return config.UserDB.URL
 	}
+	return config.DB.URL + " (shared)"
 }

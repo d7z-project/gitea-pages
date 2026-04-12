@@ -2,6 +2,7 @@ package filters
 
 import (
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
@@ -33,14 +33,14 @@ func FilterInstDirect(_ core.Params) (core.FilterInstance, error) {
 				return nil
 			}
 			path := param.Prefix + strings.TrimSuffix(ctx.Path, "/")
-			zap.L().Debug("direct fetch", zap.String("path", path))
+			slog.Debug("direct fetch", "path", path)
 			resp, err := ctx.NativeOpen(request.Context(), path, nil)
 			if err != nil {
 				if resp != nil {
 					resp.Body.Close()
 				}
 				if !errors.Is(err, os.ErrNotExist) {
-					zap.L().Debug("error", zap.Any("error", err))
+					slog.Debug("error", "error", err)
 					return err
 				}
 				exists, e := ctx.Exists(ctx, path+"/index.html")

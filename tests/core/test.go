@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
@@ -38,20 +38,15 @@ func NewTestServerOptions(domain string, opts ...pkg.ServerOption) *TestServer {
 }
 
 func NewTestServerWithKVOptions(domain string, db, userDB kv.KV, opts ...pkg.ServerOption) *TestServer {
-	atom := zap.NewAtomicLevel()
+	level := slog.LevelDebug
 	getenv := os.Getenv("BM")
 	if getenv != "" {
-		atom.SetLevel(zap.ErrorLevel)
-	} else {
-		atom.SetLevel(zap.DebugLevel)
+		level = slog.LevelError
 	}
-	cfg := zap.NewProductionConfig()
-	cfg.Level = atom
-	logger, _ := cfg.Build()
-	zap.ReplaceGlobals(logger)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 	dummy, err := NewDummy()
 	if err != nil {
-		zap.S().Fatal(err)
+		panic(err)
 	}
 	memoryCache, _ := cache.NewMemoryCache(cache.MemoryCacheConfig{
 		MaxCapacity: 256,

@@ -3,17 +3,17 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/gitea-pages/pkg/providers"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/subscribe"
@@ -30,12 +30,7 @@ var (
 )
 
 func init() {
-	atom := zap.NewAtomicLevel()
-	atom.SetLevel(zap.DebugLevel)
-	cfg := zap.NewProductionConfig()
-	cfg.Level = atom
-	logger, _ := cfg.Build()
-	zap.ReplaceGlobals(logger)
+	slog.SetDefault(utils.NewConsoleLogger(os.Stderr, slog.LevelDebug))
 	dir, _ := os.Getwd()
 	path = dir
 	flag.StringVar(&org, "org", org, "org")
@@ -47,9 +42,9 @@ func init() {
 }
 
 func main() {
-	fmt.Printf("Open http://%s%s/ (local path: %s)\n", repo, port, path)
 	if stat, err := os.Stat(path); err != nil || !stat.IsDir() {
-		zap.L().Fatal("path is not a directory", zap.String("path", path))
+		slog.Error("path is not a directory", "path", path, "error", err)
+		os.Exit(1)
 	}
 	provider := providers.NewLocalProvider(map[string][]string{
 		org: {repo},
@@ -60,7 +55,8 @@ func main() {
 		var info map[string]interface{}
 		err := yaml.Unmarshal(file, &info)
 		if err != nil {
-			zap.L().Fatal("parse yaml", zap.Error(err))
+			slog.Error("parse yaml", "error", err)
+			os.Exit(1)
 		}
 		delete(info, "alias")
 		marshal, _ := yaml.Marshal(info)
@@ -68,11 +64,13 @@ func main() {
 	}
 	db, err := kv.NewMemory("")
 	if err != nil {
-		zap.L().Fatal("failed to init memory provider", zap.Error(err))
+		slog.Error("failed to init memory provider", "error", err)
+		os.Exit(1)
 	}
 	userDB, err := kv.NewMemory("")
 	if err != nil {
-		zap.L().Fatal("failed to init user memory provider", zap.Error(err))
+		slog.Error("failed to init user memory provider", "error", err)
+		os.Exit(1)
 	}
 	subscriber := subscribe.NewMemorySubscriber()
 	server, err := pkg.NewPageServer(
@@ -95,11 +93,22 @@ func main() {
 		}),
 	)
 	if err != nil {
-		zap.L().Fatal("failed to init page", zap.Error(err))
+		slog.Error("failed to init page", "error", err)
+		os.Exit(1)
 	}
+	slog.Info("server initialized",
+		"mode", "local",
+		"listen", port,
+		"domain", domain,
+		"org", org,
+		"repo", repo,
+		"path", path,
+		"url", "http://"+repo+port+"/",
+	)
 	err = http.ListenAndServe(port, server)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		zap.L().Fatal("failed to start server", zap.Error(err))
+		slog.Error("failed to start server", "error", err)
+		os.Exit(1)
 	}
 }
 
