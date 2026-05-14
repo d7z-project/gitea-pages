@@ -25,7 +25,7 @@ func installResponse(vm *goja.Runtime) error {
 	ctor := func(call goja.ConstructorCall) *goja.Object {
 		state, err := responseStateFromConstructor(vm, call)
 		if err != nil {
-			panic(err)
+			panic(vm.ToValue(err.Error()))
 		}
 		return newResponseObject(vm, state)
 	}
@@ -38,7 +38,7 @@ func installResponse(vm *goja.Runtime) error {
 		}
 		body, err := json.Marshal(exported)
 		if err != nil {
-			panic(err)
+			panic(vm.ToValue(err.Error()))
 		}
 		state := &webResponseState{
 			status:  http.StatusOK,
@@ -99,7 +99,7 @@ func responseStateFromConstructor(vm *goja.Runtime, call goja.ConstructorCall) (
 		status:  http.StatusOK,
 		headers: make(http.Header),
 	}
-	if len(call.Arguments) > 0 && call.Arguments[0] != nil && !goja.IsUndefined(call.Arguments[0]) && !goja.IsNull(call.Arguments[0]) {
+	if len(call.Arguments) > 0 && !isNilish(call.Arguments[0]) {
 		body, err := bodyBytesFromValue(vm, call.Arguments[0])
 		if err != nil {
 			return nil, err
@@ -113,11 +113,11 @@ func responseStateFromConstructor(vm *goja.Runtime, call goja.ConstructorCall) (
 }
 
 func applyResponseInit(vm *goja.Runtime, state *webResponseState, value goja.Value) {
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+	if isNilish(value) {
 		return
 	}
-	obj := value.ToObject(vm)
-	if obj == nil {
+	obj, ok := valueObject(vm, value)
+	if !ok {
 		return
 	}
 	if next, ok := objectValue(obj, "status"); ok {
@@ -135,11 +135,15 @@ func applyResponseInit(vm *goja.Runtime, state *webResponseState, value goja.Val
 }
 
 func responseStateFromValue(vm *goja.Runtime, value goja.Value) (*webResponseState, bool) {
-	exported, ok := internalExportedValue(vm, value, internalResponseKey)
+	obj, ok := valueObject(vm, value)
 	if !ok {
 		return nil, false
 	}
-	state, ok := exported.(*webResponseState)
+	internal, ok := objectValue(obj, internalResponseKey)
+	if !ok {
+		return nil, false
+	}
+	state, ok := internal.Export().(*webResponseState)
 	return state, ok
 }
 

@@ -1,8 +1,47 @@
 package goja
 
 import (
+	"errors"
+	"sync"
+	"sync/atomic"
+
 	"github.com/dop251/goja"
 )
+
+const internalAbortSignalKey = "__page_internal_abort_signal__"
+
+var errInvalidAbortSignal = errors.New("invalid abort signal")
+
+type abortSignalState struct {
+	aborted atomic.Bool
+	done    chan struct{}
+	once    sync.Once
+}
+
+func newAbortSignalState() *abortSignalState {
+	return &abortSignalState{done: make(chan struct{})}
+}
+
+func (s *abortSignalState) Abort() {
+	if s == nil {
+		return
+	}
+	s.aborted.Store(true)
+	s.once.Do(func() {
+		close(s.done)
+	})
+}
+
+func (s *abortSignalState) Aborted() bool {
+	return s != nil && s.aborted.Load()
+}
+
+func (s *abortSignalState) Done() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.done
+}
 
 func isNilish(value goja.Value) bool {
 	return value == nil || goja.IsUndefined(value) || goja.IsNull(value)
@@ -46,30 +85,6 @@ func objectInt64(obj *goja.Object, key string) (int64, bool) {
 	return value.ToInteger(), true
 }
 
-func internalExportedValue(vm *goja.Runtime, value goja.Value, key string) (any, bool) {
-	obj, ok := valueObject(vm, value)
-	if !ok {
-		return nil, false
-	}
-	internal, ok := objectValue(obj, key)
-	if !ok {
-		return nil, false
-	}
-	return internal.Export(), true
-}
-
-func resolvedPromise(vm *goja.Runtime, value any) *goja.Promise {
-	promise, resolve, _ := vm.NewPromise()
-	_ = resolve(vm.ToValue(value))
-	return promise
-}
-
-func rejectedPromise(vm *goja.Runtime, err error) *goja.Promise {
-	promise, _, reject := vm.NewPromise()
-	_ = reject(vm.ToValue(err))
-	return promise
-}
-
 func installTextCodecs(vm *goja.Runtime) error {
 	encoder := func(call goja.ConstructorCall) *goja.Object {
 		obj := vm.NewObject()
@@ -107,11 +122,11 @@ func installTextCodecs(vm *goja.Runtime) error {
 
 func installAbortPrimitives(vm *goja.Runtime) error {
 	controller := func(call goja.ConstructorCall) *goja.Object {
-		signal := newAbortSignalObject(vm)
+		signal, state := newAbortSignal(vm)
 		obj := vm.NewObject()
 		_ = obj.Set("signal", signal)
 		_ = obj.Set("abort", func() {
-			_ = signal.Set("aborted", true)
+			state.Abort()
 		})
 		return obj
 	}
@@ -119,14 +134,44 @@ func installAbortPrimitives(vm *goja.Runtime) error {
 		return err
 	}
 	return vm.Set("AbortSignal", vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
-		return newAbortSignalObject(vm)
+		signal, _ := newAbortSignal(vm)
+		return signal
 	}))
 }
 
-func newAbortSignalObject(vm *goja.Runtime) *goja.Object {
+func newAbortSignal(vm *goja.Runtime) (*goja.Object, *abortSignalState) {
+	state := newAbortSignalState()
 	obj := vm.NewObject()
-	_ = obj.Set("aborted", false)
-	return obj
+	_ = obj.Set(internalAbortSignalKey, state)
+	_ = obj.DefineAccessorProperty("aborted",
+		vm.ToValue(func() bool {
+			return state.Aborted()
+		}),
+		vm.ToValue(func(value goja.Value) {
+			if value != nil && value.ToBoolean() {
+				state.Abort()
+			}
+		}),
+		goja.FLAG_FALSE,
+		goja.FLAG_TRUE,
+	)
+	return obj, state
+}
+
+func abortSignalFromValue(vm *goja.Runtime, value goja.Value) (*goja.Object, *abortSignalState, error) {
+	obj, ok := valueObject(vm, value)
+	if !ok {
+		return nil, nil, errInvalidAbortSignal
+	}
+	internal, ok := objectValue(obj, internalAbortSignalKey)
+	if !ok {
+		return nil, nil, errInvalidAbortSignal
+	}
+	state, ok := internal.Export().(*abortSignalState)
+	if !ok {
+		return nil, nil, errInvalidAbortSignal
+	}
+	return obj, state, nil
 }
 
 func uint8ArrayBytes(vm *goja.Runtime, value goja.Value) ([]byte, bool) {

@@ -2,7 +2,6 @@ package goja
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/dop251/goja"
@@ -26,7 +25,26 @@ func initRuntime(
 ) (*goja.Object, error) {
 	buffer.Enable(vm)
 	url.Enable(vm)
-	if err := installHandlerRegistration(vm); err != nil {
+	if err := vm.Set("serve", func(handler goja.Value) error {
+		if isNilish(handler) {
+			return errors.New("invalid handler")
+		}
+		if _, ok := goja.AssertFunction(handler); ok {
+			return vm.GlobalObject().Set(internalHandlerName, handler)
+		}
+		obj, ok := valueObject(vm, handler)
+		if !ok {
+			return errors.New("handler must be a function or an object with fetch(request)")
+		}
+		fetchValue, ok := objectValue(obj, "fetch")
+		if !ok {
+			return errors.New("handler must be a function or an object with fetch(request)")
+		}
+		if _, ok := goja.AssertFunction(fetchValue); !ok {
+			return errors.New("handler must be a function or an object with fetch(request)")
+		}
+		return vm.GlobalObject().Set(internalHandlerName, handler)
+	}); err != nil {
 		return nil, err
 	}
 	if err := installHeaders(vm); err != nil {
@@ -69,50 +87,4 @@ func initRuntime(
 		closers.AddCloser(closer.Close)
 	}
 	return newIncomingRequestObject(vm, request, global.Request.MaxBodyBytes)
-}
-
-func installHandlerRegistration(vm *goja.Runtime) error {
-	return vm.Set("serve", func(handler goja.Value) error {
-		if isNilish(handler) {
-			return errors.New("invalid handler")
-		}
-		if _, ok := goja.AssertFunction(handler); ok {
-			return vm.GlobalObject().Set(internalHandlerName, handler)
-		}
-		obj, ok := valueObject(vm, handler)
-		if !ok {
-			return errors.New("handler must be a function or an object with fetch(request)")
-		}
-		fetchValue, ok := objectValue(obj, "fetch")
-		if !ok {
-			return errors.New("handler must be a function or an object with fetch(request)")
-		}
-		if _, ok := goja.AssertFunction(fetchValue); !ok {
-			return errors.New("handler must be a function or an object with fetch(request)")
-		}
-		return vm.GlobalObject().Set(internalHandlerName, handler)
-	})
-}
-
-func callHandler(vm *goja.Runtime, requestObj *goja.Object) (goja.Value, error) {
-	handler := vm.Get(internalHandlerName)
-	if isNilish(handler) {
-		return nil, errors.New("missing handler registration; call serve(handler)")
-	}
-	if fn, ok := goja.AssertFunction(handler); ok {
-		return fn(goja.Undefined(), requestObj)
-	}
-	obj, ok := valueObject(vm, handler)
-	if !ok {
-		return nil, fmt.Errorf("invalid handler: %s", handler.String())
-	}
-	fetchValue, ok := objectValue(obj, "fetch")
-	if !ok {
-		return nil, errors.New("handler must be a function or an object with fetch(request)")
-	}
-	fetchFn, ok := goja.AssertFunction(fetchValue)
-	if !ok {
-		return nil, errors.New("handler must be a function or an object with fetch(request)")
-	}
-	return fetchFn(obj, requestObj)
 }

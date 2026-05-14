@@ -458,6 +458,79 @@ routes:
 	assert.JSONEq(t, `{"body":"ok","method":"POST","value":"123","statusText":"OK"}`, string(data))
 }
 
+func Test_GoJa_AbortSignalBehavior(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(200 * time.Millisecond):
+			_, _ = w.Write([]byte("late"))
+		}
+	}))
+	defer ts.Close()
+
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(async function() {
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), 20)
+  const abortErr = await fetch('%s', { signal: controller.signal })
+    .then(() => "resolved")
+    .catch(err => String(err))
+  const fetchErr = await fetch("https://example.com", {
+    signal: { aborted: false },
+  }).then(() => "resolved").catch(err => String(err))
+  let requestErr = "missing-error"
+  try {
+    new Request("https://example.com", {
+      signal: { aborted: false },
+    })
+  } catch (err) {
+    requestErr = String(err)
+  }
+  return Response.json({ abortErr, fetchErr, requestErr })
+})
+`, ts.URL)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "**"
+  js:
+    exec: "index.js"
+`)
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/abort-signal")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"abortErr":"fetch aborted","fetchErr":"invalid abort signal","requestErr":"invalid abort signal"}`, string(data))
+}
+
+func Test_GoJa_ResponseErrorsAreCatchable(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  let constructorErr = "missing-error"
+  try {
+    new Response({ value: 1 })
+  } catch (err) {
+    constructorErr = String(err)
+  }
+  let jsonErr = "missing-error"
+  try {
+    Response.json(function nope() {})
+  } catch (err) {
+    jsonErr = String(err)
+  }
+  return Response.json({ constructorErr, jsonErr })
+})
+`)
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/response-errors")
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"constructorErr":"unsupported body type:`)
+	assert.Contains(t, string(data), `"jsonErr":"json: unsupported type:`)
+}
+
 func Test_GoJa_BodyUsed(t *testing.T) {
 	server := newGoJaTestServer(`
 serve(async function(request) {

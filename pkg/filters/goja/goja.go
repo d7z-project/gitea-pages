@@ -155,7 +155,32 @@ func runProgram(
 			finish(err)
 			return
 		}
-		result, err := callHandler(vm, requestObj)
+		handler := vm.Get(internalHandlerName)
+		if isNilish(handler) {
+			finish(errors.New("missing handler registration; call serve(handler)"))
+			return
+		}
+		var result goja.Value
+		if fn, ok := goja.AssertFunction(handler); ok {
+			result, err = fn(goja.Undefined(), requestObj)
+		} else {
+			obj, ok := valueObject(vm, handler)
+			if !ok {
+				finish(fmt.Errorf("invalid handler: %s", handler.String()))
+				return
+			}
+			fetchValue, ok := objectValue(obj, "fetch")
+			if !ok {
+				finish(errors.New("handler must be a function or an object with fetch(request)"))
+				return
+			}
+			fetchFn, ok := goja.AssertFunction(fetchValue)
+			if !ok {
+				finish(errors.New("handler must be a function or an object with fetch(request)"))
+				return
+			}
+			result, err = fetchFn(obj, requestObj)
+		}
 		if err != nil {
 			finish(err)
 			return

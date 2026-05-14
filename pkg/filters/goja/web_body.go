@@ -53,48 +53,87 @@ func attachBodyMethods(vm *goja.Runtime, obj *goja.Object, state *webBodyState) 
 	if obj == nil || state == nil {
 		return
 	}
+	bodyPromise := func(transform func([]byte) (any, error)) *goja.Promise {
+		promise, resolve, reject := vm.NewPromise()
+		data, err := consumeWebBody(state)
+		if err != nil {
+			_ = reject(err)
+			return promise
+		}
+		value, err := transform(data)
+		if err != nil {
+			_ = reject(err)
+			return promise
+		}
+		_ = resolve(vm.ToValue(value))
+		return promise
+	}
 	_ = obj.Set("body", newBodyObject(vm, state))
 	_ = obj.DefineAccessorProperty("bodyUsed", vm.ToValue(func() bool {
 		return state.used != nil && *state.used
 	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
 	_ = obj.Set("text", func() *goja.Promise {
-		return bodyTextPromise(vm, state)
+		return bodyPromise(func(data []byte) (any, error) {
+			return string(data), nil
+		})
 	})
 	_ = obj.Set("json", func() *goja.Promise {
-		return bodyJSONPromise(vm, state)
+		return bodyPromise(func(data []byte) (any, error) {
+			var decoded any
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				return nil, err
+			}
+			return decoded, nil
+		})
 	})
 	_ = obj.Set("arrayBuffer", func() *goja.Promise {
-		return bodyArrayBufferPromise(vm, state)
+		return bodyPromise(func(data []byte) (any, error) {
+			return vm.NewArrayBuffer(data), nil
+		})
 	})
 	_ = obj.Set("bytes", func() *goja.Promise {
-		return bodyBytesPromise(vm, state)
+		return bodyPromise(func(data []byte) (any, error) {
+			return uint8ArrayValue(vm, data), nil
+		})
 	})
 	_ = obj.Set("blob", func() *goja.Promise {
-		return bodyBlobPromise(vm, state)
+		return bodyPromise(func(data []byte) (any, error) {
+			return newBlobObject(vm, data, state.contentType), nil
+		})
 	})
 	_ = obj.Set("formData", func() *goja.Promise {
-		return bodyFormDataPromise(vm, state)
+		return bodyPromise(func(data []byte) (any, error) {
+			form, err := parseFormData(state.contentType, data)
+			if err != nil {
+				return nil, err
+			}
+			return newFormDataObject(vm, form), nil
+		})
 	})
 }
 
 func newBodyReaderObject(vm *goja.Runtime, state *webBodyReaderState) *goja.Object {
 	obj := vm.NewObject()
 	_ = obj.Set("read", func() *goja.Promise {
+		promise, resolve, reject := vm.NewPromise()
 		if state.consumed {
-			return resolvedPromise(vm, map[string]any{
+			_ = resolve(vm.ToValue(map[string]any{
 				"done":  true,
 				"value": goja.Undefined(),
-			})
+			}))
+			return promise
 		}
 		data, err := consumeWebBody(state.body)
 		if err != nil {
-			return rejectedPromise(vm, err)
+			_ = reject(err)
+			return promise
 		}
 		state.consumed = true
-		return resolvedPromise(vm, map[string]any{
+		_ = resolve(vm.ToValue(map[string]any{
 			"done":  false,
 			"value": uint8ArrayValue(vm, data),
-		})
+		}))
+		return promise
 	})
 	return obj
 }
@@ -112,74 +151,23 @@ func consumeWebBody(state *webBodyState) ([]byte, error) {
 	return append([]byte(nil), state.data...), nil
 }
 
-func bodyTextPromise(vm *goja.Runtime, state *webBodyState) *goja.Promise {
-	data, err := consumeWebBody(state)
-	if err != nil {
-		return rejectedPromise(vm, err)
-	}
-	return resolvedPromise(vm, string(data))
-}
-
-func bodyJSONPromise(vm *goja.Runtime, state *webBodyState) *goja.Promise {
-	data, err := consumeWebBody(state)
-	if err != nil {
-		return rejectedPromise(vm, err)
-	}
-	var decoded any
-	if err = json.Unmarshal(data, &decoded); err != nil {
-		return rejectedPromise(vm, err)
-	}
-	return resolvedPromise(vm, decoded)
-}
-
-func bodyArrayBufferPromise(vm *goja.Runtime, state *webBodyState) *goja.Promise {
-	data, err := consumeWebBody(state)
-	if err != nil {
-		return rejectedPromise(vm, err)
-	}
-	return resolvedPromise(vm, vm.NewArrayBuffer(data))
-}
-
-func bodyBytesPromise(vm *goja.Runtime, state *webBodyState) *goja.Promise {
-	data, err := consumeWebBody(state)
-	if err != nil {
-		return rejectedPromise(vm, err)
-	}
-	return resolvedPromise(vm, uint8ArrayValue(vm, data))
-}
-
-func bodyBlobPromise(vm *goja.Runtime, state *webBodyState) *goja.Promise {
-	data, err := consumeWebBody(state)
-	if err != nil {
-		return rejectedPromise(vm, err)
-	}
-	return resolvedPromise(vm, newBlobObject(vm, data, state.contentType))
-}
-
-func bodyFormDataPromise(vm *goja.Runtime, state *webBodyState) *goja.Promise {
-	data, err := consumeWebBody(state)
-	if err != nil {
-		return rejectedPromise(vm, err)
-	}
-	form, err := parseFormData(state.contentType, data)
-	if err != nil {
-		return rejectedPromise(vm, err)
-	}
-	return resolvedPromise(vm, newFormDataObject(vm, form))
-}
-
 func newBlobObject(vm *goja.Runtime, data []byte, contentType string) *goja.Object {
 	obj := vm.NewObject()
+	resolve := func(value any) *goja.Promise {
+		promise, doResolve, _ := vm.NewPromise()
+		_ = doResolve(vm.ToValue(value))
+		return promise
+	}
 	_ = obj.Set("size", len(data))
 	_ = obj.Set("type", contentType)
 	_ = obj.Set("text", func() *goja.Promise {
-		return resolvedPromise(vm, string(append([]byte(nil), data...)))
+		return resolve(string(append([]byte(nil), data...)))
 	})
 	_ = obj.Set("arrayBuffer", func() *goja.Promise {
-		return resolvedPromise(vm, vm.NewArrayBuffer(append([]byte(nil), data...)))
+		return resolve(vm.NewArrayBuffer(append([]byte(nil), data...)))
 	})
 	_ = obj.Set("bytes", func() *goja.Promise {
-		return resolvedPromise(vm, uint8ArrayValue(vm, data))
+		return resolve(uint8ArrayValue(vm, data))
 	})
 	return obj
 }

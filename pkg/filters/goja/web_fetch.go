@@ -9,7 +9,6 @@ import (
 	"net/http"
 	nurl "net/url"
 	"slices"
-	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
@@ -18,66 +17,64 @@ import (
 func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLoop, client *http.Client, cfg FetchConfig) error {
 	return vm.Set("fetch", func(resource goja.Value, init ...goja.Value) *goja.Promise {
 		promise, resolve, reject := vm.NewPromise()
+		if !cfg.Enabled {
+			_ = reject(errors.New("fetch is disabled"))
+			return promise
+		}
+
+		requestState := requestStateFromInput(vm, resource)
+		if len(init) > 0 && !isNilish(init[0]) {
+			if err := applyRequestInit(vm, requestState, init[0]); err != nil {
+				_ = reject(err)
+				return promise
+			}
+		}
+		if requestState.abort != nil && requestState.abort.Aborted() {
+			_ = reject(errors.New("fetch aborted"))
+			return promise
+		}
+		if err := validateFetchTarget(requestState.url, cfg); err != nil {
+			_ = reject(err)
+			return promise
+		}
+
+		body := io.Reader(nil)
+		if len(requestState.body) > 0 {
+			body = bytes.NewReader(requestState.body)
+		}
+		headers := cloneHeaderValues(requestState.headers)
 
 		go func() {
-			if !cfg.Enabled {
-				loop.RunOnLoop(func(*goja.Runtime) {
-					_ = reject(errors.New("fetch is disabled"))
-				})
-				return
-			}
-
-			requestState, err := fetchRequestState(vm, resource, init)
-			if err != nil {
-				loop.RunOnLoop(func(*goja.Runtime) {
-					_ = reject(err)
-				})
-				return
-			}
-			if isAbortedSignal(requestState.signal) {
-				loop.RunOnLoop(func(*goja.Runtime) {
-					_ = reject(errors.New("fetch aborted"))
-				})
-				return
-			}
-
-			if err = validateFetchTarget(requestState.url, cfg); err != nil {
-				loop.RunOnLoop(func(*goja.Runtime) {
-					_ = reject(err)
-				})
-				return
-			}
-
 			reqCtx := ctx
-			if requestState.signal != nil {
+			if requestState.abort != nil {
 				var cancel context.CancelFunc
 				reqCtx, cancel = context.WithCancel(ctx)
 				defer cancel()
 				go func() {
-					ticker := time.NewTicker(10 * time.Millisecond)
-					defer ticker.Stop()
-					for reqCtx.Err() == nil {
-						if isAbortedSignal(requestState.signal) {
-							cancel()
-							return
-						}
-						<-ticker.C
+					select {
+					case <-requestState.abort.Done():
+						cancel()
+					case <-reqCtx.Done():
 					}
 				}()
 			}
 
-			req, err := http.NewRequestWithContext(reqCtx, requestState.method, requestState.url, bytesReader(requestState.body))
+			req, err := http.NewRequestWithContext(reqCtx, requestState.method, requestState.url, body)
 			if err != nil {
 				loop.RunOnLoop(func(*goja.Runtime) {
 					_ = reject(err)
 				})
 				return
 			}
-			req.Header = cloneHeaderValues(requestState.headers)
+			req.Header = headers
 
 			resp, err := client.Do(req)
 			if err != nil {
 				loop.RunOnLoop(func(*goja.Runtime) {
+					if requestState.abort != nil && requestState.abort.Aborted() {
+						_ = reject(errors.New("fetch aborted"))
+						return
+					}
 					_ = reject(err)
 				})
 				return
@@ -114,38 +111,6 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 
 		return promise
 	})
-}
-
-func fetchRequestState(vm *goja.Runtime, resource goja.Value, init []goja.Value) (*webRequestState, error) {
-	state := requestStateFromInput(vm, resource)
-	if len(init) == 0 || isNilish(init[0]) {
-		return state, nil
-	}
-	if err := applyRequestInit(vm, state, init[0]); err != nil {
-		return nil, err
-	}
-	return state, nil
-}
-
-func isAbortedSignal(signal *goja.Object) bool {
-	if signal == nil {
-		return false
-	}
-	value, ok := objectValue(signal, "aborted")
-	if !ok {
-		return false
-	}
-	if aborted, ok := value.Export().(bool); ok {
-		return aborted
-	}
-	return false
-}
-
-func bytesReader(body []byte) io.Reader {
-	if len(body) == 0 {
-		return nil
-	}
-	return bytes.NewReader(body)
 }
 
 func validateFetchTarget(rawURL string, cfg FetchConfig) error {

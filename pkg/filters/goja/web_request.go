@@ -23,13 +23,14 @@ type webRequestState struct {
 	body     []byte
 	used     bool
 	signal   *goja.Object
+	abort    *abortSignalState
 }
 
 func installRequest(vm *goja.Runtime) error {
 	ctor := func(call goja.ConstructorCall) *goja.Object {
 		state, err := requestStateFromConstructor(vm, call)
 		if err != nil {
-			panic(err)
+			panic(vm.ToValue(err.Error()))
 		}
 		return newRequestObject(vm, state)
 	}
@@ -55,16 +56,19 @@ func newRequestObject(vm *goja.Runtime, state *webRequestState) *goja.Object {
 			headers:  cloneHeaderValues(state.headers),
 			body:     append([]byte(nil), state.body...),
 			signal:   state.signal,
+			abort:    state.abort,
 		})
 	})
 	return obj
 }
 
 func newDefaultRequestState(vm *goja.Runtime) *webRequestState {
+	signal, abort := newAbortSignal(vm)
 	return &webRequestState{
 		method:  http.MethodGet,
 		headers: make(http.Header),
-		signal:  newAbortSignalObject(vm),
+		signal:  signal,
+		abort:   abort,
 	}
 }
 
@@ -79,6 +83,7 @@ func cloneRequestState(current *webRequestState) *webRequestState {
 		headers:  cloneHeaderValues(current.headers),
 		body:     append([]byte(nil), current.body...),
 		signal:   current.signal,
+		abort:    current.abort,
 	}
 }
 
@@ -118,9 +123,12 @@ func applyRequestInit(vm *goja.Runtime, state *webRequestState, init goja.Value)
 		state.body = body
 	}
 	if value, ok := objectValue(initObj, "signal"); ok {
-		if signal, ok := valueObject(vm, value); ok {
-			state.signal = signal
+		signal, abort, err := abortSignalFromValue(vm, value)
+		if err != nil {
+			return err
 		}
+		state.signal = signal
+		state.abort = abort
 	}
 
 	return nil
@@ -145,16 +153,20 @@ func requestStateFromConstructor(vm *goja.Runtime, call goja.ConstructorCall) (*
 }
 
 func requestStateFromValue(vm *goja.Runtime, value goja.Value) (*webRequestState, bool) {
-	exported, ok := internalExportedValue(vm, value, internalRequestKey)
+	obj, ok := valueObject(vm, value)
 	if !ok {
 		return nil, false
 	}
-	state, ok := exported.(*webRequestState)
+	internal, ok := objectValue(obj, internalRequestKey)
+	if !ok {
+		return nil, false
+	}
+	state, ok := internal.Export().(*webRequestState)
 	return state, ok
 }
 
 func bodyBytesFromValue(vm *goja.Runtime, value goja.Value) ([]byte, error) {
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+	if isNilish(value) {
 		return nil, nil
 	}
 	switch current := value.Export().(type) {
@@ -191,13 +203,15 @@ func newIncomingRequestObject(vm *goja.Runtime, req *http.Request, maxBodyBytes 
 	}
 	req.Body = cloneBody(body)
 	info := core.RequestInfoFromRequest(req)
+	signal, abort := newAbortSignal(vm)
 	return newRequestObject(vm, &webRequestState{
 		method:   req.Method,
 		url:      absoluteRequestURL(req, info),
 		remoteIP: info.ClientIP,
 		headers:  cloneHeaderValues(req.Header),
 		body:     body,
-		signal:   newAbortSignalObject(vm),
+		signal:   signal,
+		abort:    abort,
 	}), nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -19,9 +20,10 @@ import (
 )
 
 type TestServer struct {
-	server  *pkg.Server
-	dummy   *ProviderDummy
-	cookies map[string]*http.Cookie
+	server    *pkg.Server
+	dummy     *ProviderDummy
+	cookiesMu sync.Mutex
+	cookies   map[string]*http.Cookie
 }
 
 func NewDefaultTestServer() *TestServer {
@@ -106,11 +108,18 @@ func (t *TestServer) OpenRequestWithContext(ctx context.Context, method, url str
 
 func (t *TestServer) Do(req *http.Request) ([]byte, *http.Response, error) {
 	recorder := httptest.NewRecorder()
+	t.cookiesMu.Lock()
+	cookies := make([]*http.Cookie, 0, len(t.cookies))
 	for _, cookie := range t.cookies {
+		cookies = append(cookies, cookie)
+	}
+	t.cookiesMu.Unlock()
+	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}
 	t.server.ServeHTTP(recorder, req)
 	response := recorder.Result()
+	t.cookiesMu.Lock()
 	for _, cookie := range response.Cookies() {
 		if cookie.MaxAge < 0 || cookie.Value == "" {
 			delete(t.cookies, cookie.Name)
@@ -118,6 +127,7 @@ func (t *TestServer) Do(req *http.Request) ([]byte, *http.Response, error) {
 		}
 		t.cookies[cookie.Name] = cookie
 	}
+	t.cookiesMu.Unlock()
 	if response.Body != nil {
 		defer response.Body.Close()
 	}

@@ -13,15 +13,17 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
 type LocalProvider struct {
-	graph   map[string][]string
-	path    string
-	overlay map[string][]byte
+	graph     map[string][]string
+	path      string
+	overlayMu sync.RWMutex
+	overlay   map[string][]byte
 }
 
 func NewLocalProvider(
@@ -36,7 +38,9 @@ func NewLocalProvider(
 }
 
 func (l *LocalProvider) AddOverlay(path string, overlay []byte) {
-	l.overlay[strings.Trim(path, "/")] = overlay
+	l.overlayMu.Lock()
+	l.overlay[strings.Trim(path, "/")] = append([]byte(nil), overlay...)
+	l.overlayMu.Unlock()
 }
 
 func (l *LocalProvider) Close() error {
@@ -82,8 +86,11 @@ func (l *LocalProvider) List(_ context.Context, _, _, _, path string) ([]core.Di
 func (l *LocalProvider) Open(_ context.Context, _, _, _, path string, _ http.Header) (*http.Response, error) {
 	var all []byte
 	recorder := httptest.NewRecorder()
-	if data, ok := l.overlay[strings.Trim(path, "/")]; ok {
-		all = data
+	l.overlayMu.RLock()
+	data, ok := l.overlay[strings.Trim(path, "/")]
+	l.overlayMu.RUnlock()
+	if ok {
+		all = append([]byte(nil), data...)
 		recorder.Header().Add("Content-Length", strconv.FormatInt(int64(len(data)), 10))
 	} else {
 		open, err := os.Open(filepath.Join(l.path, path))

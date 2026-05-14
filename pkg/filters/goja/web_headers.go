@@ -81,11 +81,15 @@ func newHeadersObject(vm *goja.Runtime, state *webHeadersState) *goja.Object {
 }
 
 func headersStateFromValue(vm *goja.Runtime, value goja.Value) (*webHeadersState, bool) {
-	exported, ok := internalExportedValue(vm, value, internalHeadersKey)
+	obj, ok := valueObject(vm, value)
 	if !ok {
 		return nil, false
 	}
-	state, ok := exported.(*webHeadersState)
+	internal, ok := objectValue(obj, internalHeadersKey)
+	if !ok {
+		return nil, false
+	}
+	state, ok := internal.Export().(*webHeadersState)
 	return state, ok
 }
 

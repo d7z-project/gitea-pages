@@ -70,7 +70,10 @@ func installSSE(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWr
 						state.finish()
 						return nil
 					case msg := <-state.queue:
-						err := writeSSEMessage(writer, flusher, msg.payload)
+						_, err := io.WriteString(writer, msg.payload)
+						if err == nil {
+							err = safeSSEFlush(flusher)
+						}
 						msg.result <- err
 						close(msg.result)
 						if err != nil {
@@ -96,14 +99,21 @@ func newSSEStreamObject(vm *goja.Runtime, state *sseState) *goja.Object {
 	obj := vm.NewObject()
 	_ = obj.Set("send", func(data string, options ...goja.Value) *goja.Promise {
 		promise, resolve, reject := vm.NewPromise()
+		settle := func(err error) {
+			if err != nil {
+				_ = reject(vm.ToValue(err.Error()))
+				return
+			}
+			_ = resolve(goja.Undefined())
+		}
 		go func() {
 			select {
 			case <-state.ready:
 			case <-state.ctx.Done():
-				resolveOrReject(vm, reject, resolve, state.ctx.Err())
+				settle(state.ctx.Err())
 				return
 			case <-state.done:
-				resolveOrReject(vm, reject, resolve, errors.New("event stream is closed"))
+				settle(errors.New("event stream is closed"))
 				return
 			}
 			result := make(chan error, 1)
@@ -113,20 +123,20 @@ func newSSEStreamObject(vm *goja.Runtime, state *sseState) *goja.Object {
 			}
 			select {
 			case <-state.ctx.Done():
-				resolveOrReject(vm, reject, resolve, state.ctx.Err())
+				settle(state.ctx.Err())
 				return
 			case <-state.done:
-				resolveOrReject(vm, reject, resolve, errors.New("event stream is closed"))
+				settle(errors.New("event stream is closed"))
 				return
 			case state.queue <- msg:
 			}
 			select {
 			case err := <-result:
-				resolveOrReject(vm, reject, resolve, err)
+				settle(err)
 			case <-state.ctx.Done():
-				resolveOrReject(vm, reject, resolve, state.ctx.Err())
+				settle(state.ctx.Err())
 			case <-state.done:
-				resolveOrReject(vm, reject, resolve, errors.New("event stream is closed"))
+				settle(errors.New("event stream is closed"))
 			}
 		}()
 		return promise
@@ -135,13 +145,6 @@ func newSSEStreamObject(vm *goja.Runtime, state *sseState) *goja.Object {
 		state.finish()
 	})
 	return obj
-}
-
-func writeSSEMessage(writer http.ResponseWriter, flusher http.Flusher, payload string) error {
-	if _, err := io.WriteString(writer, payload); err != nil {
-		return err
-	}
-	return safeSSEFlush(flusher)
 }
 
 func safeSSEFlush(flusher http.Flusher) (err error) {
@@ -185,7 +188,7 @@ func encodeSSEPayload(vm *goja.Runtime, data string, options []goja.Value) strin
 	if retry > 0 {
 		_, _ = fmt.Fprintf(&payload, "retry: %d\n", retry)
 	}
-	for _, line := range splitSSELines(data) {
+	for _, line := range strings.Split(strings.ReplaceAll(data, "\r", ""), "\n") {
 		payload.WriteString("data: ")
 		payload.WriteString(line)
 		payload.WriteByte('\n')
@@ -194,37 +197,9 @@ func encodeSSEPayload(vm *goja.Runtime, data string, options []goja.Value) strin
 	return payload.String()
 }
 
-func splitSSELines(data string) []string {
-	if data == "" {
-		return []string{""}
-	}
-	lines := make([]string, 0)
-	current := ""
-	for _, r := range data {
-		if r == '\n' {
-			lines = append(lines, current)
-			current = ""
-			continue
-		}
-		if r != '\r' {
-			current += string(r)
-		}
-	}
-	lines = append(lines, current)
-	return lines
-}
-
 func (s *sseState) finish() {
 	s.closeOnce.Do(func() {
 		close(s.closeCh)
 		close(s.done)
 	})
-}
-
-func resolveOrReject(vm *goja.Runtime, reject, resolve func(any) error, err error) {
-	if err != nil {
-		_ = reject(vm.ToValue(err.Error()))
-		return
-	}
-	_ = resolve(goja.Undefined())
 }
