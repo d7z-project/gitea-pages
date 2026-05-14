@@ -46,7 +46,7 @@ func FilterInstTemplate(_ core.Params) (core.FilterInstance, error) {
 					"Repo":   ctx.Repo,
 					"Commit": ctx.CommitID,
 				},
-			}))
+			}, core.RequestInfoFromRequest(request).ClientIP))
 			if err != nil {
 				return err
 			}

@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
-	"gopkg.d7z.net/gitea-pages/pkg/utils"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
 const internalRequestKey = "__page_internal_request__"
@@ -190,17 +190,18 @@ func newIncomingRequestObject(vm *goja.Runtime, req *http.Request, maxBodyBytes 
 		return nil, fmt.Errorf("request body exceeds limit: %d", maxBodyBytes)
 	}
 	req.Body = cloneBody(body)
+	info := core.RequestInfoFromRequest(req)
 	return newRequestObject(vm, &webRequestState{
 		method:   req.Method,
-		url:      absoluteRequestURL(req),
-		remoteIP: utils.GetRemoteIP(req),
+		url:      absoluteRequestURL(req, info),
+		remoteIP: info.ClientIP,
 		headers:  cloneHeaderValues(req.Header),
 		body:     body,
 		signal:   newAbortSignalObject(vm),
 	}), nil
 }
 
-func absoluteRequestURL(req *http.Request) string {
+func absoluteRequestURL(req *http.Request, info core.RequestInfo) string {
 	if req == nil || req.URL == nil {
 		return ""
 	}
@@ -209,13 +210,7 @@ func absoluteRequestURL(req *http.Request) string {
 	}
 	cloned := new(nurl.URL)
 	*cloned = *req.URL
-	if proto := strings.TrimSpace(req.Header.Get("X-Forwarded-Proto")); proto != "" {
-		cloned.Scheme = strings.ToLower(strings.Split(proto, ",")[0])
-	} else if req.TLS != nil {
-		cloned.Scheme = "https"
-	} else {
-		cloned.Scheme = "http"
-	}
+	cloned.Scheme = info.Scheme
 	cloned.Host = req.Host
 	return cloned.String()
 }

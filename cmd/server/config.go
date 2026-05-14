@@ -11,6 +11,7 @@ import (
 
 	"github.com/alecthomas/units"
 	"github.com/pkg/errors"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.in/yaml.v3"
 )
@@ -21,6 +22,8 @@ var defaultErrPage string
 type Config struct {
 	Bind   string `yaml:"bind"`   // HTTP 绑定
 	Domain string `yaml:"domain"` // 基础域名
+
+	TrustedProxies []string `yaml:"trusted_proxies"` // 受信任反向代理网段
 
 	DB             ConfigDatabase `yaml:"db"`       // 程序内部使用的存储
 	UserDB         ConfigDatabase `yaml:"user_db"`  // 用户脚本使用的存储
@@ -68,7 +71,7 @@ func (c *Config) RenderStatusPage(w http.ResponseWriter, r *http.Request, status
 		"Error": err,
 		"Path":  r.URL.Path,
 		"Code":  status,
-	})); renderErr != nil {
+	}, core.RequestInfoFromRequest(r).ClientIP)); renderErr != nil {
 		slog.Error("failed to render error page", "error", renderErr)
 	}
 }

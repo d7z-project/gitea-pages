@@ -134,6 +134,7 @@ func main() {
 		pkg.WithBlobCache(cacheBlob.Child("filter"), config.Cache.BlobTTL),
 		pkg.WithErrorHandler(config.ErrorHandler),
 		pkg.WithFilterConfig(config.Filters),
+		pkg.WithTrustedProxies(config.TrustedProxies),
 		pkg.WithAuth(authService),
 	)
 	if err != nil {

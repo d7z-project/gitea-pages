@@ -39,6 +39,54 @@ make gitea-pages
 
 具体配置可查看 [`config.yaml`](./config.yaml)。
 
+### 反向代理配置
+
+如果 `gitea-pages` 前面还有 Caddy、Nginx、Traefik 或 ingress，需要在 [`config.yaml`](./config.yaml) 中配置 `trusted_proxies`，声明哪些代理出口 IP 或 CIDR 可以被信任。只有来自这些地址的请求，程序才会信任 `X-Forwarded-For` 与 `X-Forwarded-Proto`。
+
+示例：
+
+```yaml
+trusted_proxies:
+  - 127.0.0.1/32
+  - 10.0.0.0/8
+```
+
+`reverse_proxy` 路由过滤器默认启用，也可以在 `filters.reverse_proxy` 下做全局配置：
+
+```yaml
+filters:
+  reverse_proxy:
+    enabled: true
+    strip_request_headers:
+      - Authorization
+      - Cookie
+      - Forwarded
+      - Proxy-Authorization
+      - X-Forwarded-For
+      - X-Forwarded-Host
+      - X-Forwarded-Proto
+      - X-Page-Host
+      - X-Page-IP
+      - X-Page-Refer
+      - X-Real-IP
+```
+
+`.pages.yaml` 中的路由示例：
+
+```yaml
+routes:
+  - path: "/api/**"
+    reverse_proxy:
+      prefix: /api
+      target: https://example-upstream.com
+```
+
+说明：
+
+- `target` 必须是绝对 `https://` URL。
+- 如果目标地址解析到回环、私网或链路本地地址，请求会被拒绝。
+- 转发时会先从匹配路径中裁掉 `prefix`。
+
 ## JavaScript Filter
 
 Goja filter 的使用方式、宿主 API 与 TypeScript 全局类型可查看 [pkg/filters/goja/README.md](./pkg/filters/goja/README.md)。

@@ -8,7 +8,7 @@ import (
 	sprig "github.com/go-task/slim-sprig/v3"
 )
 
-func NewTemplateInject(r *http.Request, def map[string]any) map[string]any {
+func NewTemplateInject(r *http.Request, def map[string]any, remoteIP string) map[string]any {
 	if def == nil {
 		def = make(map[string]any)
 	}
@@ -21,7 +21,7 @@ func NewTemplateInject(r *http.Request, def map[string]any) map[string]any {
 		"Path":     r.URL.Path,
 		"Params":   r.URL.Query(),
 		"Method":   r.Method,
-		"RemoteIP": GetRemoteIP(r),
+		"RemoteIP": remoteIP,
 	}
 	return def
 }

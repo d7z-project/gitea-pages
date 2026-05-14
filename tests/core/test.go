@@ -103,8 +103,12 @@ func (t *TestServer) OpenRequest(method, url string, body io.Reader) ([]byte, *h
 }
 
 func (t *TestServer) OpenRequestWithContext(ctx context.Context, method, url string, body io.Reader) ([]byte, *http.Response, error) {
-	recorder := httptest.NewRecorder()
 	req := httptest.NewRequest(method, url, body).WithContext(ctx)
+	return t.Do(req)
+}
+
+func (t *TestServer) Do(req *http.Request) ([]byte, *http.Response, error) {
+	recorder := httptest.NewRecorder()
 	for _, cookie := range t.cookies {
 		req.AddCookie(cookie)
 	}

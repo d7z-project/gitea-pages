@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
+	"gopkg.d7z.net/gitea-pages/pkg"
 	testcore "gopkg.d7z.net/gitea-pages/tests/core"
 	"gopkg.d7z.net/middleware/kv"
 )
@@ -112,34 +113,34 @@ routes:
 }
 
 func Test_GoJa_RequestIP(t *testing.T) {
-	server := newGoJaTestServer(`
+	server := testcore.NewTestServerOptions("example.com", pkg.WithTrustedProxies([]string{"127.0.0.1/32", "10.0.0.0/8"}))
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `%s`, `
 serve(async function(request) {
   return Response.json({
     ip: request.ip,
     remoteIP: request.RemoteIP,
   })
 })
-`, "api/v1/**")
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "api/v1/**"
+  js:
+    exec: "index.js"
+`)
 	defer server.Close()
 
-	httpServer := server.StartHTTPServer("org1.example.com")
-	defer httpServer.Close()
-
-	req, err := http.NewRequest(http.MethodGet, httpServer.URL+"/repo1/api/v1/fetch", nil)
-	assert.NoError(t, err)
+	req := httptest.NewRequest(http.MethodGet, "http://org1.example.com/repo1/api/v1/fetch", nil)
 	req.Host = "org1.example.com"
+	req.RemoteAddr = "127.0.0.1:1234"
 	req.Header.Set("X-Forwarded-For", "198.51.100.10, 10.0.0.1")
-
-	resp, err := http.DefaultClient.Do(req)
-	assert.NoError(t, err)
+	respBody, resp, err := server.Do(req)
 	if err != nil {
 		return
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
-	assert.JSONEq(t, `{"ip":"198.51.100.10","remoteIP":"198.51.100.10"}`, string(body))
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.JSONEq(t, `{"ip":"198.51.100.10","remoteIP":"198.51.100.10"}`, string(respBody))
 }
 
 func Test_GoJa_RequestBody(t *testing.T) {

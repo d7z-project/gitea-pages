@@ -2,6 +2,11 @@
 bind: 127.0.0.1:18080
 # 基础域名
 domain: example.com
+# 如果前面还有 Caddy / Nginx / ingress 等反向代理，
+# 在这里声明受信任的代理出口 IP 或网段后，程序才会信任 X-Forwarded-For / X-Forwarded-Proto
+trusted_proxies:
+  - 127.0.0.1/32
+  - 10.0.0.0/8
 # 程序内部使用的存储
 db:
   url: "memory://"
@@ -76,6 +81,22 @@ page:
   # 默认 500 页面模板
   500: /path/to/html.gotmpl
 filters:
+  reverse_proxy:
+    # 设为 false 可全局禁用 reverse_proxy 路由
+    enabled: true
+    # 转发前移除的请求头，留空时使用内置安全默认值
+    strip_request_headers:
+      - Authorization
+      - Cookie
+      - Forwarded
+      - Proxy-Authorization
+      - X-Forwarded-For
+      - X-Forwarded-Host
+      - X-Forwarded-Proto
+      - X-Page-Host
+      - X-Page-IP
+      - X-Page-Refer
+      - X-Real-IP
   js:
     # 是否启用 debug 页面
     debug: true
@@ -99,3 +120,13 @@ filters:
     fs:
       # 是否允许脚本列目录
       enabled: true
+
+# .pages.yaml 路由示例
+#
+# routes:
+#   - path: "/api/**"
+#     reverse_proxy:
+#       # 从请求路径前缀中裁掉的部分
+#       prefix: /api
+#       # 必须是绝对 HTTPS URL；不允许 HTTP，也不允许解析到私网/回环地址
+#       target: https://example-upstream.com

@@ -14,20 +14,24 @@ func DefaultFilters(config map[string]map[string]any) (map[string]core.FilterIns
 	}
 	result := make(map[string]core.FilterInstance)
 	for key, instance := range map[string]core.GlobalFilter{
-		"block":    FilterInstBlock,
-		"redirect": FilterInstRedirect,
-		"direct":   FilterInstDirect,
-		//"reverse_proxy": FilterInstProxy,
-		"404":      FilterInstDefaultNotFound,
-		"failback": FilterInstFailback,
-		"template": FilterInstTemplate,
-		"js":       goja.FilterInstGoJa,
+		"block":         FilterInstBlock,
+		"redirect":      FilterInstRedirect,
+		"direct":        FilterInstDirect,
+		"reverse_proxy": FilterInstProxy,
+		"404":           FilterInstDefaultNotFound,
+		"failback":      FilterInstFailback,
+		"template":      FilterInstTemplate,
+		"js":            goja.FilterInstGoJa,
 	} {
 		item, ok := config[key]
 		if !ok {
 			item = make(map[string]any)
 		}
-		if it, ok := item["Enabled"]; ok && it == false {
+		enabled, ok := item["enabled"].(bool)
+		if !ok {
+			enabled, ok = item["Enabled"].(bool)
+		}
+		if ok && !enabled {
 			slog.Debug("skip filter", "key", key)
 			continue
 		}

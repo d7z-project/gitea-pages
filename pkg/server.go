@@ -26,11 +26,12 @@ import (
 var portExp = regexp.MustCompile(`:\d+$`)
 
 type Server struct {
-	backend   core.Backend
-	meta      *core.PageDomain
-	db        kv.KV
-	userDB    kv.KV
-	filterMgr map[string]core.FilterInstance
+	backend      core.Backend
+	meta         *core.PageDomain
+	db           kv.KV
+	userDB       kv.KV
+	filterMgr    map[string]core.FilterInstance
+	trustedProxy *core.TrustedProxyPolicy
 
 	globCache *lru.Cache[string, glob.Glob]
 
@@ -53,6 +54,7 @@ type serverConfig struct {
 	cacheBlobTTL               time.Duration
 	errorHandler               func(w http.ResponseWriter, r *http.Request, err error)
 	filterConfig               map[string]map[string]any
+	trustedProxies             []string
 	authService                *core.AuthService
 }
 
@@ -95,6 +97,12 @@ func WithErrorHandler(handler func(w http.ResponseWriter, r *http.Request, err e
 func WithFilterConfig(config map[string]map[string]any) ServerOption {
 	return func(c *serverConfig) {
 		c.filterConfig = config
+	}
+}
+
+func WithTrustedProxies(entries []string) ServerOption {
+	return func(c *serverConfig) {
+		c.trustedProxies = append([]string(nil), entries...)
 	}
 }
 
@@ -170,6 +178,13 @@ func NewPageServer(
 	if err != nil {
 		return nil, err
 	}
+	var trustedProxy *core.TrustedProxyPolicy
+	if len(cfg.trustedProxies) > 0 {
+		trustedProxy, err = core.NewTrustedProxyPolicy(cfg.trustedProxies)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &Server{
 		backend:      backend,
 		meta:         pageMeta,
@@ -177,6 +192,7 @@ func NewPageServer(
 		userDB:       userDB,
 		globCache:    globCache,
 		filterMgr:    defaultFilters,
+		trustedProxy: trustedProxy,
 		errorHandler: cfg.errorHandler,
 		cacheBlob:    cfg.cacheBlob,
 		cacheBlobTTL: cfg.cacheBlobTTL,
@@ -188,6 +204,7 @@ func NewPageServer(
 func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	sessionID, _ := uuid.NewRandom()
 	request.Header.Set("Session-ID", sessionID.String())
+	request = request.WithContext(core.ContextWithRequestInfo(request.Context(), core.ResolveRequestInfo(request, s.trustedProxy)))
 	writer := utils.NewWrittenResponseWriter(w)
 	defer func() {
 		if e := recover(); e != nil {
