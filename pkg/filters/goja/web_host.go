@@ -104,17 +104,34 @@ func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloo
 		"load": func(key string) *goja.Promise {
 			promise, resolve, reject := vm.NewPromise()
 			go func() {
-				subscribe, err := ctx.Event.Subscribe(ctx, key)
+				sub, err := ctx.Event.Subscribe(ctx, key)
 				if err != nil {
 					loop.RunOnLoop(func(runtime *goja.Runtime) {
 						_ = reject(runtime.ToValue(err))
 					})
 					return
 				}
+				defer sub.Close()
 				select {
-				case data := <-subscribe:
+				case event, ok := <-sub.Events():
+					if !ok {
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(ctx.Err()))
+						})
+						return
+					}
 					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						_ = resolve(runtime.ToValue(data))
+						_ = resolve(runtime.ToValue(event.Value))
+					})
+				case err, ok := <-sub.Errors():
+					if !ok {
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(ctx.Err()))
+						})
+						return
+					}
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						_ = reject(runtime.ToValue(err))
 					})
 				case <-ctx.Done():
 					loop.RunOnLoop(func(runtime *goja.Runtime) {

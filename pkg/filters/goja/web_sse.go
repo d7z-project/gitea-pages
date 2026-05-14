@@ -183,7 +183,7 @@ func encodeSSEPayload(vm *goja.Runtime, data string, options []goja.Value) strin
 		payload.WriteByte('\n')
 	}
 	if retry > 0 {
-		payload.WriteString(fmt.Sprintf("retry: %d\n", retry))
+		_, _ = fmt.Fprintf(&payload, "retry: %d\n", retry)
 	}
 	for _, line := range splitSSELines(data) {
 		payload.WriteString("data: ")
