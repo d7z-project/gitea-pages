@@ -49,20 +49,19 @@ func TestFilterContextPublicEvent(t *testing.T) {
 			Owner:           "org1",
 			Repo:            "repo1",
 		},
-		Event: recorder,
+		PublicEvent: recorder.Child("commit-123"),
 	}
 
-	assert.NotNil(t, ctx.PublicEvent())
+	assert.NotNil(t, ctx.PublicEvent)
 	assert.Len(t, recorder.childPaths, 1)
 	assert.Equal(t, []string{"domain", "org1", "repo1", "commit-123"}, recorder.childPaths[0])
 }
 
 func TestFilterContextSystemEvent(t *testing.T) {
 	recorder := &eventRecorder{path: []string{"domain", "org1", "repo1"}}
-	ctx := FilterContext{Event: recorder}
+	ctx := FilterContext{SystemEvent: recorder.Child("_sys")}
 
-	system := ctx.SystemEvent()
-	assert.NotNil(t, system)
+	assert.NotNil(t, ctx.SystemEvent)
 	assert.Len(t, recorder.childPaths, 1)
 	assert.Equal(t, []string{"domain", "org1", "repo1", "_sys"}, recorder.childPaths[0])
 }

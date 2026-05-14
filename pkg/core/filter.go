@@ -18,27 +18,14 @@ type FilterContext struct {
 	context.Context
 	*PageContent
 	*PageVFS
-	Cache  *tools.TTLCache
-	OrgDB  kv.KV
-	RepoDB kv.KV
-	Event  subscribe.Subscriber
-	Auth   AuthInfo
+	Cache       *tools.TTLCache
+	OrgDB       kv.KV
+	RepoDB      kv.KV
+	PublicEvent subscribe.Subscriber
+	SystemEvent subscribe.Subscriber
+	Auth        AuthInfo
 
 	Kill func()
-}
-
-func (f FilterContext) PublicEvent() subscribe.Subscriber {
-	if f.Event == nil {
-		return nil
-	}
-	return f.Event.Child(f.CommitID)
-}
-
-func (f FilterContext) SystemEvent() subscribe.Subscriber {
-	if f.Event == nil {
-		return nil
-	}
-	return f.Event.Child("_sys")
 }
 
 type Params map[string]any

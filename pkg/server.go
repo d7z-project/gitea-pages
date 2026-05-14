@@ -264,7 +264,8 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		Cache:       tools.NewTTLCache(s.cacheBlob.Child("filter", meta.Owner, meta.Repo, meta.CommitID), s.cacheBlobTTL),
 		OrgDB:       s.userDB.Child("org", meta.Owner),
 		RepoDB:      s.userDB.Child("repo", meta.Owner, meta.Repo),
-		Event:       s.event.Child("domain", meta.Owner, meta.Repo),
+		PublicEvent: s.event.Child("domain", meta.Owner, meta.Repo, meta.CommitID),
+		SystemEvent: s.event.Child("domain", meta.Owner, meta.Repo, "_sys"),
 		Auth:        core.AuthInfoFromContext(request.Context()),
 
 		Kill: cancelFunc,
