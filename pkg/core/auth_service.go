@@ -81,7 +81,8 @@ func (s *AuthService) RequireRepoAccess(w http.ResponseWriter, req *http.Request
 		return true, nil
 	}
 
-	hadCookie := s.hasSessionCookie(req)
+	_, hadCookieErr := req.Cookie(s.config.CookieName)
+	hadCookie := hadCookieErr == nil
 	sess, ok, err := s.loadSession(req.Context(), req)
 	if err != nil {
 		return false, err
@@ -222,21 +223,12 @@ func (s *AuthService) loadSession(ctx context.Context, req *http.Request) (*Auth
 	return &sess, true, nil
 }
 
-func (s *AuthService) authzKey(sess *AuthSession, owner, repo string) string {
-	return sess.Identity.Subject + "/" + owner + "/" + repo
-}
-
 func (s *AuthService) loadAuthz(ctx context.Context, sess *AuthSession, owner, repo string) (bool, bool, error) {
-	return s.authz.Load(ctx, s.authzKey(sess, owner, repo))
+	return s.authz.Load(ctx, sess.Identity.Subject+"/"+owner+"/"+repo)
 }
 
 func (s *AuthService) storeAuthz(ctx context.Context, sess *AuthSession, owner, repo string, allowed bool) error {
-	return s.authz.Store(ctx, s.authzKey(sess, owner, repo), allowed)
-}
-
-func (s *AuthService) hasSessionCookie(req *http.Request) bool {
-	_, err := req.Cookie(s.config.CookieName)
-	return err == nil
+	return s.authz.Store(ctx, sess.Identity.Subject+"/"+owner+"/"+repo, allowed)
 }
 
 func (s *AuthService) clearSessionCookie(w http.ResponseWriter) {

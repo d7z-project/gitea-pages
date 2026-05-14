@@ -145,7 +145,12 @@ func main() {
 		"bind", config.Bind,
 		"domain", config.Domain,
 		"db", config.DB.URL,
-		"user_db", effectiveUserDBURL(config),
+		"user_db", func() string {
+			if config.UserDB.URL != "" {
+				return config.UserDB.URL
+			}
+			return config.DB.URL + " (shared)"
+		}(),
 		"event", config.Event.URL,
 		"provider", config.Provider.Type,
 	)
@@ -179,14 +184,6 @@ func logInject() {
 	if debug {
 		level = slog.LevelDebug
 	}
-	logger := utils.NewConsoleLogger(os.Stderr, level)
-	slog.SetDefault(logger)
+	slog.SetDefault(utils.NewConsoleLogger(os.Stderr, level))
 	slog.Debug("debug enabled")
-}
-
-func effectiveUserDBURL(config *Config) string {
-	if config.UserDB.URL != "" {
-		return config.UserDB.URL
-	}
-	return config.DB.URL + " (shared)"
 }

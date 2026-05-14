@@ -25,11 +25,7 @@ type TestServer struct {
 }
 
 func NewDefaultTestServer() *TestServer {
-	return NewTestServer("example.com")
-}
-
-func NewTestServer(domain string) *TestServer {
-	return NewTestServerOptions(domain)
+	return NewTestServerOptions("example.com")
 }
 
 func NewTestServerOptions(domain string, opts ...pkg.ServerOption) *TestServer {
@@ -99,7 +95,8 @@ func (t *TestServer) OpenFile(url string) ([]byte, *http.Response, error) {
 }
 
 func (t *TestServer) OpenRequest(method, url string, body io.Reader) ([]byte, *http.Response, error) {
-	return t.OpenRequestWithContext(context.Background(), method, url, body)
+	req := httptest.NewRequest(method, url, body).WithContext(context.Background())
+	return t.Do(req)
 }
 
 func (t *TestServer) OpenRequestWithContext(ctx context.Context, method, url string, body io.Reader) ([]byte, *http.Response, error) {
