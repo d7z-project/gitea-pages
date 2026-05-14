@@ -27,6 +27,20 @@ type FilterContext struct {
 	Kill func()
 }
 
+func (f FilterContext) PublicEvent() subscribe.Subscriber {
+	if f.Event == nil {
+		return nil
+	}
+	return f.Event.Child(f.CommitID)
+}
+
+func (f FilterContext) SystemEvent() subscribe.Subscriber {
+	if f.Event == nil {
+		return nil
+	}
+	return f.Event.Child("_sys")
+}
+
 type Params map[string]any
 
 func (f Params) String() string {

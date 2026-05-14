@@ -13,6 +13,7 @@ import (
 
 func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloop.EventLoop, fsEnabled bool) (*goja.Object, error) {
 	host := vm.NewObject()
+	publicEvent := ctx.PublicEvent()
 	if err := host.Set("meta", map[string]any{
 		"org":    ctx.Owner,
 		"repo":   ctx.Repo,
@@ -104,7 +105,7 @@ func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloo
 		"load": func(key string) *goja.Promise {
 			promise, resolve, reject := vm.NewPromise()
 			go func() {
-				sub, err := ctx.Event.Subscribe(ctx, key)
+				sub, err := publicEvent.Subscribe(ctx, key)
 				if err != nil {
 					loop.RunOnLoop(func(runtime *goja.Runtime) {
 						_ = reject(runtime.ToValue(err))
@@ -144,7 +145,7 @@ func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloo
 		"put": func(key, value string) *goja.Promise {
 			promise, resolve, reject := vm.NewPromise()
 			go func() {
-				err := ctx.Event.Publish(ctx, key, value)
+				err := publicEvent.Publish(ctx, key, value)
 				loop.RunOnLoop(func(runtime *goja.Runtime) {
 					if err != nil {
 						_ = reject(runtime.ToValue(err))

@@ -51,6 +51,8 @@ Host APIs:
 - `upgradeWebSocket(request?)`
 - `http.*`
 
+`event.*` is scoped to the current page commit. Events published by one version are isolated from other versions of the same repo.
+
 ## Helpers
 
 `http` provides thin helpers for common handlers.
