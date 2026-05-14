@@ -1,6 +1,7 @@
 package goja
 
 import (
+	"context"
 	"os"
 	"time"
 
@@ -9,9 +10,72 @@ import (
 	"github.com/pkg/errors"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/subscribe"
 )
 
 func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloop.EventLoop, fsEnabled bool) (*goja.Object, error) {
+	eventAPI := func(
+		subscribeFn func(context.Context, string) (subscribe.Subscription, error),
+		publishFn func(context.Context, string, string) error,
+	) map[string]any {
+		return map[string]any{
+			"load": func(key string) *goja.Promise {
+				promise, resolve, reject := vm.NewPromise()
+				go func() {
+					sub, err := subscribeFn(ctx, key)
+					if err != nil {
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(err))
+						})
+						return
+					}
+					defer sub.Close()
+					select {
+					case event, ok := <-sub.Events():
+						if !ok {
+							loop.RunOnLoop(func(runtime *goja.Runtime) {
+								_ = reject(runtime.ToValue(ctx.Err()))
+							})
+							return
+						}
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = resolve(runtime.ToValue(event))
+						})
+					case err, ok := <-sub.Errors():
+						if !ok {
+							loop.RunOnLoop(func(runtime *goja.Runtime) {
+								_ = reject(runtime.ToValue(ctx.Err()))
+							})
+							return
+						}
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(err))
+						})
+					case <-ctx.Done():
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(ctx.Err()))
+						})
+					}
+				}()
+				return promise
+			},
+			"put": func(key, value string) *goja.Promise {
+				promise, resolve, reject := vm.NewPromise()
+				go func() {
+					err := publishFn(ctx, key, value)
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						if err != nil {
+							_ = reject(runtime.ToValue(err))
+						} else {
+							_ = resolve(goja.Undefined())
+						}
+					})
+				}()
+				return promise
+			},
+		}
+	}
+
 	host := vm.NewObject()
 	if err := host.Set("meta", map[string]any{
 		"org":    ctx.Owner,
@@ -100,120 +164,10 @@ func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloo
 	}); err != nil {
 		return nil, err
 	}
-	if err := vm.Set("event", map[string]any{
-		"load": func(key string) *goja.Promise {
-			promise, resolve, reject := vm.NewPromise()
-			go func() {
-				sub, err := ctx.SharedEvent.Subscribe(ctx, key)
-				if err != nil {
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						_ = reject(runtime.ToValue(err))
-					})
-					return
-				}
-				defer sub.Close()
-				select {
-				case event, ok := <-sub.Events():
-					if !ok {
-						loop.RunOnLoop(func(runtime *goja.Runtime) {
-							_ = reject(runtime.ToValue(ctx.Err()))
-						})
-						return
-					}
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						_ = resolve(runtime.ToValue(event.Value))
-					})
-				case err, ok := <-sub.Errors():
-					if !ok {
-						loop.RunOnLoop(func(runtime *goja.Runtime) {
-							_ = reject(runtime.ToValue(ctx.Err()))
-						})
-						return
-					}
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						_ = reject(runtime.ToValue(err))
-					})
-				case <-ctx.Done():
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						_ = reject(runtime.ToValue(ctx.Err()))
-					})
-				}
-			}()
-			return promise
-		},
-		"put": func(key, value string) *goja.Promise {
-			promise, resolve, reject := vm.NewPromise()
-			go func() {
-				err := ctx.SharedEvent.Publish(ctx, key, value)
-				loop.RunOnLoop(func(runtime *goja.Runtime) {
-					if err != nil {
-						_ = reject(runtime.ToValue(err))
-					} else {
-						_ = resolve(goja.Undefined())
-					}
-				})
-			}()
-			return promise
-		},
-	}); err != nil {
+	if err := vm.Set("event", eventAPI(ctx.SharedEvent.Subscribe, ctx.SharedEvent.Publish)); err != nil {
 		return nil, err
 	}
-	if err := vm.Set("versionEvent", map[string]any{
-		"load": func(key string) *goja.Promise {
-			promise, resolve, reject := vm.NewPromise()
-			go func() {
-				sub, err := ctx.VersionEvent.Subscribe(ctx, key)
-				if err != nil {
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						_ = reject(runtime.ToValue(err))
-					})
-					return
-				}
-				defer sub.Close()
-				select {
-				case event, ok := <-sub.Events():
-					if !ok {
-						loop.RunOnLoop(func(runtime *goja.Runtime) {
-							_ = reject(runtime.ToValue(ctx.Err()))
-						})
-						return
-					}
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						_ = resolve(runtime.ToValue(event.Value))
-					})
-				case err, ok := <-sub.Errors():
-					if !ok {
-						loop.RunOnLoop(func(runtime *goja.Runtime) {
-							_ = reject(runtime.ToValue(ctx.Err()))
-						})
-						return
-					}
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						_ = reject(runtime.ToValue(err))
-					})
-				case <-ctx.Done():
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						_ = reject(runtime.ToValue(ctx.Err()))
-					})
-				}
-			}()
-			return promise
-		},
-		"put": func(key, value string) *goja.Promise {
-			promise, resolve, reject := vm.NewPromise()
-			go func() {
-				err := ctx.VersionEvent.Publish(ctx, key, value)
-				loop.RunOnLoop(func(runtime *goja.Runtime) {
-					if err != nil {
-						_ = reject(runtime.ToValue(err))
-					} else {
-						_ = resolve(goja.Undefined())
-					}
-				})
-			}()
-			return promise
-		},
-	}); err != nil {
+	if err := vm.Set("versionEvent", eventAPI(ctx.VersionEvent.Subscribe, ctx.VersionEvent.Publish)); err != nil {
 		return nil, err
 	}
 	if err := vm.Set("page", host); err != nil {

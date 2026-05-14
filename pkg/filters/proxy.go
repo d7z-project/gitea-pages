@@ -2,6 +2,7 @@ package filters
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -57,7 +58,7 @@ func FilterInstProxy(globalParams core.Params) (core.FilterInstance, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(param.Target) == "" {
-			return nil, fmt.Errorf("reverse_proxy target is required")
+			return nil, errors.New("reverse_proxy target is required")
 		}
 		targetURL, err := parseProxyTarget(param.Target)
 		if err != nil {
@@ -128,7 +129,7 @@ func parseProxyTarget(raw string) (*url.URL, error) {
 		return nil, err
 	}
 	if target.Scheme == "" || target.Host == "" {
-		return nil, fmt.Errorf("reverse_proxy target must be an absolute URL")
+		return nil, errors.New("reverse_proxy target must be an absolute URL")
 	}
 	switch strings.ToLower(target.Scheme) {
 	case "https":

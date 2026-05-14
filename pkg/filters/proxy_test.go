@@ -1,6 +1,7 @@
 package filters
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
@@ -15,7 +16,7 @@ func TestRewriteProxyRequestStripsSensitiveHeadersAndRebuildsForwarding(t *testi
 	target, err := url.Parse("https://upstream.example/base")
 	require.NoError(t, err)
 
-	req := httptest.NewRequest("GET", "https://pages.example/repo1/api/data?q=ok", nil)
+	req := httptest.NewRequest(http.MethodGet, "https://pages.example/repo1/api/data?q=ok", nil)
 	req.Host = "org1.example.com"
 	req.RemoteAddr = "198.51.100.20:1234"
 	req.Header.Set("Authorization", "Bearer secret")
@@ -51,7 +52,7 @@ func TestRewriteProxyRequestTrustsConfiguredForwardedChain(t *testing.T) {
 	policy, err := core.NewTrustedProxyPolicy([]string{"127.0.0.1/32", "10.0.0.0/8"})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest("GET", "http://pages.example/repo1/api", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://pages.example/repo1/api", nil)
 	req.Host = "org1.example.com"
 	req.RemoteAddr = "127.0.0.1:1234"
 	req.Header.Set("X-Forwarded-For", "198.51.100.10, 10.0.0.1")
