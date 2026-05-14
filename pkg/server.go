@@ -39,6 +39,7 @@ type Server struct {
 	cacheBlobTTL time.Duration
 
 	event        subscribe.Subscriber
+	updateHub    *core.RepoUpdateHub
 	auth         *core.AuthService
 	errorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
@@ -168,7 +169,8 @@ func NewPageServer(
 	}
 
 	alias := core.NewDomainAlias(db.Child("config", "alias"))
-	svcMeta := core.NewServerMeta(cfg.client, backend, domain, alias, cfg.cacheMeta, cfg.cacheMetaTTL, cfg.cacheMetaRefresh, cfg.cacheMetaRefreshConcurrent)
+	updateHub := core.NewRepoUpdateHub(cfg.event)
+	svcMeta := core.NewServerMeta(cfg.client, backend, domain, alias, cfg.cacheMeta, cfg.cacheMetaTTL, cfg.cacheMetaRefresh, cfg.cacheMetaRefreshConcurrent, updateHub)
 	pageMeta := core.NewPageDomain(svcMeta, domain)
 	globCache, err := lru.New[string, glob.Glob](512)
 	if err != nil {
@@ -197,6 +199,7 @@ func NewPageServer(
 		cacheBlob:    cfg.cacheBlob,
 		cacheBlobTTL: cfg.cacheBlobTTL,
 		event:        cfg.event,
+		updateHub:    updateHub,
 		auth:         cfg.authService,
 	}, nil
 }
@@ -257,6 +260,11 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 	}
 	writer.Header().Set("X-Page-ID", meta.CommitID)
 	cancelCtx, cancelFunc := context.WithCancel(request.Context())
+	releaseUpdate, err := s.updateHub.Attach(meta.Owner, meta.Repo, meta.CommitID, request.Header.Get("Session-ID"), cancelFunc)
+	if err != nil {
+		return err
+	}
+	defer releaseUpdate()
 	filterCtx := core.FilterContext{
 		PageContent:  meta,
 		Context:      cancelCtx,

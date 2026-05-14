@@ -31,6 +31,7 @@ type ServerMeta struct {
 	refreshSem chan struct{}
 	updatesMu  sync.Mutex
 	updates    map[string]*metaUpdate
+	updateHub  *RepoUpdateHub
 }
 
 type metaUpdate struct {
@@ -91,6 +92,7 @@ func NewServerMeta(
 	ttl time.Duration,
 	refresh time.Duration,
 	refreshConcurrent int,
+	updateHub *RepoUpdateHub,
 ) *ServerMeta {
 	if refreshConcurrent <= 0 {
 		refreshConcurrent = 16
@@ -104,6 +106,7 @@ func NewServerMeta(
 		refresh:    refresh,
 		refreshSem: make(chan struct{}, refreshConcurrent),
 		updates:    make(map[string]*metaUpdate),
+		updateHub:  updateHub,
 	}
 }
 
@@ -235,6 +238,11 @@ func (s *ServerMeta) refreshMeta(ctx context.Context, owner, repo string) (*Page
 		return nil, err
 	}
 	_ = s.cache.Store(ctx, key, *rel)
+	if s.updateHub != nil {
+		if err = s.updateHub.PublishUpdate(ctx, owner, repo, rel.CommitID); err != nil {
+			slog.Warn("publish update event failed", "owner", owner, "repo", repo, "commit", rel.CommitID, "error", err)
+		}
+	}
 	return rel, nil
 }
 

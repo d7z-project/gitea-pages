@@ -11,7 +11,7 @@ import (
 
 func TestCNAMERegex(t *testing.T) {
 	db, _ := kv.NewMemory("")
-	meta := core.NewServerMeta(nil, nil, "example.com", nil, db, 0, 0, 0)
+	meta := core.NewServerMeta(nil, nil, "example.com", nil, db, 0, 0, 0, nil)
 
 	tests := []struct {
 		domain string
