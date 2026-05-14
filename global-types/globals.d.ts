@@ -157,6 +157,8 @@ declare global {
     const kv: KVSystem;
     // @ts-ignore
     const event: EventSystem;
+    // @ts-ignore
+    const versionEvent: EventSystem;
 
     interface PageWebSocket extends WebSocket {
         send(data: string | Uint8Array | ArrayBuffer): Promise<void>;

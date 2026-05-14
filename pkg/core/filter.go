@@ -18,12 +18,12 @@ type FilterContext struct {
 	context.Context
 	*PageContent
 	*PageVFS
-	Cache       *tools.TTLCache
-	OrgDB       kv.KV
-	RepoDB      kv.KV
-	PublicEvent subscribe.Subscriber
-	SystemEvent subscribe.Subscriber
-	Auth        AuthInfo
+	Cache        *tools.TTLCache
+	OrgDB        kv.KV
+	RepoDB       kv.KV
+	VersionEvent subscribe.Subscriber
+	SharedEvent  subscribe.Subscriber
+	Auth         AuthInfo
 
 	Kill func()
 }

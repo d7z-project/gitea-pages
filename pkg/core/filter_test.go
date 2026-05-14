@@ -41,7 +41,7 @@ func (n *noopSubscription) Close() error {
 	return nil
 }
 
-func TestFilterContextPublicEvent(t *testing.T) {
+func TestFilterContextVersionEvent(t *testing.T) {
 	recorder := &eventRecorder{path: []string{"domain", "org1", "repo1"}}
 	ctx := FilterContext{
 		PageContent: &PageContent{
@@ -49,19 +49,19 @@ func TestFilterContextPublicEvent(t *testing.T) {
 			Owner:           "org1",
 			Repo:            "repo1",
 		},
-		PublicEvent: recorder.Child("commit-123"),
+		VersionEvent: recorder.Child("commit-123"),
 	}
 
-	assert.NotNil(t, ctx.PublicEvent)
+	assert.NotNil(t, ctx.VersionEvent)
 	assert.Len(t, recorder.childPaths, 1)
 	assert.Equal(t, []string{"domain", "org1", "repo1", "commit-123"}, recorder.childPaths[0])
 }
 
-func TestFilterContextSystemEvent(t *testing.T) {
+func TestFilterContextSharedEvent(t *testing.T) {
 	recorder := &eventRecorder{path: []string{"domain", "org1", "repo1"}}
-	ctx := FilterContext{SystemEvent: recorder.Child("_sys")}
+	ctx := FilterContext{SharedEvent: recorder.Child("shared")}
 
-	assert.NotNil(t, ctx.SystemEvent)
+	assert.NotNil(t, ctx.SharedEvent)
 	assert.Len(t, recorder.childPaths, 1)
-	assert.Equal(t, []string{"domain", "org1", "repo1", "_sys"}, recorder.childPaths[0])
+	assert.Equal(t, []string{"domain", "org1", "repo1", "shared"}, recorder.childPaths[0])
 }

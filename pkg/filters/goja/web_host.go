@@ -104,7 +104,7 @@ func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloo
 		"load": func(key string) *goja.Promise {
 			promise, resolve, reject := vm.NewPromise()
 			go func() {
-				sub, err := ctx.PublicEvent.Subscribe(ctx, key)
+				sub, err := ctx.SharedEvent.Subscribe(ctx, key)
 				if err != nil {
 					loop.RunOnLoop(func(runtime *goja.Runtime) {
 						_ = reject(runtime.ToValue(err))
@@ -144,7 +144,65 @@ func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloo
 		"put": func(key, value string) *goja.Promise {
 			promise, resolve, reject := vm.NewPromise()
 			go func() {
-				err := ctx.PublicEvent.Publish(ctx, key, value)
+				err := ctx.SharedEvent.Publish(ctx, key, value)
+				loop.RunOnLoop(func(runtime *goja.Runtime) {
+					if err != nil {
+						_ = reject(runtime.ToValue(err))
+					} else {
+						_ = resolve(goja.Undefined())
+					}
+				})
+			}()
+			return promise
+		},
+	}); err != nil {
+		return nil, err
+	}
+	if err := vm.Set("versionEvent", map[string]any{
+		"load": func(key string) *goja.Promise {
+			promise, resolve, reject := vm.NewPromise()
+			go func() {
+				sub, err := ctx.VersionEvent.Subscribe(ctx, key)
+				if err != nil {
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						_ = reject(runtime.ToValue(err))
+					})
+					return
+				}
+				defer sub.Close()
+				select {
+				case event, ok := <-sub.Events():
+					if !ok {
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(ctx.Err()))
+						})
+						return
+					}
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						_ = resolve(runtime.ToValue(event.Value))
+					})
+				case err, ok := <-sub.Errors():
+					if !ok {
+						loop.RunOnLoop(func(runtime *goja.Runtime) {
+							_ = reject(runtime.ToValue(ctx.Err()))
+						})
+						return
+					}
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						_ = reject(runtime.ToValue(err))
+					})
+				case <-ctx.Done():
+					loop.RunOnLoop(func(runtime *goja.Runtime) {
+						_ = reject(runtime.ToValue(ctx.Err()))
+					})
+				}
+			}()
+			return promise
+		},
+		"put": func(key, value string) *goja.Promise {
+			promise, resolve, reject := vm.NewPromise()
+			go func() {
+				err := ctx.VersionEvent.Publish(ctx, key, value)
 				loop.RunOnLoop(func(runtime *goja.Runtime) {
 					if err != nil {
 						_ = reject(runtime.ToValue(err))

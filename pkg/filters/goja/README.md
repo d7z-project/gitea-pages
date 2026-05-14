@@ -48,10 +48,14 @@ Host APIs:
 - `kv.org(...group)`
 - `event.load(key)`
 - `event.put(key, value)`
+- `versionEvent.load(key)`
+- `versionEvent.put(key, value)`
 - `upgradeWebSocket(request?)`
 - `http.*`
 
-`event.*` is scoped to the current page commit. Events published by one version are isolated from other versions of the same repo.
+`event.*` is shared across page versions in the same repo.
+
+`versionEvent.*` is scoped to the current page commit. Events published by one version are isolated from other versions of the same repo.
 
 ## Helpers
 

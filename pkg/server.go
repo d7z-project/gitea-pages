@@ -258,15 +258,15 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 	writer.Header().Set("X-Page-ID", meta.CommitID)
 	cancelCtx, cancelFunc := context.WithCancel(request.Context())
 	filterCtx := core.FilterContext{
-		PageContent: meta,
-		Context:     cancelCtx,
-		PageVFS:     core.NewPageVFS(s.backend, meta.Owner, meta.Repo, meta.CommitID),
-		Cache:       tools.NewTTLCache(s.cacheBlob.Child("filter", meta.Owner, meta.Repo, meta.CommitID), s.cacheBlobTTL),
-		OrgDB:       s.userDB.Child("org", meta.Owner),
-		RepoDB:      s.userDB.Child("repo", meta.Owner, meta.Repo),
-		PublicEvent: s.event.Child("domain", meta.Owner, meta.Repo, meta.CommitID),
-		SystemEvent: s.event.Child("domain", meta.Owner, meta.Repo, "_sys"),
-		Auth:        core.AuthInfoFromContext(request.Context()),
+		PageContent:  meta,
+		Context:      cancelCtx,
+		PageVFS:      core.NewPageVFS(s.backend, meta.Owner, meta.Repo, meta.CommitID),
+		Cache:        tools.NewTTLCache(s.cacheBlob.Child("filter", meta.Owner, meta.Repo, meta.CommitID), s.cacheBlobTTL),
+		OrgDB:        s.userDB.Child("org", meta.Owner),
+		RepoDB:       s.userDB.Child("repo", meta.Owner, meta.Repo),
+		VersionEvent: s.event.Child("version", meta.Owner, meta.Repo, meta.CommitID),
+		SharedEvent:  s.event.Child("shared", meta.Owner, meta.Repo),
+		Auth:         core.AuthInfoFromContext(request.Context()),
 
 		Kill: cancelFunc,
 	}
