@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -196,16 +197,24 @@ func (s *ServerMeta) getOrStartMetaUpdate(owner, repo string) *metaUpdate {
 }
 
 func (s *ServerMeta) runMetaUpdate(owner, repo string, update *metaUpdate) {
+	key := fmt.Sprintf("%s/%s", owner, repo)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			update.meta = nil
+			update.err = fmt.Errorf("panic while refreshing page metadata: %v", recovered)
+			slog.Error("panic while refreshing page metadata", "owner", owner, "repo", repo,
+				"panic", recovered, "stack", string(debug.Stack()))
+		}
+		s.updatesMu.Lock()
+		delete(s.updates, key)
+		s.updatesMu.Unlock()
+		close(update.done)
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	update.meta, update.err = s.refreshMeta(ctx, owner, repo)
-
-	key := fmt.Sprintf("%s/%s", owner, repo)
-	s.updatesMu.Lock()
-	delete(s.updates, key)
-	s.updatesMu.Unlock()
-	close(update.done)
 }
 
 func (s *ServerMeta) refreshMeta(ctx context.Context, owner, repo string) (*PageMetaContent, error) {

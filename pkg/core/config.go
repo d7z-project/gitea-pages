@@ -1,6 +1,8 @@
 package core
 
 import (
+	"strings"
+
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
@@ -19,33 +21,58 @@ type PageConfigRoute struct {
 }
 
 func (p *PageConfigRoute) UnmarshalYAML(value *yaml.Node) error {
-	var data map[string]any
-	if err := value.Decode(&data); err != nil {
-		return err
+	p.Params = make(map[string]any)
+	if value == nil || value.Kind != yaml.MappingNode {
+		return errors.New("route must be a mapping")
 	}
-	if item, ok := data["path"]; ok {
-		p.Path = item.(string)
-	} else {
+
+	var (
+		pathFound  bool
+		filterNode *yaml.Node
+	)
+
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		key := strings.TrimSpace(value.Content[i].Value)
+		node := value.Content[i+1]
+		if key == "" {
+			return errors.New("route key cannot be empty")
+		}
+		if key == "path" {
+			if pathFound {
+				return errors.New("duplicate path field")
+			}
+			if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+				return errors.New("route path must be a string")
+			}
+			if strings.TrimSpace(node.Value) == "" {
+				return errors.New("route path cannot be empty")
+			}
+			p.Path = node.Value
+			pathFound = true
+			continue
+		}
+		if p.Type != "" {
+			return errors.Errorf("route must define exactly one filter, got %q and %q", p.Type, key)
+		}
+		p.Type = key
+		filterNode = node
+	}
+
+	if !pathFound {
 		return errors.New("missing path field")
 	}
-	delete(data, "path")
-	keys := make([]string, 0)
-	for k := range data {
-		keys = append(keys, k)
+	if p.Type == "" {
+		return errors.New("missing filter field")
 	}
-	if len(keys) != 1 {
-		return errors.Errorf("invalid param: %v", keys)
-	}
-	p.Type = keys[0]
-	params := data[p.Type]
-	// 跳过空参数
-	p.Params = make(map[string]any)
-	if _, ok := params.(string); ok || params == nil {
+	if filterNode == nil {
 		return nil
 	}
-	out, err := yaml.Marshal(params)
-	if err != nil {
-		return err
+
+	if filterNode.Kind == yaml.ScalarNode {
+		if filterNode.Tag == "!!null" || filterNode.Tag == "!!str" {
+			return nil
+		}
+		return errors.Errorf("route filter %q must be a mapping, string or null", p.Type)
 	}
-	return yaml.Unmarshal(out, &p.Params)
+	return filterNode.Decode(&p.Params)
 }

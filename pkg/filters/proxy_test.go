@@ -1,10 +1,17 @@
 package filters
 
 import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -140,8 +147,230 @@ func TestRewriteProxyRequestBuildsForwardedForMappedIPv6Peer(t *testing.T) {
 	assert.Equal(t, "198.51.100.10", pr.Out.Header.Get("X-Real-IP"))
 }
 
-func TestParseProxyTargetRequiresHTTPS(t *testing.T) {
-	_, err := parseProxyTarget("http://127.0.0.1:8080")
+func TestParseProxyTargetRejectsInvalidInputs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "http",
+			raw:  "http://127.0.0.1:8080",
+			want: "must use https",
+		},
+		{
+			name: "userinfo",
+			raw:  "https://user:pass@upstream.example",
+			want: "must not include userinfo",
+		},
+		{
+			name: "invalid port",
+			raw:  "https://upstream.example:abc",
+			want: "invalid port",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseProxyTarget(tc.raw)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+func TestNewProxyPolicyRejectsInvalidDenyEntries(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config proxyGlobalConfig
+		want   string
+	}{
+		{
+			name:   "deny host with port",
+			config: proxyGlobalConfig{DenyHosts: []string{"metadata.internal.example:443"}},
+			want:   "must not include a port or IP literal",
+		},
+		{
+			name:   "deny host as ip",
+			config: proxyGlobalConfig{DenyHosts: []string{"127.0.0.1"}},
+			want:   "must be a hostname",
+		},
+		{
+			name:   "invalid cidr",
+			config: proxyGlobalConfig{DenyCIDRs: []string{"bad-cidr"}},
+			want:   "deny_cidrs entry is invalid",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := newProxyPolicy(tc.config)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+func TestProxyPolicyTransportForTargetRejectsDeniedHost(t *testing.T) {
+	policy, err := newProxyPolicy(proxyGlobalConfig{
+		DenyHosts: []string{"metadata.internal.example"},
+	})
+	require.NoError(t, err)
+
+	target, err := parseProxyTarget("https://metadata.internal.example")
+	require.NoError(t, err)
+
+	_, err = policy.transportForTarget(context.Background(), target)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must use https")
+	assert.Contains(t, err.Error(), "is denied")
+}
+
+func TestProxyPolicyTransportForTargetRejectsLiteralDeniedIP(t *testing.T) {
+	policy, err := newProxyPolicy(proxyGlobalConfig{
+		DenyCIDRs: []string{"10.0.0.0/8"},
+	})
+	require.NoError(t, err)
+
+	target, err := parseProxyTarget("https://10.1.2.3")
+	require.NoError(t, err)
+
+	_, err = policy.transportForTarget(context.Background(), target)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "denied by cidr rule")
+}
+
+func TestProxyPolicyTransportForTargetFiltersDeniedAddressesAndKeepsResolverOrder(t *testing.T) {
+	policy, err := newProxyPolicy(proxyGlobalConfig{
+		DenyCIDRs: []string{"10.0.0.0/8"},
+	})
+	require.NoError(t, err)
+
+	target, err := parseProxyTarget("https://upstream.example")
+	require.NoError(t, err)
+
+	var attempts []string
+	policy.resolver = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{
+			netip.MustParseAddr("10.0.0.5"),
+			netip.MustParseAddr("203.0.113.10"),
+			netip.MustParseAddr("203.0.113.11"),
+		}, nil
+	}
+	policy.dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		attempts = append(attempts, addr)
+		return nil, errors.New("dial failed")
+	}
+
+	transport, err := policy.transportForTarget(context.Background(), target)
+	require.NoError(t, err)
+	_, err = transport.DialContext(context.Background(), "tcp", "ignored:443")
+	require.Error(t, err)
+	assert.Equal(t, []string{"203.0.113.10:443", "203.0.113.11:443"}, attempts)
+}
+
+func TestProxyPolicyTransportForTargetFallsBackAcrossAllowedAddresses(t *testing.T) {
+	policy, err := newProxyPolicy(proxyGlobalConfig{})
+	require.NoError(t, err)
+
+	target, err := parseProxyTarget("https://upstream.example")
+	require.NoError(t, err)
+
+	var attempts []string
+	policy.resolver = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{
+			netip.MustParseAddr("203.0.113.10"),
+			netip.MustParseAddr("203.0.113.11"),
+		}, nil
+	}
+	policy.dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		attempts = append(attempts, addr)
+		if len(attempts) == 1 {
+			return nil, errors.New("first failed")
+		}
+		left, right := net.Pipe()
+		go right.Close()
+		return left, nil
+	}
+
+	transport, err := policy.transportForTarget(context.Background(), target)
+	require.NoError(t, err)
+	conn, err := transport.DialContext(context.Background(), "tcp", "ignored:443")
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+	assert.Equal(t, []string{"203.0.113.10:443", "203.0.113.11:443"}, attempts)
+}
+
+func TestProxyPolicyTransportForTargetUsesOriginalHostnameForTLS(t *testing.T) {
+	var (
+		serverName string
+		hostHeader string
+	)
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hostHeader = r.Host
+		_, _ = w.Write([]byte("ok"))
+	}))
+	server.TLS = &tls.Config{
+		GetConfigForClient: func(info *tls.ClientHelloInfo) (*tls.Config, error) {
+			serverName = info.ServerName
+			return nil, nil
+		},
+	}
+	server.StartTLS()
+	defer server.Close()
+
+	listenerHost, port, err := net.SplitHostPort(server.Listener.Addr().String())
+	require.NoError(t, err)
+	resolvedAddr := netip.MustParseAddr(listenerHost)
+
+	policy, err := newProxyPolicy(proxyGlobalConfig{})
+	require.NoError(t, err)
+	policy.resolver = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{resolvedAddr}, nil
+	}
+
+	target, err := parseProxyTarget("https://upstream.example:" + port + "/hello")
+	require.NoError(t, err)
+	transport, err := policy.transportForTarget(context.Background(), target)
+	require.NoError(t, err)
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	req, err := http.NewRequest(http.MethodGet, target.String(), nil)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "upstream.example", serverName)
+	assert.Equal(t, "upstream.example:"+port, hostHeader)
+	assert.Equal(t, "ok", string(body))
+}
+
+func TestProxyPolicyTransportForTargetPreservesResolverOrderAfterFiltering(t *testing.T) {
+	policy, err := newProxyPolicy(proxyGlobalConfig{
+		DenyCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
+	})
+	require.NoError(t, err)
+
+	target, err := parseProxyTarget("https://upstream.example:8443")
+	require.NoError(t, err)
+
+	policy.resolver = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{
+			netip.MustParseAddr("10.0.0.5"),
+			netip.MustParseAddr("203.0.113.10"),
+			netip.MustParseAddr("192.168.1.9"),
+			netip.MustParseAddr("203.0.113.11"),
+		}, nil
+	}
+
+	var attempts []string
+	policy.dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		attempts = append(attempts, addr)
+		return nil, errors.New("dial failed")
+	}
+
+	transport, err := policy.transportForTarget(context.Background(), target)
+	require.NoError(t, err)
+	_, err = transport.DialContext(context.Background(), "tcp", "ignored")
+	require.Error(t, err)
+	assert.True(t, slices.Equal(attempts, []string{"203.0.113.10:8443", "203.0.113.11:8443"}))
 }

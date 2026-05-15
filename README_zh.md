@@ -58,6 +58,11 @@ filters:
   reverse_proxy:
     enabled: true
     forward_authorization: false
+    deny_hosts:
+      - metadata.internal.example
+    deny_cidrs:
+      - 169.254.169.254/32
+      - 127.0.0.0/8
 ```
 
 `.pages.yaml` 中的路由示例：
@@ -73,7 +78,9 @@ routes:
 说明：
 
 - `target` 必须是绝对 `https://` URL。
-- 如果目标地址解析到回环、私网或链路本地地址，请求会被拒绝。
+- `deny_hosts` 用于精确拒绝目标主机名。
+- `deny_cidrs` 会同时匹配字面量目标 IP 和 DNS 解析得到的 IP。
+- 代理会在每次请求时重新解析目标地址，按 `deny_cidrs` 过滤后，再按解析结果顺序依次尝试剩余 IP。
 - 转发时会先从匹配路径中裁掉 `prefix`。
 - `Forwarded`、`X-Forwarded-*`、`X-Real-IP` 和 `X-Page-*` 会始终由代理过滤器重建。
 - Cookie 是否继续转发由页面 `security` 配置统一控制。

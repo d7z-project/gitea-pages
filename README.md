@@ -58,6 +58,11 @@ filters:
   reverse_proxy:
     enabled: true
     forward_authorization: false
+    deny_hosts:
+      - metadata.internal.example
+    deny_cidrs:
+      - 169.254.169.254/32
+      - 127.0.0.0/8
 ```
 
 Per-page route example in `.pages.yaml`:
@@ -73,7 +78,9 @@ routes:
 Notes:
 
 - `target` must be an absolute `https://` URL.
-- Targets that resolve to loopback, private, or link-local addresses are rejected.
+- `deny_hosts` blocks exact target hostnames.
+- `deny_cidrs` blocks both literal target IPs and IPs returned by DNS resolution.
+- The proxy resolves the target on each request, filters the returned addresses against `deny_cidrs`, and dials the remaining IPs in resolver order.
 - `prefix` is removed from the matched request path before proxying.
 - `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and `X-Page-*` are always rebuilt by the proxy filter.
 - Cookie forwarding is controlled by the page `security` config.

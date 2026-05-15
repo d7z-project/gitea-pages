@@ -89,6 +89,10 @@ filters:
     enabled: true
     # 是否把原始 Authorization 请求头继续转发给上游
     forward_authorization: false
+    # 精确拒绝的目标主机名
+    deny_hosts: []
+    # 拒绝的目标 IP / CIDR；会同时匹配字面量 IP 和 DNS 解析结果
+    deny_cidrs: []
   js:
     # 是否启用 debug 页面
     debug: true
@@ -120,5 +124,5 @@ filters:
 #     reverse_proxy:
 #       # 从请求路径前缀中裁掉的部分
 #       prefix: /api
-#       # 必须是绝对 HTTPS URL；不允许 HTTP，也不允许解析到私网/回环地址
+#       # 必须是绝对 HTTPS URL；实际连接会在解析后按 deny_hosts / deny_cidrs 过滤
 #       target: https://example-upstream.com
