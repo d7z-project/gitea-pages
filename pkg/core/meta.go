@@ -25,13 +25,14 @@ type ServerMeta struct {
 	Domain string
 	Alias  *DomainAlias
 
-	client     *http.Client
-	cache      *tools.KVCache[PageMetaContent]
-	refresh    time.Duration
-	refreshSem chan struct{}
-	updatesMu  sync.Mutex
-	updates    map[string]*metaUpdate
-	updateHub  *RepoUpdateHub
+	client         *http.Client
+	cache          *tools.KVCache[PageMetaContent]
+	refresh        time.Duration
+	refreshSem     chan struct{}
+	enabledFilters map[string]struct{}
+	updatesMu      sync.Mutex
+	updates        map[string]*metaUpdate
+	updateHub      *RepoUpdateHub
 }
 
 type metaUpdate struct {
@@ -94,22 +95,36 @@ func NewServerMeta(
 	ttl time.Duration,
 	refresh time.Duration,
 	refreshConcurrent int,
+	enabledFilters []string,
 	updateHub *RepoUpdateHub,
 ) *ServerMeta {
 	if refreshConcurrent <= 0 {
 		refreshConcurrent = 16
 	}
 	return &ServerMeta{
-		Backend:    backend,
-		Domain:     domain,
-		Alias:      alias,
-		client:     client,
-		cache:      tools.NewCache[PageMetaContent](cache, "meta", ttl),
-		refresh:    refresh,
-		refreshSem: make(chan struct{}, refreshConcurrent),
-		updates:    make(map[string]*metaUpdate),
-		updateHub:  updateHub,
+		Backend:        backend,
+		Domain:         domain,
+		Alias:          alias,
+		client:         client,
+		cache:          tools.NewCache[PageMetaContent](cache, "meta", ttl),
+		refresh:        refresh,
+		refreshSem:     make(chan struct{}, refreshConcurrent),
+		enabledFilters: toNameSet(enabledFilters),
+		updates:        make(map[string]*metaUpdate),
+		updateHub:      updateHub,
 	}
+}
+
+func toNameSet(items []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		result[item] = struct{}{}
+	}
+	return result
 }
 
 func (s *ServerMeta) GetMeta(ctx context.Context, owner, repo string) (*PageMetaContent, error) {
@@ -322,6 +337,9 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 			}
 			if _, err := glob.Compile(item); err != nil {
 				return errors.Wrapf(err, "invalid route glob pattern: %s", item)
+			}
+			if _, ok := s.enabledFilters[r.Type]; !ok {
+				return fmt.Errorf("unavailable filter %q in route %q", r.Type, item)
 			}
 			meta.Filters = append(meta.Filters, Filter{
 				Path:   item,

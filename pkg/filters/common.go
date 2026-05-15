@@ -8,21 +8,28 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/filters/goja"
 )
 
+var registeredFilters = map[string]core.GlobalFilter{
+	"block":         FilterInstBlock,
+	"redirect":      FilterInstRedirect,
+	"direct":        FilterInstDirect,
+	"reverse_proxy": FilterInstProxy,
+	"404":           FilterInstDefaultNotFound,
+	"failback":      FilterInstFailback,
+	"template":      FilterInstTemplate,
+	"js":            goja.FilterInstGoJa,
+}
+
 func DefaultFilters(config map[string]map[string]any) (map[string]core.FilterInstance, error) {
 	if config == nil {
 		return nil, errors.New("config is nil")
 	}
+	for key := range config {
+		if _, ok := registeredFilters[key]; !ok {
+			slog.Warn("unknown filter config is ignored", "filter", key)
+		}
+	}
 	result := make(map[string]core.FilterInstance)
-	for key, instance := range map[string]core.GlobalFilter{
-		"block":         FilterInstBlock,
-		"redirect":      FilterInstRedirect,
-		"direct":        FilterInstDirect,
-		"reverse_proxy": FilterInstProxy,
-		"404":           FilterInstDefaultNotFound,
-		"failback":      FilterInstFailback,
-		"template":      FilterInstTemplate,
-		"js":            goja.FilterInstGoJa,
-	} {
+	for key, instance := range registeredFilters {
 		item, ok := config[key]
 		if !ok {
 			item = make(map[string]any)

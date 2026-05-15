@@ -170,8 +170,6 @@ func NewPageServer(
 
 	alias := core.NewDomainAlias(db.Child("config", "alias"))
 	updateHub := core.NewRepoUpdateHub(cfg.event)
-	svcMeta := core.NewServerMeta(cfg.client, backend, domain, alias, cfg.cacheMeta, cfg.cacheMetaTTL, cfg.cacheMetaRefresh, cfg.cacheMetaRefreshConcurrent, updateHub)
-	pageMeta := core.NewPageDomain(svcMeta, domain)
 	globCache, err := lru.New[string, glob.Glob](512)
 	if err != nil {
 		return nil, err
@@ -180,6 +178,23 @@ func NewPageServer(
 	if err != nil {
 		return nil, err
 	}
+	enabledFilters := make([]string, 0, len(defaultFilters))
+	for name := range defaultFilters {
+		enabledFilters = append(enabledFilters, name)
+	}
+	svcMeta := core.NewServerMeta(
+		cfg.client,
+		backend,
+		domain,
+		alias,
+		cfg.cacheMeta,
+		cfg.cacheMetaTTL,
+		cfg.cacheMetaRefresh,
+		cfg.cacheMetaRefreshConcurrent,
+		enabledFilters,
+		updateHub,
+	)
+	pageMeta := core.NewPageDomain(svcMeta, domain)
 	var trustedProxy *core.TrustedProxyPolicy
 	if len(cfg.trustedProxies) > 0 {
 		trustedProxy, err = core.NewTrustedProxyPolicy(cfg.trustedProxies)
@@ -322,7 +337,7 @@ func (s *Server) servePage(writer *utils.WrittenResponseWriter, request *http.Re
 		if value.Match(meta.Path) {
 			instance := s.filterMgr[filter.Type]
 			if instance == nil {
-				return errors.New("filter not found : " + filter.Type)
+				return fmt.Errorf("filter %q became unavailable after metadata validation", filter.Type)
 			}
 			activeFilters = append(activeFilters, filter)
 			filtersRoute = append(filtersRoute, fmt.Sprintf("%s[%s]%s", filter.Type, filter.Path, filter.Params))
