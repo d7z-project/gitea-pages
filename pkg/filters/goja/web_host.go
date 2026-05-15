@@ -2,78 +2,46 @@ package goja
 
 import (
 	"context"
+	"errors"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
-	"github.com/pkg/errors"
+	pkgerrors "github.com/pkg/errors"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/middleware/kv"
 	"gopkg.d7z.net/middleware/subscribe"
 )
 
-func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloop.EventLoop, fsEnabled bool) (*goja.Object, error) {
-	eventAPI := func(
-		subscribeFn func(context.Context, string) (subscribe.Subscription, error),
-		publishFn func(context.Context, string, string) error,
-	) map[string]any {
-		return map[string]any{
-			"load": func(key string) *goja.Promise {
-				promise, resolve, reject := vm.NewPromise()
-				go func() {
-					sub, err := subscribeFn(ctx, key)
-					if err != nil {
-						loop.RunOnLoop(func(runtime *goja.Runtime) {
-							_ = reject(runtime.ToValue(err))
-						})
-						return
-					}
-					defer sub.Close()
-					select {
-					case event, ok := <-sub.Events():
-						if !ok {
-							loop.RunOnLoop(func(runtime *goja.Runtime) {
-								_ = reject(runtime.ToValue(ctx.Err()))
-							})
-							return
-						}
-						loop.RunOnLoop(func(runtime *goja.Runtime) {
-							_ = resolve(runtime.ToValue(event))
-						})
-					case err, ok := <-sub.Errors():
-						if !ok {
-							loop.RunOnLoop(func(runtime *goja.Runtime) {
-								_ = reject(runtime.ToValue(ctx.Err()))
-							})
-							return
-						}
-						loop.RunOnLoop(func(runtime *goja.Runtime) {
-							_ = reject(runtime.ToValue(err))
-						})
-					case <-ctx.Done():
-						loop.RunOnLoop(func(runtime *goja.Runtime) {
-							_ = reject(runtime.ToValue(ctx.Err()))
-						})
-					}
-				}()
-				return promise
-			},
-			"put": func(key, value string) *goja.Promise {
-				promise, resolve, reject := vm.NewPromise()
-				go func() {
-					err := publishFn(ctx, key, value)
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
-						if err != nil {
-							_ = reject(runtime.ToValue(err))
-						} else {
-							_ = resolve(goja.Undefined())
-						}
-					})
-				}()
-				return promise
-			},
-		}
+const defaultEventPendingLimit = 256
+
+var errEventBacklogOverflow = errors.New("event backlog overflow")
+
+type eventResult struct {
+	value string
+	err   error
+}
+
+type eventStream struct {
+	mu       sync.Mutex
+	pending  []string
+	waiters  []chan eventResult
+	closed   error
+	limit    int
+	overflow bool
+}
+
+func installHostGlobals(
+	ctx core.FilterContext,
+	vm *goja.Runtime,
+	loop *eventloop.EventLoop,
+	fsEnabled bool,
+	eventPendingLimit int,
+) (*goja.Object, error) {
+	if eventPendingLimit <= 0 {
+		eventPendingLimit = defaultEventPendingLimit
 	}
 
 	host := vm.NewObject()
@@ -164,16 +132,264 @@ func installHostGlobals(ctx core.FilterContext, vm *goja.Runtime, loop *eventloo
 	}); err != nil {
 		return nil, err
 	}
-	if err := vm.Set("event", eventAPI(ctx.SharedEvent.Subscribe, ctx.SharedEvent.Publish)); err != nil {
+
+	sharedStreams := make(map[string]*eventStream)
+	versionStreams := make(map[string]*eventStream)
+	var sharedMu sync.Mutex
+	var versionMu sync.Mutex
+
+	if err := vm.Set("event", newEventAPI(ctx, vm, loop, &sharedMu, sharedStreams, ctx.SharedEvent.Subscribe, ctx.SharedEvent.Publish, eventPendingLimit)); err != nil {
 		return nil, err
 	}
-	if err := vm.Set("versionEvent", eventAPI(ctx.VersionEvent.Subscribe, ctx.VersionEvent.Publish)); err != nil {
+	if err := vm.Set("versionEvent", newEventAPI(ctx, vm, loop, &versionMu, versionStreams, ctx.VersionEvent.Subscribe, ctx.VersionEvent.Publish, eventPendingLimit)); err != nil {
 		return nil, err
 	}
 	if err := vm.Set("page", host); err != nil {
 		return nil, err
 	}
 	return host, nil
+}
+
+func newEventAPI(
+	ctx context.Context,
+	vm *goja.Runtime,
+	loop *eventloop.EventLoop,
+	streamsMu *sync.Mutex,
+	streams map[string]*eventStream,
+	subscribeFn func(context.Context, string) (subscribe.Subscription, error),
+	publishFn func(context.Context, string, string) error,
+	limit int,
+) map[string]any {
+	ensureStream := func(key string) (*eventStream, error) {
+		streamsMu.Lock()
+		if stream := streams[key]; stream != nil && !stream.isClosed() {
+			streamsMu.Unlock()
+			return stream, nil
+		}
+		delete(streams, key)
+		sub, err := subscribeFn(ctx, key)
+		if err != nil {
+			streamsMu.Unlock()
+			return nil, err
+		}
+		stream := &eventStream{limit: limit}
+		streams[key] = stream
+		streamsMu.Unlock()
+
+		go superviseEventStream(ctx, key, streamsMu, streams, subscribeFn, stream, sub)
+		return stream, nil
+	}
+
+	return map[string]any{
+		"load": func(key string) *goja.Promise {
+			promise, resolve, reject := vm.NewPromise()
+			stream, err := ensureStream(key)
+			if err != nil {
+				_ = reject(vm.ToValue(err))
+				return promise
+			}
+			// event is a broadcast stream. load(key) means "wait for the next
+			// broadcast event on this key", not "read the current value".
+			// Each request/key keeps one live subscription so repeated
+			// `while (true) await event.load(key)` calls do not lose broadcasts
+			// between iterations.
+			stream.await(loop, vm, resolve, reject)
+			return promise
+		},
+		"put": func(key, value string) *goja.Promise {
+			promise, resolve, reject := vm.NewPromise()
+			go func() {
+				err := publishFn(ctx, key, value)
+				loop.RunOnLoop(func(runtime *goja.Runtime) {
+					if err != nil {
+						_ = reject(runtime.ToValue(err))
+						return
+					}
+					_ = resolve(goja.Undefined())
+				})
+			}()
+			return promise
+		},
+	}
+}
+
+func superviseEventStream(
+	ctx context.Context,
+	key string,
+	streamsMu *sync.Mutex,
+	streams map[string]*eventStream,
+	subscribeFn func(context.Context, string) (subscribe.Subscription, error),
+	stream *eventStream,
+	initial subscribe.Subscription,
+) {
+	defer func() {
+		streamsMu.Lock()
+		if streams[key] == stream {
+			delete(streams, key)
+		}
+		streamsMu.Unlock()
+	}()
+
+	backoff := 50 * time.Millisecond
+	sub := initial
+	for {
+		if stream.isClosed() {
+			return
+		}
+		if ctx.Err() != nil {
+			stream.finish(ctx.Err())
+			return
+		}
+		if sub == nil {
+			next, err := subscribeFn(ctx, key)
+			if err != nil {
+				if !waitEventRetry(ctx, backoff) {
+					stream.finish(ctx.Err())
+					return
+				}
+				if backoff < time.Second {
+					backoff *= 2
+				}
+				continue
+			}
+			sub = next
+		}
+		backoff = 50 * time.Millisecond
+		if !consumeEventSubscription(ctx, sub, stream) {
+			return
+		}
+		sub = nil
+		if !waitEventRetry(ctx, backoff) {
+			stream.finish(ctx.Err())
+			return
+		}
+		if backoff < time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+func consumeEventSubscription(ctx context.Context, sub subscribe.Subscription, stream *eventStream) bool {
+	defer sub.Close()
+	for {
+		if stream.isClosed() {
+			return false
+		}
+		select {
+		case event, ok := <-sub.Events():
+			if !ok {
+				return true
+			}
+			stream.push(event.Value)
+		case _, ok := <-sub.Errors():
+			if !ok {
+				return true
+			}
+			return true
+		case <-ctx.Done():
+			stream.finish(ctx.Err())
+			return false
+		}
+	}
+}
+
+func waitEventRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func (s *eventStream) push(value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed != nil {
+		return
+	}
+	if len(s.waiters) > 0 {
+		waiter := s.waiters[0]
+		s.waiters = s.waiters[1:]
+		waiter <- eventResult{value: value}
+		close(waiter)
+		return
+	}
+	if len(s.pending) >= s.limit {
+		s.overflow = true
+		return
+	}
+	s.pending = append(s.pending, value)
+}
+
+func (s *eventStream) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed != nil
+}
+
+func (s *eventStream) finish(err error) {
+	if err == nil {
+		err = context.Canceled
+	}
+	s.mu.Lock()
+	if s.closed != nil {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = err
+	waiters := s.waiters
+	s.waiters = nil
+	s.pending = nil
+	s.mu.Unlock()
+	for _, waiter := range waiters {
+		waiter <- eventResult{err: err}
+		close(waiter)
+	}
+}
+
+func (s *eventStream) await(
+	loop *eventloop.EventLoop,
+	vm *goja.Runtime,
+	resolve func(any) error,
+	reject func(any) error,
+) {
+	waiter := make(chan eventResult, 1)
+	s.mu.Lock()
+	switch {
+	case len(s.pending) > 0:
+		value := s.pending[0]
+		s.pending = s.pending[1:]
+		s.mu.Unlock()
+		_ = resolve(vm.ToValue(value))
+		return
+	case s.overflow:
+		s.overflow = false
+		s.mu.Unlock()
+		s.finish(errEventBacklogOverflow)
+		_ = reject(vm.ToValue(errEventBacklogOverflow))
+		return
+	case s.closed != nil:
+		err := s.closed
+		s.mu.Unlock()
+		_ = reject(vm.ToValue(err))
+		return
+	default:
+		s.waiters = append(s.waiters, waiter)
+		s.mu.Unlock()
+	}
+	go func() {
+		result := <-waiter
+		loop.RunOnLoop(func(runtime *goja.Runtime) {
+			if result.err != nil {
+				_ = reject(runtime.ToValue(result.err))
+				return
+			}
+			_ = resolve(runtime.ToValue(result.value))
+		})
+	}()
 }
 
 func authIdentityMap(identity *core.AuthIdentity) any {
@@ -196,7 +412,7 @@ func kvResult(db kv.KV) func(ctx core.FilterContext, jsCtx *goja.Runtime, group 
 			"get": func(key string) (goja.Value, error) {
 				get, err := db.Get(ctx, key)
 				if err != nil {
-					if !errors.Is(err, os.ErrNotExist) {
+					if !pkgerrors.Is(err, os.ErrNotExist) {
 						return nil, err
 					}
 					return goja.Null(), nil

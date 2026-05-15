@@ -179,7 +179,7 @@ func bodyBytesFromValue(vm *goja.Runtime, value goja.Value) ([]byte, error) {
 	case goja.ArrayBuffer:
 		return append([]byte(nil), current.Bytes()...), nil
 	default:
-		if bs, ok := uint8ArrayBytes(vm, value); ok {
+		if bs, ok := arrayBufferViewBytes(vm, value); ok {
 			return bs, nil
 		}
 		return nil, fmt.Errorf("unsupported body type: %T", current)

@@ -143,7 +143,18 @@ declare global {
     }
 
     interface EventSystem {
+        /**
+         * Waits for the next broadcast event on the given key.
+         *
+         * This is a live event stream, not a key/value read and not a history API.
+         * If the local event backlog overflows, the promise rejects with
+         * `"event backlog overflow"`. A later call can establish a fresh
+         * subscription and continue receiving new events.
+         */
         load(key: string): Promise<any>;
+        /**
+         * Broadcasts one event value to the given key.
+         */
         put(key: string, value: string): Promise<void>;
     }
 
@@ -155,12 +166,22 @@ declare global {
     const page: PageHost;
     const fs: PageFS;
     const kv: KVSystem;
+    /**
+     * Broadcast events shared across page versions in the same repo.
+     */
     // @ts-ignore
     const event: EventSystem;
+    /**
+     * Broadcast events scoped to the current page commit.
+     */
     // @ts-ignore
     const versionEvent: EventSystem;
 
     interface PageWebSocket extends WebSocket {
+        /**
+         * Sends text or binary data. Typed-array views are sent using their
+         * actual byte window, not the entire backing ArrayBuffer.
+         */
         send(data: string | Uint8Array | ArrayBuffer): Promise<void>;
     }
 

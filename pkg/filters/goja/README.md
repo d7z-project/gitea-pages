@@ -57,6 +57,12 @@ Host APIs:
 
 `versionEvent.*` is scoped to the current page commit. Events published by one version are isolated from other versions of the same repo.
 
+`event.load(key)` and `versionEvent.load(key)` wait for the next broadcast event on the key. They do not read a current value and they do not provide event history.
+
+Each request keeps a live subscription per event key. If the local backlog overflows, `load(key)` rejects with `event backlog overflow`. A later `load(key)` call can establish a fresh subscription and continue receiving new events.
+
+`fetch` only allows `http` and `https`. When private-network blocking is enabled, fetch dials validated public IPs directly and does not use proxies.
+
 ## Helpers
 
 `http` provides thin helpers for common handlers.
@@ -103,6 +109,8 @@ serve(function(request) {
   return response
 })
 ```
+
+`socket.send(...)` accepts text, `Uint8Array`, and `ArrayBuffer`. Typed-array views use their actual `byteOffset` and `byteLength`.
 
 ## SSE
 

@@ -22,7 +22,14 @@ import (
 )
 
 func newGoJaTestServer(script string, routePath ...string) *testcore.TestServer {
+	return newGoJaTestServerWithFilterConfig(script, nil, routePath...)
+}
+
+func newGoJaTestServerWithFilterConfig(script string, filterConfig map[string]map[string]any, routePath ...string) *testcore.TestServer {
 	server := testcore.NewDefaultTestServer()
+	if filterConfig != nil {
+		server = testcore.NewTestServerOptions("example.com", pkg.WithFilterConfig(filterConfig))
+	}
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/index.js", "%s", script)
 	path := "**"
@@ -848,6 +855,148 @@ routes:
 	assert.NoError(t, err)
 	assert.Equal(t, websocket.TextMessage, messageType)
 	assert.Equal(t, "ECHO: hello", string(payload))
+}
+
+func Test_GoJa_EventAndVersionEventAreIsolated(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  const sharedLoad = event.load("topic")
+  const versionLoad = versionEvent.load("topic")
+  await event.put("topic", "shared")
+  await versionEvent.put("topic", "version")
+  return Response.json({
+    shared: await sharedLoad,
+    version: await versionLoad,
+  })
+})
+`)
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/isolation")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"shared":"shared","version":"version"}`, string(data))
+}
+
+func Test_GoJa_WebSocketSharedEventBroadcast(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(function(request) {
+  const name = new URL(request.url).searchParams.get("name")?.trim()
+  if (!name) throw new Error("Missing or empty name parameter")
+
+  const { socket, response } = upgradeWebSocket(request)
+
+  const pump = async () => {
+    while (true) {
+      await socket.send(await event.load("messages"))
+    }
+  }
+
+  socket.addEventListener("message", async (evt) => {
+    const data = typeof evt.data === "string" ? evt.data : ""
+    if (data.trim()) {
+      await event.put("messages", JSON.stringify({ name, data: data.trim() }))
+    }
+  })
+
+  void pump()
+  return response
+})
+`)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "event"
+  js:
+    exec: "index.js"
+`)
+
+	httpServer := server.StartHTTPServer("org1.example.com")
+	defer httpServer.Close()
+
+	baseURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/repo1/event"
+	connA, _, err := websocket.DefaultDialer.Dial(baseURL+"?name=a", nil)
+	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
+	defer connA.Close()
+
+	connB, _, err := websocket.DefaultDialer.Dial(baseURL+"?name=b", nil)
+	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
+	defer connB.Close()
+
+	assert.NoError(t, connA.WriteMessage(websocket.TextMessage, []byte("hello")))
+
+	type result struct {
+		messageType int
+		payload     string
+		err         error
+	}
+	read := func(conn *websocket.Conn) <-chan result {
+		ch := make(chan result, 1)
+		go func() {
+			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			messageType, payload, err := conn.ReadMessage()
+			ch <- result{messageType: messageType, payload: string(payload), err: err}
+		}()
+		return ch
+	}
+
+	results := []<-chan result{read(connA), read(connB)}
+	for _, ch := range results {
+		got := <-ch
+		assert.NoError(t, got.err)
+		if got.err == nil {
+			assert.Equal(t, websocket.TextMessage, got.messageType)
+			assert.JSONEq(t, `{"name":"a","data":"hello"}`, got.payload)
+		}
+	}
+}
+
+func Test_GoJa_EventOverflowRejectsPendingStream(t *testing.T) {
+	server := newGoJaTestServerWithFilterConfig(`
+serve(async function() {
+  const first = event.load("topic")
+  await event.put("topic", "one")
+  await event.put("topic", "two")
+  await event.put("topic", "three")
+  await new Promise(resolve => setTimeout(resolve, 10))
+  const second = await event.load("topic")
+
+  let overflow = "missing"
+  try {
+    await event.load("topic")
+  } catch (err) {
+    overflow = String(err)
+  }
+
+  const afterOverflow = event.load("topic")
+  await event.put("topic", "four")
+
+  return Response.json({
+    first: await first,
+    second,
+    overflow,
+    afterOverflow: await afterOverflow,
+  })
+})
+`, map[string]map[string]any{
+		"js": {
+			"realtime": map[string]any{
+				"event_buffer": 1,
+			},
+		},
+	})
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/overflow")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"first":"one","second":"two","overflow":"event backlog overflow","afterOverflow":"four"}`, string(data))
 }
 
 func Test_GoJa_SSE(t *testing.T) {

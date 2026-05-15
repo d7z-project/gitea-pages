@@ -96,7 +96,7 @@ func installTextCodecs(vm *goja.Runtime) error {
 	decoder := func(call goja.ConstructorCall) *goja.Object {
 		obj := vm.NewObject()
 		_ = obj.Set("decode", func(input goja.Value) string {
-			if bytes, ok := uint8ArrayBytes(vm, input); ok {
+			if bytes, ok := arrayBufferViewBytes(vm, input); ok {
 				return string(bytes)
 			}
 			if !isNilish(input) {
@@ -174,18 +174,35 @@ func abortSignalFromValue(vm *goja.Runtime, value goja.Value) (*goja.Object, *ab
 	return obj, state, nil
 }
 
-func uint8ArrayBytes(vm *goja.Runtime, value goja.Value) ([]byte, bool) {
+func arrayBufferViewBytes(vm *goja.Runtime, value goja.Value) ([]byte, bool) {
 	obj, ok := valueObject(vm, value)
 	if !ok {
 		return nil, false
 	}
-	if bufferValue, ok := objectValue(obj, "buffer"); ok {
-		if buffer, ok := bufferValue.Export().(goja.ArrayBuffer); ok {
-			return append([]byte(nil), buffer.Bytes()...), true
-		}
-	}
-	if _, ok := objectValue(obj, "byteLength"); !ok {
+	bufferValue, ok := objectValue(obj, "buffer")
+	if !ok {
 		return nil, false
 	}
-	return nil, false
+	buffer, ok := bufferValue.Export().(goja.ArrayBuffer)
+	if !ok {
+		return nil, false
+	}
+	offsetValue, ok := objectValue(obj, "byteOffset")
+	if !ok {
+		return nil, false
+	}
+	lengthValue, ok := objectValue(obj, "byteLength")
+	if !ok {
+		return nil, false
+	}
+	offset := int(offsetValue.ToInteger())
+	length := int(lengthValue.ToInteger())
+	if offset < 0 || length < 0 {
+		return nil, false
+	}
+	bytes := buffer.Bytes()
+	if offset > len(bytes) || length > len(bytes)-offset {
+		return nil, false
+	}
+	return append([]byte(nil), bytes[offset:offset+length]...), true
 }

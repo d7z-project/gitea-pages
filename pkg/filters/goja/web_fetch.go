@@ -7,12 +7,77 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	nurl "net/url"
 	"slices"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
 )
+
+type lookupNetIPFunc func(context.Context, string, string) ([]netip.Addr, error)
+type dialContextFunc func(context.Context, string, string) (net.Conn, error)
+
+func newFetchClient(cfg FetchConfig) *http.Client {
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: newFetchTransport(cfg),
+	}
+}
+
+func newFetchTransport(cfg FetchConfig) *http.Transport {
+	base, _ := http.DefaultTransport.(*http.Transport)
+	transport := base.Clone()
+	if cfg.BlockPrivateNetwork {
+		transport.Proxy = func(*http.Request) (*nurl.URL, error) { return nil, nil }
+	}
+	dial := transport.DialContext
+	if dial == nil {
+		dial = (&net.Dialer{}).DialContext
+	}
+	transport.DialContext = restrictedDialContext(cfg, net.DefaultResolver.LookupNetIP, dial)
+	return transport
+}
+
+func restrictedDialContext(cfg FetchConfig, lookup lookupNetIPFunc, dial dialContextFunc) dialContextFunc {
+	if !cfg.BlockPrivateNetwork {
+		return dial
+	}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := lookup(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+
+		var lastDialErr error
+		hasAllowed := false
+		for _, ip := range ips {
+			ip = ip.Unmap()
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+				continue
+			}
+			hasAllowed = true
+			target := net.JoinHostPort(ip.String(), port)
+			conn, err := dial(ctx, network, target)
+			if err == nil {
+				return conn, nil
+			}
+			lastDialErr = err
+		}
+		if !hasAllowed {
+			return nil, errors.New("fetch target ip is not allowed")
+		}
+		if lastDialErr != nil {
+			return nil, lastDialErr
+		}
+		return nil, errors.New("fetch target ip is not allowed")
+	}
+}
 
 func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLoop, client *http.Client, cfg FetchConfig) error {
 	return vm.Set("fetch", func(resource goja.Value, init ...goja.Value) *goja.Promise {
@@ -118,17 +183,15 @@ func validateFetchTarget(rawURL string, cfg FetchConfig) error {
 	if err != nil {
 		return err
 	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("fetch scheme is not allowed")
+	}
 	host := parsed.Hostname()
 	if host == "" {
 		return errors.New("missing fetch host")
 	}
 	if len(cfg.AllowedHosts) > 0 && !slices.Contains(cfg.AllowedHosts, host) {
 		return errors.New("fetch target host is not allowed")
-	}
-	if cfg.BlockPrivateNetwork {
-		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
-			return errors.New("fetch target ip is not allowed")
-		}
 	}
 	return nil
 }

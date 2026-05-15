@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
@@ -34,8 +33,9 @@ type FSConfig struct {
 }
 
 type RealtimeConfig struct {
-	WebSocket bool `json:"websocket"`
-	SSE       bool `json:"sse"`
+	WebSocket   bool `json:"websocket"`
+	SSE         bool `json:"sse"`
+	EventBuffer int  `json:"event_buffer"`
 }
 
 type Config struct {
@@ -59,14 +59,13 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	global.EnableDebug = true
 	global.Realtime.WebSocket = true
 	global.Realtime.SSE = true
+	global.Realtime.EventBuffer = defaultEventPendingLimit
 	global.Fetch.Enabled = true
 	global.FS.Enabled = true
 	if err := gl.Unmarshal(&global); err != nil {
 		return nil, err
 	}
-	sharedClient := &http.Client{
-		Timeout: 30 * time.Second,
-	}
+	sharedClient := newFetchClient(global.Fetch)
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
 			Exec  string `json:"exec"`
