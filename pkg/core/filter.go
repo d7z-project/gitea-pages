@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/storage"
 	"gopkg.d7z.net/middleware/subscribe"
 	"gopkg.d7z.net/middleware/tools"
 )
@@ -21,6 +22,7 @@ type FilterContext struct {
 	Cache        *tools.TTLCache
 	OrgDB        kv.KV
 	RepoDB       kv.KV
+	Storage      storage.Storage
 	VersionEvent subscribe.Subscriber
 	SharedEvent  subscribe.Subscriber
 	Auth         AuthInfo

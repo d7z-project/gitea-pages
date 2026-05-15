@@ -1,0 +1,9 @@
+routes:
+  - path: "storage"
+    js:
+      exec: "index.js"
+
+  - path: "storage/write"
+    js:
+      exec: "index.js"
+

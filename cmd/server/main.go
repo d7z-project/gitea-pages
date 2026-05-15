@@ -17,6 +17,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/storage"
 	"gopkg.d7z.net/middleware/subscribe"
 )
 
@@ -28,14 +29,18 @@ var (
 func init() {
 	flag.StringVar(&configPath, "conf", configPath, "config file path")
 	flag.BoolVar(&debug, "debug", debug, "debug mode")
-	flag.Parse()
 }
 
 func main() {
+	flag.Parse()
 	logInject()
 	config, err := LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("fail to load config file: %v", err)
+	}
+	storageURL := strings.ToLower(strings.TrimSpace(config.Storage.URL))
+	if strings.HasPrefix(storageURL, "memory://") || strings.HasPrefix(storageURL, "mem://") {
+		slog.Warn("storage.url uses in-memory storage; data written by page scripts is kept in this server process's memory, is not released until the process restarts, and continued writes can exhaust memory", "storage", config.Storage.URL)
 	}
 
 	factory, ok := core.GetProviderFactory(config.Provider.Type)
@@ -92,6 +97,11 @@ func main() {
 		log.Fatalln(err)
 	}
 	defer event.Close()
+	fileStorage, err := storage.NewStorageFromURL(config.Storage.URL)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer fileStorage.Close()
 	var authService *core.AuthService
 	if config.Auth != nil {
 		authProvider, ok := provider.(core.ProviderWithAuth)
@@ -130,6 +140,7 @@ func main() {
 		userDB,
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(event),
+		pkg.WithStorage(fileStorage),
 		pkg.WithMetaCache(cacheMeta, config.Cache.MetaTTL, config.Cache.MetaRefresh, config.Cache.MetaRefreshConcurrent),
 		pkg.WithBlobCache(cacheBlob.Child("filter"), config.Cache.BlobTTL),
 		pkg.WithErrorHandler(config.ErrorHandler),
@@ -152,6 +163,7 @@ func main() {
 			return config.DB.URL + " (shared)"
 		}(),
 		"event", config.Event.URL,
+		"storage", config.Storage.URL,
 		"provider", config.Provider.Type,
 	)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)

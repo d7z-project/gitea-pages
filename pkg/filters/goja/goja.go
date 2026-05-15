@@ -35,10 +35,6 @@ type RequestConfig struct {
 	MaxBodyBytes int64 `json:"max_body_bytes"`
 }
 
-type FSConfig struct {
-	Enabled bool `json:"enabled"`
-}
-
 type RealtimeConfig struct {
 	WebSocket   bool `json:"websocket"`
 	SSE         bool `json:"sse"`
@@ -50,7 +46,6 @@ type Config struct {
 	Realtime    RealtimeConfig `json:"realtime"`
 	Fetch       FetchConfig    `json:"fetch"`
 	Request     RequestConfig  `json:"request"`
-	FS          FSConfig       `json:"fs"`
 }
 
 func init() {
@@ -70,7 +65,6 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	global.Fetch.Enabled = true
 	global.Fetch.MaxResponseBodyBytes = defaultFetchBodyLimit
 	global.Request.MaxBodyBytes = defaultRequestBodyLimit
-	global.FS.Enabled = true
 	if err := gl.Unmarshal(&global); err != nil {
 		return nil, err
 	}

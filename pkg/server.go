@@ -19,6 +19,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
+	mwstorage "gopkg.d7z.net/middleware/storage"
 	"gopkg.d7z.net/middleware/subscribe"
 	"gopkg.d7z.net/middleware/tools"
 )
@@ -38,6 +39,7 @@ type Server struct {
 	cacheBlob    cache.Cache
 	cacheBlobTTL time.Duration
 
+	storage      mwstorage.Storage
 	event        subscribe.Subscriber
 	updateHub    *core.RepoUpdateHub
 	auth         *core.AuthService
@@ -53,6 +55,7 @@ type serverConfig struct {
 	cacheMetaRefreshConcurrent int
 	cacheBlob                  cache.Cache
 	cacheBlobTTL               time.Duration
+	storage                    mwstorage.Storage
 	errorHandler               func(w http.ResponseWriter, r *http.Request, err error)
 	filterConfig               map[string]map[string]any
 	trustedProxies             []string
@@ -86,6 +89,12 @@ func WithBlobCache(cache cache.Cache, ttl time.Duration) ServerOption {
 	return func(c *serverConfig) {
 		c.cacheBlob = cache
 		c.cacheBlobTTL = ttl
+	}
+}
+
+func WithStorage(storage mwstorage.Storage) ServerOption {
+	return func(c *serverConfig) {
+		c.storage = storage
 	}
 }
 
@@ -158,6 +167,9 @@ func NewPageServer(
 			return nil, err
 		}
 	}
+	if cfg.storage == nil {
+		cfg.storage = mwstorage.NewMemoryStorage()
+	}
 
 	if cfg.errorHandler == nil {
 		cfg.errorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -213,6 +225,7 @@ func NewPageServer(
 		errorHandler: cfg.errorHandler,
 		cacheBlob:    cfg.cacheBlob,
 		cacheBlobTTL: cfg.cacheBlobTTL,
+		storage:      cfg.storage,
 		event:        cfg.event,
 		updateHub:    updateHub,
 		auth:         cfg.authService,
@@ -301,6 +314,10 @@ func (s *Server) servePage(writer *utils.WrittenResponseWriter, request *http.Re
 		return err
 	}
 	defer releaseUpdate()
+	repoStorage := s.storage.Child("repo", meta.Owner, meta.Repo)
+	if err = repoStorage.MkdirAll(".", 0o755); err != nil {
+		return err
+	}
 	filterCtx := core.FilterContext{
 		PageContent:  meta,
 		Context:      cancelCtx,
@@ -308,6 +325,7 @@ func (s *Server) servePage(writer *utils.WrittenResponseWriter, request *http.Re
 		Cache:        tools.NewTTLCache(s.cacheBlob.Child("filter", meta.Owner, meta.Repo, meta.CommitID), s.cacheBlobTTL),
 		OrgDB:        s.userDB.Child("org", meta.Owner),
 		RepoDB:       s.userDB.Child("repo", meta.Owner, meta.Repo),
+		Storage:      repoStorage,
 		VersionEvent: s.event.Child("version", meta.Owner, meta.Repo, meta.CommitID),
 		SharedEvent:  s.event.Child("shared", meta.Owner, meta.Repo),
 		Auth:         core.AuthInfoFromContext(request.Context()),

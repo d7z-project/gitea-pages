@@ -16,6 +16,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
 	"gopkg.d7z.net/middleware/kv"
+	"gopkg.d7z.net/middleware/storage"
 	"gopkg.d7z.net/middleware/subscribe"
 	"gopkg.in/yaml.v3"
 )
@@ -38,10 +39,10 @@ func init() {
 	flag.StringVar(&domain, "domain", domain, "domain")
 	flag.StringVar(&path, "path", path, "path")
 	flag.StringVar(&port, "port", port, "port")
-	flag.Parse()
 }
 
 func main() {
+	flag.Parse()
 	if stat, err := os.Stat(path); err != nil || !stat.IsDir() {
 		slog.Error("path is not a directory", "path", path, "error", err)
 		os.Exit(1)
@@ -73,10 +74,12 @@ func main() {
 		os.Exit(1)
 	}
 	subscriber := subscribe.NewMemorySubscriber()
+	fileStorage := storage.NewMemoryStorage()
 	server, err := pkg.NewPageServer(
 		provider, domain, db, userDB,
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(subscriber),
+		pkg.WithStorage(fileStorage),
 		pkg.WithMetaCache(db, 0, 0, 0),
 		pkg.WithBlobCache(&nopCache{}, 0),
 		pkg.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {

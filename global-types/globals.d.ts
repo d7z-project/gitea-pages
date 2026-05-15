@@ -114,6 +114,85 @@ declare global {
         readTextSync(path: string): string;
     }
 
+    type StorageEncoding = "utf8";
+
+    interface StorageStat {
+        name: string;
+        path: string;
+        size: number;
+        mode?: number;
+        modTime?: string;
+        isFile(): boolean;
+        isDirectory(): boolean;
+    }
+
+    interface StorageDirent {
+        name: string;
+        path: string;
+        isFile(): boolean;
+        isDirectory(): boolean;
+    }
+
+    interface StorageReadFileOptions {
+        encoding?: StorageEncoding;
+    }
+
+    interface StorageWriteFileOptions {
+        encoding?: StorageEncoding;
+        mode?: number;
+        append?: boolean;
+        mkdir?: boolean;
+    }
+
+    interface StorageMkdirOptions {
+        recursive?: boolean;
+        mode?: number;
+    }
+
+    interface StorageReaddirOptions {
+        withFileTypes?: boolean;
+        recursive?: boolean;
+    }
+
+    interface StorageRmOptions {
+        recursive?: boolean;
+        force?: boolean;
+    }
+
+    interface StorageRenameOptions {
+        overwrite?: boolean;
+    }
+
+    interface StorageNamespace {
+        child(...paths: string[]): StorageNamespace;
+        access(path: string): Promise<void>;
+        accessSync(path: string): void;
+        exists(path: string): Promise<boolean>;
+        existsSync(path: string): boolean;
+        stat(path: string): Promise<StorageStat>;
+        statSync(path: string): StorageStat;
+        lstat(path: string): Promise<StorageStat>;
+        lstatSync(path: string): StorageStat;
+        readdir(path?: string, options?: StorageReaddirOptions): Promise<string[] | StorageDirent[]>;
+        readdirSync(path?: string, options?: StorageReaddirOptions): string[] | StorageDirent[];
+        readFile(path: string, options?: StorageReadFileOptions | StorageEncoding): Promise<Uint8Array | string>;
+        readFileSync(path: string, options?: StorageReadFileOptions | StorageEncoding): Uint8Array | string;
+        writeFile(path: string, data: string | Uint8Array | ArrayBuffer, options?: StorageWriteFileOptions): Promise<void>;
+        writeFileSync(path: string, data: string | Uint8Array | ArrayBuffer, options?: StorageWriteFileOptions): void;
+        appendFile(path: string, data: string | Uint8Array | ArrayBuffer, options?: Omit<StorageWriteFileOptions, "append">): Promise<void>;
+        appendFileSync(path: string, data: string | Uint8Array | ArrayBuffer, options?: Omit<StorageWriteFileOptions, "append">): void;
+        mkdir(path: string, options?: StorageMkdirOptions): Promise<void>;
+        mkdirSync(path: string, options?: StorageMkdirOptions): void;
+        rm(path: string, options?: StorageRmOptions): Promise<void>;
+        rmSync(path: string, options?: StorageRmOptions): void;
+        unlink(path: string): Promise<void>;
+        unlinkSync(path: string): void;
+        rename(oldPath: string, newPath: string, options?: StorageRenameOptions): Promise<void>;
+        renameSync(oldPath: string, newPath: string, options?: StorageRenameOptions): void;
+        copyFile(src: string, dest: string): Promise<void>;
+        copyFileSync(src: string, dest: string): void;
+    }
+
     interface KVListResult {
         keys: string[];
         items: { key: string; value: string }[];
@@ -157,7 +236,14 @@ declare global {
     }
 
     const page: PageHost;
+    /**
+     * Read-only page source files from the current commit.
+     */
     const fs: PageFS;
+    /**
+     * Read-write repo-scoped storage isolated to the current repo.
+     */
+    const storage: StorageNamespace;
     const kv: KVSystem;
     /**
      * Broadcast events shared across page versions in the same repo.

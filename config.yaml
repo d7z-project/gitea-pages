@@ -16,6 +16,9 @@ user_db:
 # 事件传递配置
 event:
   url: "memory://"
+# goja storage 配置，按 repo 做隔离
+storage:
+  url: "memory://"
 provider:
   type: gitea
   gitea:

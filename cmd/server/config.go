@@ -29,7 +29,8 @@ type Config struct {
 	UserDB         ConfigDatabase `yaml:"user_db"`  // 用户脚本使用的存储
 	LegacyDatabase ConfigDatabase `yaml:"database"` // 兼容旧配置
 
-	Event ConfigEvent `yaml:"event"` // 事件传递
+	Event   ConfigEvent   `yaml:"event"`   // 事件传递
+	Storage ConfigStorage `yaml:"storage"` // goja 文件存储
 
 	Provider ConfigProvider `yaml:"provider"` // 内容 Provider 配置
 
@@ -120,6 +121,9 @@ type ConfigDatabase struct {
 type ConfigEvent struct {
 	URL string `yaml:"url"`
 }
+type ConfigStorage struct {
+	URL string `yaml:"url"`
+}
 
 type ConfigCache struct {
 	Meta                  string        `yaml:"meta"`                    // 元数据缓存
@@ -178,6 +182,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if c.Event.URL == "" {
 		c.Event.URL = "memory://"
+	}
+	if c.Storage.URL == "" {
+		c.Storage.URL = "memory://"
 	}
 	if c.StaticDir != "" {
 		stat, err := os.Stat(c.StaticDir)

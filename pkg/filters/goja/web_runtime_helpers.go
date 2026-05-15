@@ -85,6 +85,14 @@ func objectInt64(obj *goja.Object, key string) (int64, bool) {
 	return value.ToInteger(), true
 }
 
+func objectBool(obj *goja.Object, key string) (bool, bool) {
+	value, ok := objectValue(obj, key)
+	if !ok {
+		return false, false
+	}
+	return value.ToBoolean(), true
+}
+
 func installTextCodecs(vm *goja.Runtime) error {
 	encoder := func(call goja.ConstructorCall) *goja.Object {
 		obj := vm.NewObject()

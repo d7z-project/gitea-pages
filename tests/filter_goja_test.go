@@ -17,17 +17,15 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg"
 	testcore "gopkg.d7z.net/gitea-pages/tests/core"
 	"gopkg.d7z.net/middleware/kv"
+	mwstorage "gopkg.d7z.net/middleware/storage"
 )
 
 func newGoJaTestServer(script string, routePath ...string) *testcore.TestServer {
 	return newGoJaTestServerWithFilterConfig(script, nil, routePath...)
 }
 
-func newGoJaTestServerWithFilterConfig(script string, filterConfig map[string]map[string]any, routePath ...string) *testcore.TestServer {
-	server := testcore.NewDefaultTestServer()
-	if filterConfig != nil {
-		server = testcore.NewTestServerOptions("example.com", pkg.WithFilterConfig(filterConfig))
-	}
+func newGoJaTestServerWithOptions(script string, options []pkg.ServerOption, routePath ...string) *testcore.TestServer {
+	server := testcore.NewTestServerOptions("example.com", options...)
 	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
 	server.AddFile("org1/repo1/gh-pages/index.js", "%s", script)
 	path := "**"
@@ -41,6 +39,26 @@ routes:
     exec: "index.js"
 `, path)
 	return server
+}
+
+func newGoJaTestServerWithFilterConfig(script string, filterConfig map[string]map[string]any, routePath ...string) *testcore.TestServer {
+	options := make([]pkg.ServerOption, 0, 1)
+	if filterConfig != nil {
+		options = append(options, pkg.WithFilterConfig(filterConfig))
+	}
+	return newGoJaTestServerWithOptions(script, options, routePath...)
+}
+
+func addGoJaRepo(server *testcore.TestServer, repo, routePath, script string) {
+	base := "org1/" + repo + "/gh-pages/"
+	server.AddFile(base+"index.html", "hello world")
+	server.AddFile(base+"index.js", "%s", script)
+	server.AddFile(base+".pages.yaml", `
+routes:
+- path: %q
+  js:
+    exec: "index.js"
+`, routePath)
 }
 
 func Test_GoJa_HandlerResponse(t *testing.T) {
@@ -107,8 +125,7 @@ routes:
 	defer httpServer.Close()
 
 	resp, err := http.Get(httpServer.URL + "/repo1/api/v1/fetch?q=ok")
-	assert.NoError(t, err)
-	if err != nil {
+	if !assert.NoError(t, err) {
 		return
 	}
 	defer resp.Body.Close()
@@ -141,7 +158,7 @@ routes:
 	req.RemoteAddr = "127.0.0.1:1234"
 	req.Header.Set("X-Forwarded-For", "198.51.100.10, 10.0.0.1")
 	respBody, resp, err := server.Do(req)
-	if err != nil {
+	if !assert.NoError(t, err) {
 		return
 	}
 	assert.Equal(t, 200, resp.StatusCode)
@@ -174,8 +191,7 @@ serve(async function(request) {
 	defer httpServer.Close()
 
 	resp, err := http.Post(httpServer.URL+"/repo1/api/v1/fetch", "text/plain", strings.NewReader(strings.Repeat("a", (4<<20)+1)))
-	assert.NoError(t, err)
-	if err != nil {
+	if !assert.NoError(t, err) {
 		return
 	}
 	defer resp.Body.Close()
@@ -236,6 +252,180 @@ serve(async function() {
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/io")
 	assert.NoError(t, err)
 	assert.JSONEq(t, `{"syncText":"alpha","asyncText":"beta","syncBytes":"alpha","asyncBytes":"beta"}`, string(data))
+}
+
+func Test_GoJa_StorageReadWriteAndDirOps(t *testing.T) {
+	store := mwstorage.NewMemoryStorage()
+	server := newGoJaTestServerWithOptions(`
+serve(async function() {
+  await storage.mkdir("docs", { recursive: true })
+  await storage.writeFile("docs/a.txt", "a")
+  storage.writeFileSync("docs/b.txt", "b")
+  await storage.appendFile("docs/a.txt", "1")
+  storage.appendFileSync("docs/b.txt", "2")
+  const nested = storage.child("nested")
+  await nested.writeFile("c.txt", "c", { mkdir: true })
+  await storage.copyFile("docs/a.txt", "docs/copy.txt")
+  await storage.rename("docs/copy.txt", "docs/final.txt")
+
+  const text = await storage.readFile("docs/a.txt", "utf8")
+  const syncText = storage.readFileSync("docs/b.txt", "utf8")
+  const entries = await storage.readdir("docs", { withFileTypes: true })
+  const names = storage.readdirSync("docs").slice().sort()
+  const recursive = storage.readdirSync(".", { recursive: true }).slice().sort()
+  const stat = await storage.stat("docs/final.txt")
+
+  return Response.json({
+    text,
+    syncText,
+    names,
+    recursive,
+    entryKinds: entries.map(item => ({ name: item.name, file: item.isFile(), dir: item.isDirectory() })).sort((a, b) => a.name.localeCompare(b.name)),
+    stat: {
+      path: stat.path,
+      file: stat.isFile(),
+      dir: stat.isDirectory(),
+      size: stat.size
+    }
+  })
+})
+`, []pkg.ServerOption{pkg.WithStorage(store)}, "api/v1/**")
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/storage")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{
+		"text":"a1",
+		"syncText":"b2",
+		"names":["a.txt","b.txt","final.txt"],
+		"recursive":["docs","docs/a.txt","docs/b.txt","docs/final.txt","nested","nested/c.txt"],
+		"entryKinds":[
+			{"name":"a.txt","file":true,"dir":false},
+			{"name":"b.txt","file":true,"dir":false},
+			{"name":"final.txt","file":true,"dir":false}
+		],
+		"stat":{"path":"docs/final.txt","file":true,"dir":false,"size":2}
+	}`, string(data))
+
+	file, err := store.Child("repo", "org1", "repo1").Open("nested/c.txt")
+	assert.NoError(t, err)
+	defer file.Close()
+	fileData, readErr := io.ReadAll(file)
+	assert.NoError(t, readErr)
+	assert.Equal(t, "c", string(fileData))
+}
+
+func Test_GoJa_StorageIsolationBetweenRepos(t *testing.T) {
+	store := mwstorage.NewMemoryStorage()
+	server := testcore.NewTestServerOptions("example.com", pkg.WithStorage(store))
+	defer server.Close()
+	addGoJaRepo(server, "repo1", "api/**", `
+serve(async function() {
+  await storage.writeFile("shared.txt", "repo1")
+  return http.json({ ok: true })
+})
+`)
+	addGoJaRepo(server, "repo2", "api/**", `
+serve(async function() {
+  return http.json({
+    exists: storage.existsSync("shared.txt"),
+    root: storage.readdirSync()
+  })
+})
+`)
+
+	_, _, err := server.OpenFile("https://org1.example.com/repo1/api/write")
+	assert.NoError(t, err)
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo2/api/check")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"exists":false,"root":[]}`, string(data))
+}
+
+func Test_GoJa_StorageRejectsPathEscape(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  const errors = []
+  try {
+    await storage.readFile("../bad.txt", "utf8")
+  } catch (err) {
+    errors.push(String(err))
+  }
+  try {
+    storage.child("..").writeFileSync("x.txt", "blocked")
+  } catch (err) {
+    errors.push(String(err))
+  }
+  return Response.json({ errors })
+})
+`, "api/v1/**")
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/escape")
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), "storage: invalid child path")
+}
+
+func Test_GoJa_StorageRemoveAndExists(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  await storage.writeFile("tmp/a.txt", "1", { mkdir: true })
+  await storage.writeFile("tmp/b.txt", "2", { mkdir: true })
+  await storage.rm("tmp/a.txt")
+  storage.rmSync("tmp/b.txt")
+  await storage.writeFile("tmp/c.txt", "3", { mkdir: true })
+  storage.unlinkSync("tmp/c.txt")
+  return Response.json({
+    a: await storage.exists("tmp/a.txt"),
+    b: storage.existsSync("tmp/b.txt"),
+    c: storage.existsSync("tmp/c.txt")
+  })
+})
+`, "api/v1/**")
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/remove")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"a":false,"b":false,"c":false}`, string(data))
+}
+
+func Test_GoJa_StorageExample(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function(request) {
+  const pathname = new URL(request.url).pathname
+
+  if (pathname.endsWith("/write")) {
+    const current = await storage.exists("hello.txt")
+      ? await storage.readFile("hello.txt", "utf8")
+      : ""
+    const next = current ? current + "\nupdated" : "created"
+    await storage.writeFile("hello.txt", next)
+  }
+
+  const exists = await storage.exists("hello.txt")
+  const content = exists ? await storage.readFile("hello.txt", "utf8") : ""
+  const files = exists ? storage.readdirSync().sort() : []
+
+  return Response.json({
+    exists,
+    content,
+    files,
+  })
+})
+`, "storage*")
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/storage")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"exists":false,"content":"","files":[]}`, string(data))
+
+	data, _, err = server.OpenFile("https://org1.example.com/repo1/storage/write")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"exists":true,"content":"created","files":["hello.txt"]}`, string(data))
+
+	data, _, err = server.OpenFile("https://org1.example.com/repo1/storage/write")
+	assert.NoError(t, err)
+	assert.JSONEq(t, "{\"exists\":true,\"content\":\"created\\nupdated\",\"files\":[\"hello.txt\"]}", string(data))
 }
 
 func Test_GoJa_HostAuth(t *testing.T) {
@@ -475,8 +665,7 @@ routes:
 	defer httpServer.Close()
 
 	resp, err := http.Get(httpServer.URL + "/repo1/fetch")
-	assert.NoError(t, err)
-	if err != nil {
+	if !assert.NoError(t, err) {
 		return
 	}
 	defer resp.Body.Close()
@@ -902,8 +1091,7 @@ routes:
 
 	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/repo1/ws"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	assert.NoError(t, err)
-	if err != nil {
+	if !assert.NoError(t, err) {
 		return
 	}
 	defer conn.Close()
@@ -975,15 +1163,13 @@ routes:
 
 	baseURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/repo1/event"
 	connA, _, err := websocket.DefaultDialer.Dial(baseURL+"?name=a", nil)
-	assert.NoError(t, err)
-	if err != nil {
+	if !assert.NoError(t, err) {
 		return
 	}
 	defer connA.Close()
 
 	connB, _, err := websocket.DefaultDialer.Dial(baseURL+"?name=b", nil)
-	assert.NoError(t, err)
-	if err != nil {
+	if !assert.NoError(t, err) {
 		return
 	}
 	defer connB.Close()
@@ -1082,8 +1268,7 @@ routes:
 	defer httpServer.Close()
 
 	resp, err := http.Get(httpServer.URL + "/repo1/sse")
-	assert.NoError(t, err)
-	if err != nil {
+	if !assert.NoError(t, err) {
 		return
 	}
 	defer resp.Body.Close()

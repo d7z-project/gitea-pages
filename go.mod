@@ -14,7 +14,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
-	gopkg.d7z.net/middleware v0.0.0-20260514085607-d94039d9b5f2
+	gopkg.d7z.net/middleware v0.0.0-20260515093549-33fda6754769
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -45,6 +45,7 @@ require (
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/onsi/gomega v1.36.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/spf13/afero v1.15.0 // indirect
 	go.etcd.io/etcd/api/v3 v3.6.11 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.6.11 // indirect
 	go.etcd.io/etcd/client/v3 v3.6.11 // indirect
@@ -60,6 +61,6 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260511170946-3700d4141b60 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260511170946-3700d4141b60 // indirect
-	google.golang.org/grpc v1.81.0 // indirect
+	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )

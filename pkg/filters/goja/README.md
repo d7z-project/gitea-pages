@@ -43,6 +43,7 @@ Host APIs:
 
 - `page.meta`
 - `page.auth`
+- `storage.*`
 - `fs.list(path?)`
 - `kv.repo(...group)`
 - `kv.org(...group)`
@@ -60,6 +61,10 @@ Host APIs:
 `event.load(key)` and `versionEvent.load(key)` wait for the next broadcast event on the key. They do not read a current value and they do not provide event history.
 
 Each request keeps a live subscription per event key. If the local backlog overflows, `load(key)` rejects with `event backlog overflow`. A later `load(key)` call can establish a fresh subscription and continue receiving new events.
+
+`storage.*` is a read-write repo-scoped filesystem rooted at the current repo. It follows a Node.js-style `fs` / `fs.promises` API with both async methods such as `storage.readFile(...)` and sync methods such as `storage.readFileSync(...)`.
+
+`fs.*` remains a read-only view of the current page commit source tree.
 
 `fetch` only allows `http` and `https`. When private-network blocking is enabled, fetch dials validated public IPs directly and does not use proxies.
 
@@ -160,6 +165,7 @@ See:
 
 - [examples/js_hello_world](../../../examples/js_hello_world)
 - [examples/js_kv](../../../examples/js_kv)
+- [examples/js_storage](../../../examples/js_storage)
 - [examples/js_ws](../../../examples/js_ws)
 - [examples/js_ws_event](../../../examples/js_ws_event)
 - [examples/js_sse](../../../examples/js_sse)

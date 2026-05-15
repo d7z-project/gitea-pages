@@ -69,7 +69,7 @@ func initRuntime(
 	if err := installFetch(ctx, vm, jsLoop, sharedClient, global.Fetch, runtime); err != nil {
 		return nil, err
 	}
-	_, err := installHostGlobals(ctx, vm, jsLoop, global.FS.Enabled, global.Realtime.EventBuffer, runtime)
+	_, err := installHostGlobals(ctx, vm, jsLoop, global.Realtime.EventBuffer, runtime)
 	if err != nil {
 		return nil, err
 	}

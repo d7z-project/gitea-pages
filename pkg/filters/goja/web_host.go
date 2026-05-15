@@ -37,7 +37,6 @@ func installHostGlobals(
 	ctx core.FilterContext,
 	vm *goja.Runtime,
 	loop *eventloop.EventLoop,
-	fsEnabled bool,
 	eventPendingLimit int,
 	runtime *runtimeState,
 ) (*goja.Object, error) {
@@ -59,79 +58,80 @@ func installHostGlobals(
 	}); err != nil {
 		return nil, err
 	}
-	if fsEnabled {
-		if err := vm.Set("fs", map[string]any{
-			"list": func(path ...string) (goja.Value, error) {
-				target := ""
-				if len(path) > 0 {
-					target = path[0]
+	if err := vm.Set("fs", map[string]any{
+		"list": func(path ...string) (goja.Value, error) {
+			target := ""
+			if len(path) > 0 {
+				target = path[0]
+			}
+			list, err := ctx.PageVFS.List(ctx, target)
+			if err != nil {
+				return nil, err
+			}
+			items := make([]map[string]any, len(list))
+			for i, item := range list {
+				items[i] = map[string]any{
+					"name": item.Name,
+					"path": item.Path,
+					"type": item.Type,
+					"size": item.Size,
 				}
-				list, err := ctx.PageVFS.List(ctx, target)
-				if err != nil {
-					return nil, err
-				}
-				items := make([]map[string]any, len(list))
-				for i, item := range list {
-					items[i] = map[string]any{
-						"name": item.Name,
-						"path": item.Path,
-						"type": item.Type,
-						"size": item.Size,
-					}
-				}
-				return vm.ToValue(items), nil
-			},
-			"read": func(path string) *goja.Promise {
-				promise, resolve, reject := vm.NewPromise()
-				if !runtime.startTask() {
-					_ = reject(vm.ToValue(errRuntimeClosing))
-					return promise
-				}
-				go func() {
-					defer runtime.finishTask()
-					data, err := ctx.PageVFS.Read(ctx, path)
-					runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-						if err != nil {
-							_ = reject(vm.ToValue(err))
-							return
-						}
-						_ = resolve(uint8ArrayValue(vm, data))
-					})
-				}()
+			}
+			return vm.ToValue(items), nil
+		},
+		"read": func(path string) *goja.Promise {
+			promise, resolve, reject := vm.NewPromise()
+			if !runtime.startTask() {
+				_ = reject(vm.ToValue(errRuntimeClosing))
 				return promise
-			},
-			"readText": func(path string) *goja.Promise {
-				promise, resolve, reject := vm.NewPromise()
-				if !runtime.startTask() {
-					_ = reject(vm.ToValue(errRuntimeClosing))
-					return promise
-				}
-				go func() {
-					defer runtime.finishTask()
-					data, err := ctx.PageVFS.ReadString(ctx, path)
-					runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-						if err != nil {
-							_ = reject(vm.ToValue(err))
-							return
-						}
-						_ = resolve(vm.ToValue(data))
-					})
-				}()
-				return promise
-			},
-			"readSync": func(path string) (goja.Value, error) {
+			}
+			go func() {
+				defer runtime.finishTask()
 				data, err := ctx.PageVFS.Read(ctx, path)
-				if err != nil {
-					return nil, err
-				}
-				return uint8ArrayValue(vm, data), nil
-			},
-			"readTextSync": func(path string) (string, error) {
-				return ctx.PageVFS.ReadString(ctx, path)
-			},
-		}); err != nil {
-			return nil, err
-		}
+				runtime.runOnLoop(loop, func(vm *goja.Runtime) {
+					if err != nil {
+						_ = reject(vm.ToValue(err))
+						return
+					}
+					_ = resolve(uint8ArrayValue(vm, data))
+				})
+			}()
+			return promise
+		},
+		"readText": func(path string) *goja.Promise {
+			promise, resolve, reject := vm.NewPromise()
+			if !runtime.startTask() {
+				_ = reject(vm.ToValue(errRuntimeClosing))
+				return promise
+			}
+			go func() {
+				defer runtime.finishTask()
+				data, err := ctx.PageVFS.ReadString(ctx, path)
+				runtime.runOnLoop(loop, func(vm *goja.Runtime) {
+					if err != nil {
+						_ = reject(vm.ToValue(err))
+						return
+					}
+					_ = resolve(vm.ToValue(data))
+				})
+			}()
+			return promise
+		},
+		"readSync": func(path string) (goja.Value, error) {
+			data, err := ctx.PageVFS.Read(ctx, path)
+			if err != nil {
+				return nil, err
+			}
+			return uint8ArrayValue(vm, data), nil
+		},
+		"readTextSync": func(path string) (string, error) {
+			return ctx.PageVFS.ReadString(ctx, path)
+		},
+	}); err != nil {
+		return nil, err
+	}
+	if err := vm.Set("storage", newStorageAPI(vm, loop, runtime, ctx.Storage)); err != nil {
+		return nil, err
 	}
 	if err := vm.Set("kv", map[string]any{
 		"repo": func(group ...string) (goja.Value, error) {
