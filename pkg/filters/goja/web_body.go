@@ -32,7 +32,7 @@ func newBodyState(data []byte, headers http.Header, used *bool) *webBodyState {
 		contentType = headers.Get("Content-Type")
 	}
 	return &webBodyState{
-		data:        append([]byte(nil), data...),
+		data:        data,
 		contentType: contentType,
 		used:        used,
 	}

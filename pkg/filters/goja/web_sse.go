@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/pkg/errors"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
@@ -20,6 +21,8 @@ type sseMessage struct {
 
 type sseState struct {
 	ctx       core.FilterContext
+	runtime   *runtimeState
+	loop      *eventloop.EventLoop
 	ready     chan struct{}
 	done      chan struct{}
 	queue     chan sseMessage
@@ -27,11 +30,13 @@ type sseState struct {
 	closeOnce sync.Once
 }
 
-func installSSE(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWriter) (io.Closer, error) {
+func installSSE(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWriter, loop *eventloop.EventLoop, runtime *runtimeState) (io.Closer, error) {
 	closers := NewClosers()
 	if err := vm.Set("createEventStream", func(_ ...goja.Value) *goja.Object {
 		state := &sseState{
 			ctx:     ctx,
+			runtime: runtime,
+			loop:    loop,
 			ready:   make(chan struct{}),
 			done:    make(chan struct{}),
 			queue:   make(chan sseMessage),
@@ -100,13 +105,20 @@ func newSSEStreamObject(vm *goja.Runtime, state *sseState) *goja.Object {
 	_ = obj.Set("send", func(data string, options ...goja.Value) *goja.Promise {
 		promise, resolve, reject := vm.NewPromise()
 		settle := func(err error) {
-			if err != nil {
-				_ = reject(vm.ToValue(err.Error()))
-				return
-			}
-			_ = resolve(goja.Undefined())
+			state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
+				if err != nil {
+					_ = reject(vm.ToValue(err.Error()))
+					return
+				}
+				_ = resolve(goja.Undefined())
+			})
+		}
+		if !state.runtime.startTask() {
+			_ = reject(vm.ToValue(errRuntimeClosing.Error()))
+			return promise
 		}
 		go func() {
+			defer state.runtime.finishTask()
 			select {
 			case <-state.ready:
 			case <-state.ctx.Done():

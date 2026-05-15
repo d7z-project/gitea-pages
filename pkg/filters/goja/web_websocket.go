@@ -16,6 +16,7 @@ import (
 type webSocketState struct {
 	loop      *eventloop.EventLoop
 	vm        *goja.Runtime
+	runtime   *runtimeState
 	ctx       core.FilterContext
 	conn      *websocket.Conn
 	connMu    sync.RWMutex
@@ -29,12 +30,13 @@ type webSocketState struct {
 	onclose   goja.Callable
 }
 
-func installWebSocket(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWriter, request *http.Request, loop *eventloop.EventLoop) (io.Closer, error) {
+func installWebSocket(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWriter, request *http.Request, loop *eventloop.EventLoop, runtime *runtimeState) (io.Closer, error) {
 	closers := NewClosers()
 	if err := vm.Set("upgradeWebSocket", func(_ ...goja.Value) (*goja.Object, error) {
 		socketState := &webSocketState{
 			loop:      loop,
 			vm:        vm,
+			runtime:   runtime,
 			ctx:       ctx,
 			done:      make(chan struct{}),
 			listeners: make(map[string][]goja.Callable),
@@ -100,19 +102,24 @@ func newWebSocketObject(vm *goja.Runtime, state *webSocketState) *goja.Object {
 	})
 	_ = obj.Set("send", func(data goja.Value) *goja.Promise {
 		promise, resolve, reject := vm.NewPromise()
+		if !state.runtime.startTask() {
+			_ = reject(vm.ToValue(errRuntimeClosing))
+			return promise
+		}
 		go func() {
+			defer state.runtime.finishTask()
 			conn, ok := state.currentConn()
 			if !ok {
-				state.loop.RunOnLoop(func(runtime *goja.Runtime) {
-					_ = reject(runtime.ToValue("websocket is not open"))
+				state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
+					_ = reject(vm.ToValue("websocket is not open"))
 				})
 				return
 			}
 			messageType := websocket.TextMessage
 			payload, err := bodyBytesFromValue(vm, data)
 			if err != nil {
-				state.loop.RunOnLoop(func(runtime *goja.Runtime) {
-					_ = reject(runtime.ToValue(err))
+				state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
+					_ = reject(vm.ToValue(err))
 				})
 				return
 			}
@@ -124,9 +131,9 @@ func newWebSocketObject(vm *goja.Runtime, state *webSocketState) *goja.Object {
 			state.writeMu.Lock()
 			err = conn.WriteMessage(messageType, payload)
 			state.writeMu.Unlock()
-			state.loop.RunOnLoop(func(runtime *goja.Runtime) {
+			state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
 				if err != nil {
-					_ = reject(runtime.ToValue(err))
+					_ = reject(vm.ToValue(err))
 					return
 				}
 				_ = resolve(goja.Undefined())
@@ -135,17 +142,11 @@ func newWebSocketObject(vm *goja.Runtime, state *webSocketState) *goja.Object {
 		return promise
 	})
 	_ = obj.Set("close", func(code ...int) {
-		conn, ok := state.currentConn()
-		if !ok {
-			state.finish()
-			return
-		}
 		closeCode := websocket.CloseNormalClosure
 		if len(code) > 0 {
 			closeCode = code[0]
 		}
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(closeCode, ""), time.Now().Add(5*time.Second))
-		_ = conn.Close()
+		state.closeConn(closeCode)
 		state.finish()
 	})
 	_ = obj.DefineAccessorProperty("onopen", vm.ToValue(func() goja.Value {
@@ -185,16 +186,22 @@ func newWebSocketObject(vm *goja.Runtime, state *webSocketState) *goja.Object {
 
 func (s *webSocketState) start() {
 	s.dispatch("open", nil)
-	go s.pingLoop()
-	go s.readLoop()
+	if s.runtime.startTask() {
+		go s.pingLoop()
+	}
+	if s.runtime.startTask() {
+		go s.readLoop()
+	}
 }
 
 func (s *webSocketState) pingLoop() {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
+	defer s.runtime.finishTask()
 	for {
 		select {
 		case <-s.ctx.Done():
+			s.closeConn(websocket.CloseGoingAway)
 			s.finish()
 			return
 		case <-s.done:
@@ -208,6 +215,7 @@ func (s *webSocketState) pingLoop() {
 				slog.Debug("websocket ping failed", "error", err)
 				s.dispatch("error", map[string]any{"error": err.Error()})
 				s.ctx.Kill()
+				s.closeConn(websocket.CloseAbnormalClosure)
 				s.finish()
 				return
 			}
@@ -216,6 +224,7 @@ func (s *webSocketState) pingLoop() {
 }
 
 func (s *webSocketState) readLoop() {
+	defer s.runtime.finishTask()
 	defer s.finish()
 	for {
 		conn, ok := s.currentConn()
@@ -248,9 +257,18 @@ func (s *webSocketState) finish() {
 	})
 }
 
+func (s *webSocketState) closeConn(code int) {
+	conn, ok := s.currentConn()
+	if !ok {
+		return
+	}
+	_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, ""), time.Now().Add(5*time.Second))
+	_ = conn.Close()
+}
+
 func (s *webSocketState) dispatch(name string, payload map[string]any) {
-	s.loop.RunOnLoop(func(runtime *goja.Runtime) {
-		event := runtime.NewObject()
+	s.runtime.runOnLoop(s.loop, func(vm *goja.Runtime) {
+		event := vm.NewObject()
 		for key, value := range payload {
 			_ = event.Set(key, value)
 		}

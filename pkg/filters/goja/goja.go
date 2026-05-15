@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
@@ -16,6 +17,12 @@ import (
 )
 
 var programCache *lru.Cache[string, *goja.Program]
+
+const (
+	defaultRequestBodyLimit int64 = 4 << 20
+	defaultFetchBodyLimit   int64 = 4 << 20
+	runtimeShutdownTimeout        = 2 * time.Second
+)
 
 type FetchConfig struct {
 	Enabled              bool     `json:"enabled"`
@@ -61,6 +68,8 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	global.Realtime.SSE = true
 	global.Realtime.EventBuffer = defaultEventPendingLimit
 	global.Fetch.Enabled = true
+	global.Fetch.MaxResponseBodyBytes = defaultFetchBodyLimit
+	global.Request.MaxBodyBytes = defaultRequestBodyLimit
 	global.FS.Enabled = true
 	if err := gl.Unmarshal(&global); err != nil {
 		return nil, err
@@ -97,7 +106,6 @@ func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 			defer jsLoop.Stop()
 
 			closers := NewClosers()
-			defer closers.Close()
 
 			return debug.Flush(runProgram(ctx, jsLoop, program, request, w, global, sharedClient, debug, closers))
 		}, nil
@@ -129,6 +137,13 @@ func runProgram(
 	debug *DebugData,
 	closers *Closers,
 ) error {
+	runtime := &runtimeState{}
+	defer func() {
+		runtime.beginClosing()
+		_ = closers.Close()
+		_ = runtime.wait(runtimeShutdownTimeout)
+	}()
+
 	resultCh := make(chan error, 1)
 	var once sync.Once
 	finish := func(err error) {
@@ -140,11 +155,13 @@ func runProgram(
 	jsLoop.RunOnLoop(func(vm *goja.Runtime) {
 		go func() {
 			<-ctx.Done()
+			runtime.beginClosing()
+			_ = closers.Close()
 			vm.Interrupt("context done")
 			finish(ctx.Err())
 		}()
 
-		requestObj, err := initRuntime(ctx, vm, request, global, sharedClient, debug, closers, jsLoop)
+		requestObj, err := initRuntime(ctx, vm, request, global, sharedClient, debug, closers, jsLoop, runtime)
 		if err != nil {
 			finish(errors.Join(err, errors.New("js init failed")))
 			return

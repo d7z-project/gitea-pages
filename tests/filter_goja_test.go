@@ -164,6 +164,30 @@ serve(async function(request) {
 	assert.Equal(t, "payload", string(data))
 }
 
+func Test_GoJa_RequestBodyDefaultLimit(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function(request) {
+  return new Response(await request.text())
+})
+`, "api/v1/**")
+	defer server.Close()
+
+	httpServer := server.StartHTTPServer("org1.example.com")
+	defer httpServer.Close()
+
+	resp, err := http.Post(httpServer.URL+"/repo1/api/v1/fetch", "text/plain", strings.NewReader(strings.Repeat("a", (4<<20)+1)))
+	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	assert.Contains(t, string(body), "request body exceeds limit: 4194304")
+}
+
 func Test_GoJa_GiteaPagesFS(t *testing.T) {
 	server := testcore.NewDefaultTestServer()
 	defer server.Close()
@@ -425,6 +449,44 @@ routes:
 	assert.NoError(t, err)
 	assert.Equal(t, "fetched-content", string(data))
 	assert.Equal(t, "test-header", resp.Header.Get("X-Fetched-Header"))
+}
+
+func Test_GoJa_FetchDefaultResponseBodyLimit(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("b", (4<<20)+1)))
+	}))
+	defer ts.Close()
+
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(async function() {
+  const res = await fetch('%s')
+  return new Response(await res.text())
+})
+`, ts.URL)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "**"
+  js:
+    exec: "index.js"
+`)
+
+	httpServer := server.StartHTTPServer("org1.example.com")
+	defer httpServer.Close()
+
+	resp, err := http.Get(httpServer.URL + "/repo1/fetch")
+	assert.NoError(t, err)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	assert.Contains(t, string(body), "fetch response body exceeds limit")
 }
 
 func Test_GoJa_FetchRequestObject(t *testing.T) {

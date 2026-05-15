@@ -79,7 +79,7 @@ func restrictedDialContext(cfg FetchConfig, lookup lookupNetIPFunc, dial dialCon
 	}
 }
 
-func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLoop, client *http.Client, cfg FetchConfig) error {
+func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLoop, client *http.Client, cfg FetchConfig, runtime *runtimeState) error {
 	return vm.Set("fetch", func(resource goja.Value, init ...goja.Value) *goja.Promise {
 		promise, resolve, reject := vm.NewPromise()
 		if !cfg.Enabled {
@@ -102,6 +102,10 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 			_ = reject(err)
 			return promise
 		}
+		if !runtime.startTask() {
+			_ = reject(errRuntimeClosing)
+			return promise
+		}
 
 		body := io.Reader(nil)
 		if len(requestState.body) > 0 {
@@ -110,6 +114,7 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 		headers := cloneHeaderValues(requestState.headers)
 
 		go func() {
+			defer runtime.finishTask()
 			reqCtx := ctx
 			if requestState.abort != nil {
 				var cancel context.CancelFunc
@@ -126,7 +131,7 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 
 			req, err := http.NewRequestWithContext(reqCtx, requestState.method, requestState.url, body)
 			if err != nil {
-				loop.RunOnLoop(func(*goja.Runtime) {
+				runtime.runOnLoop(loop, func(*goja.Runtime) {
 					_ = reject(err)
 				})
 				return
@@ -135,7 +140,7 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 
 			resp, err := client.Do(req)
 			if err != nil {
-				loop.RunOnLoop(func(*goja.Runtime) {
+				runtime.runOnLoop(loop, func(*goja.Runtime) {
 					if requestState.abort != nil && requestState.abort.Aborted() {
 						_ = reject(errors.New("fetch aborted"))
 						return
@@ -152,20 +157,20 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 			}
 			respBody, err := io.ReadAll(reader)
 			if err != nil {
-				loop.RunOnLoop(func(*goja.Runtime) {
+				runtime.runOnLoop(loop, func(*goja.Runtime) {
 					_ = reject(err)
 				})
 				return
 			}
 			if cfg.MaxResponseBodyBytes > 0 && int64(len(respBody)) > cfg.MaxResponseBodyBytes {
-				loop.RunOnLoop(func(*goja.Runtime) {
+				runtime.runOnLoop(loop, func(*goja.Runtime) {
 					_ = reject(errors.New("fetch response body exceeds limit"))
 				})
 				return
 			}
 
-			loop.RunOnLoop(func(runtime *goja.Runtime) {
-				_ = resolve(newResponseObject(runtime, &webResponseState{
+			runtime.runOnLoop(loop, func(vm *goja.Runtime) {
+				_ = resolve(newResponseObject(vm, &webResponseState{
 					status:     resp.StatusCode,
 					statusText: http.StatusText(resp.StatusCode),
 					headers:    cloneHeaderValues(resp.Header),

@@ -22,6 +22,7 @@ func initRuntime(
 	debug *DebugData,
 	closers *Closers,
 	jsLoop *eventloop.EventLoop,
+	runtime *runtimeState,
 ) (*goja.Object, error) {
 	buffer.Enable(vm)
 	url.Enable(vm)
@@ -65,22 +66,22 @@ func initRuntime(
 	if err := installFrameworkHelpers(vm); err != nil {
 		return nil, err
 	}
-	if err := installFetch(ctx, vm, jsLoop, sharedClient, global.Fetch); err != nil {
+	if err := installFetch(ctx, vm, jsLoop, sharedClient, global.Fetch, runtime); err != nil {
 		return nil, err
 	}
-	_, err := installHostGlobals(ctx, vm, jsLoop, global.FS.Enabled, global.Realtime.EventBuffer)
+	_, err := installHostGlobals(ctx, vm, jsLoop, global.FS.Enabled, global.Realtime.EventBuffer, runtime)
 	if err != nil {
 		return nil, err
 	}
 	if global.Realtime.WebSocket {
-		closer, err := installWebSocket(ctx, vm, debug, request, jsLoop)
+		closer, err := installWebSocket(ctx, vm, debug, request, jsLoop, runtime)
 		if err != nil {
 			return nil, err
 		}
 		closers.AddCloser(closer.Close)
 	}
 	if global.Realtime.SSE {
-		closer, err := installSSE(ctx, vm, debug)
+		closer, err := installSSE(ctx, vm, debug, jsLoop, runtime)
 		if err != nil {
 			return nil, err
 		}

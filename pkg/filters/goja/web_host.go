@@ -39,6 +39,7 @@ func installHostGlobals(
 	loop *eventloop.EventLoop,
 	fsEnabled bool,
 	eventPendingLimit int,
+	runtime *runtimeState,
 ) (*goja.Object, error) {
 	if eventPendingLimit <= 0 {
 		eventPendingLimit = defaultEventPendingLimit
@@ -82,28 +83,38 @@ func installHostGlobals(
 			},
 			"read": func(path string) *goja.Promise {
 				promise, resolve, reject := vm.NewPromise()
+				if !runtime.startTask() {
+					_ = reject(vm.ToValue(errRuntimeClosing))
+					return promise
+				}
 				go func() {
+					defer runtime.finishTask()
 					data, err := ctx.PageVFS.Read(ctx, path)
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
+					runtime.runOnLoop(loop, func(vm *goja.Runtime) {
 						if err != nil {
-							_ = reject(runtime.ToValue(err))
+							_ = reject(vm.ToValue(err))
 							return
 						}
-						_ = resolve(uint8ArrayValue(runtime, data))
+						_ = resolve(uint8ArrayValue(vm, data))
 					})
 				}()
 				return promise
 			},
 			"readText": func(path string) *goja.Promise {
 				promise, resolve, reject := vm.NewPromise()
+				if !runtime.startTask() {
+					_ = reject(vm.ToValue(errRuntimeClosing))
+					return promise
+				}
 				go func() {
+					defer runtime.finishTask()
 					data, err := ctx.PageVFS.ReadString(ctx, path)
-					loop.RunOnLoop(func(runtime *goja.Runtime) {
+					runtime.runOnLoop(loop, func(vm *goja.Runtime) {
 						if err != nil {
-							_ = reject(runtime.ToValue(err))
+							_ = reject(vm.ToValue(err))
 							return
 						}
-						_ = resolve(runtime.ToValue(data))
+						_ = resolve(vm.ToValue(data))
 					})
 				}()
 				return promise
@@ -138,10 +149,10 @@ func installHostGlobals(
 	var sharedMu sync.Mutex
 	var versionMu sync.Mutex
 
-	if err := vm.Set("event", newEventAPI(ctx, vm, loop, &sharedMu, sharedStreams, ctx.SharedEvent.Subscribe, ctx.SharedEvent.Publish, eventPendingLimit)); err != nil {
+	if err := vm.Set("event", newEventAPI(ctx, vm, loop, runtime, &sharedMu, sharedStreams, ctx.SharedEvent.Subscribe, ctx.SharedEvent.Publish, eventPendingLimit)); err != nil {
 		return nil, err
 	}
-	if err := vm.Set("versionEvent", newEventAPI(ctx, vm, loop, &versionMu, versionStreams, ctx.VersionEvent.Subscribe, ctx.VersionEvent.Publish, eventPendingLimit)); err != nil {
+	if err := vm.Set("versionEvent", newEventAPI(ctx, vm, loop, runtime, &versionMu, versionStreams, ctx.VersionEvent.Subscribe, ctx.VersionEvent.Publish, eventPendingLimit)); err != nil {
 		return nil, err
 	}
 	if err := vm.Set("page", host); err != nil {
@@ -154,6 +165,7 @@ func newEventAPI(
 	ctx context.Context,
 	vm *goja.Runtime,
 	loop *eventloop.EventLoop,
+	runtime *runtimeState,
 	streamsMu *sync.Mutex,
 	streams map[string]*eventStream,
 	subscribeFn func(context.Context, string) (subscribe.Subscription, error),
@@ -193,16 +205,21 @@ func newEventAPI(
 			// Each request/key keeps one live subscription so repeated
 			// `while (true) await event.load(key)` calls do not lose broadcasts
 			// between iterations.
-			stream.await(loop, vm, resolve, reject)
+			stream.await(loop, vm, resolve, reject, runtime)
 			return promise
 		},
 		"put": func(key, value string) *goja.Promise {
 			promise, resolve, reject := vm.NewPromise()
+			if !runtime.startTask() {
+				_ = reject(vm.ToValue(errRuntimeClosing))
+				return promise
+			}
 			go func() {
+				defer runtime.finishTask()
 				err := publishFn(ctx, key, value)
-				loop.RunOnLoop(func(runtime *goja.Runtime) {
+				runtime.runOnLoop(loop, func(vm *goja.Runtime) {
 					if err != nil {
-						_ = reject(runtime.ToValue(err))
+						_ = reject(vm.ToValue(err))
 						return
 					}
 					_ = resolve(goja.Undefined())
@@ -355,6 +372,7 @@ func (s *eventStream) await(
 	vm *goja.Runtime,
 	resolve func(any) error,
 	reject func(any) error,
+	runtime *runtimeState,
 ) {
 	waiter := make(chan eventResult, 1)
 	s.mu.Lock()
@@ -380,14 +398,27 @@ func (s *eventStream) await(
 		s.waiters = append(s.waiters, waiter)
 		s.mu.Unlock()
 	}
+	if !runtime.startTask() {
+		s.mu.Lock()
+		for i, current := range s.waiters {
+			if current == waiter {
+				s.waiters = append(s.waiters[:i], s.waiters[i+1:]...)
+				break
+			}
+		}
+		s.mu.Unlock()
+		_ = reject(vm.ToValue(errRuntimeClosing))
+		return
+	}
 	go func() {
+		defer runtime.finishTask()
 		result := <-waiter
-		loop.RunOnLoop(func(runtime *goja.Runtime) {
+		runtime.runOnLoop(loop, func(vm *goja.Runtime) {
 			if result.err != nil {
-				_ = reject(runtime.ToValue(result.err))
+				_ = reject(vm.ToValue(result.err))
 				return
 			}
-			_ = resolve(runtime.ToValue(result.value))
+			_ = resolve(vm.ToValue(result.value))
 		})
 	}()
 }
