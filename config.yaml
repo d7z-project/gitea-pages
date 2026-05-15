@@ -8,15 +8,34 @@ trusted_proxies:
   - 127.0.0.1/32
   - 10.0.0.0/8
 # 程序内部使用的存储
+# KV URL 示例:
+#   memory://
+#   mem://
+#   local:///var/lib/gitea-pages/db
+#   storage:///var/lib/gitea-pages/db
+#   etcd://127.0.0.1:2379?prefix=gitea-pages
+#   badger:///var/lib/gitea-pages/badger?prefix=gitea-pages
 db:
   url: "memory://"
 # 用户脚本使用的存储，可省略；省略时回退到 db
+# 同样使用上面的 KV URL 写法
 user_db:
   url: ""
 # 事件传递配置
+# Subscriber URL 示例:
+#   memory://
+#   mem://
+#   etcd://127.0.0.1:2379?prefix=gitea-pages-events
 event:
   url: "memory://"
 # goja storage 配置，按 repo 做隔离
+# Storage URL 示例:
+#   memory://
+#   mem://
+#   local:///var/lib/gitea-pages/storage
+#   storage:///var/lib/gitea-pages/storage
+#   overlay://?upperdir=local:///var/lib/gitea-pages/upper&mount=/assets::local:///srv/assets
+#   s3://bucket/root/prefix?region=us-east-1&endpoint=http://127.0.0.1:9000&path_style=true&access_key=minioadmin&secret_key=minioadmin&disable_ssl=true
 storage:
   url: "memory://"
 provider:
@@ -46,6 +65,7 @@ auth:
     same_site: lax
 cache:
   # 元数据缓存
+  # 同 db/user_db，使用 KV URL 写法
   meta: "memory://"
   # 元数据缓存时长
   meta_ttl: 1m
@@ -55,6 +75,11 @@ cache:
   meta_refresh_concurrent: 16
 
   # 响应数据缓存
+  # Cache URL 示例:
+  #   memory://?max_capacity=10485760&cleanup_interval=5m
+  #   mem://?max_capacity=10485760&cleanup_interval=5m
+  #   redis://:password@127.0.0.1:6379/0?prefix=gitea-pages:blob:
+  #   rediss://:password@redis.example.com:6379/0?prefix=gitea-pages:blob:
   blob: "memory://"
   # 响应数据缓存时长
   blob_ttl: 1m
