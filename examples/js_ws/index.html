@@ -1,82 +1,92 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple WebSocket Example</title>
+    <title>WebSocket Echo Example</title>
 </head>
 <body>
-    <h1>Simple WebSocket Echo</h1>
-    <div id="status">Disconnected</div>
-    <div id="messages" style="border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px;"></div>
-    <input type="text" id="input" placeholder="Type a message...">
-    <button onclick="send()">Send</button>
-    <button onclick="connect()">Connect</button>
-    <button onclick="disconnect()">Disconnect</button>
+<h1>WebSocket Echo</h1>
+<p>Connect, send a message, and the server will echo it back.</p>
 
-    <script>
-        let ws;
-        const statusDiv = document.getElementById('status');
-        const messagesDiv = document.getElementById('messages');
-        const input = document.getElementById('input');
+<p id="status">Disconnected</p>
 
-        function connect() {
-            if (ws) return;
-            // Get the current host (including port)
-            const host = window.location.host;
-            // Determine the protocol (ws or wss) based on the current page protocol
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // Construct the WebSocket URL. Note the leading slash for absolute path.
-            // Since .pages.yaml maps "ws" to the JS handler, we connect to /ws
-            const wsUrl = `${protocol}//${host}/ws`;
-            
-            console.log('Connecting to:', wsUrl); // Debug log
-            ws = new WebSocket(wsUrl);
+<p>
+    <input id="input" type="text" placeholder="message">
+    <button id="send" type="button">Send</button>
+    <button id="connect" type="button">Connect</button>
+    <button id="disconnect" type="button">Disconnect</button>
+</p>
 
-            ws.onopen = () => {
-                statusDiv.innerText = 'Connected';
-                log('Connected to ' + wsUrl);
-            };
+<pre id="messages"></pre>
 
-            ws.onmessage = (event) => {
-                log('Received: ' + event.data);
-            };
+<script>
+    const status = document.getElementById("status");
+    const input = document.getElementById("input");
+    const messages = document.getElementById("messages");
+    const sendButton = document.getElementById("send");
+    const connectButton = document.getElementById("connect");
+    const disconnectButton = document.getElementById("disconnect");
 
-            ws.onclose = () => {
-                statusDiv.innerText = 'Disconnected';
-                log('Disconnected');
-                ws = null;
-            };
+    let socket = null;
 
-            ws.onerror = (error) => {
-                statusDiv.innerText = 'Error';
-                log('Error: ' + error);
-            };
+    function append(line) {
+        messages.textContent += `${line}\n`;
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    function connect() {
+        if (socket) {
+            return;
         }
+        const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        socket = new WebSocket(`${protocol}//${location.host}/ws`);
 
-        function disconnect() {
-            if (ws) {
-                ws.close();
-            }
-        }
+        socket.onopen = () => {
+            status.textContent = "Connected";
+            append("[system] connected");
+        };
 
-        function send() {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                const msg = input.value;
-                ws.send(msg);
-                log('Sent: ' + msg);
-                input.value = '';
-            } else {
-                alert('Not connected');
-            }
-        }
+        socket.onmessage = (event) => {
+            append(`[recv] ${event.data}`);
+        };
 
-        function log(msg) {
-            const div = document.createElement('div');
-            div.innerText = msg;
-            messagesDiv.appendChild(div);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        socket.onclose = () => {
+            status.textContent = "Disconnected";
+            append("[system] disconnected");
+            socket = null;
+        };
+
+        socket.onerror = () => {
+            status.textContent = "Error";
+            append("[system] websocket error");
+        };
+    }
+
+    function disconnect() {
+        if (socket) {
+            socket.close();
         }
-    </script>
+    }
+
+    function send() {
+        const message = input.value.trim();
+        if (!message || !socket || socket.readyState !== WebSocket.OPEN) {
+            return;
+        }
+        append(`[send] ${message}`);
+        socket.send(message);
+        input.value = "";
+    }
+
+    connectButton.addEventListener("click", connect);
+    disconnectButton.addEventListener("click", disconnect);
+    sendButton.addEventListener("click", send);
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            send();
+        }
+    });
+</script>
 </body>
 </html>

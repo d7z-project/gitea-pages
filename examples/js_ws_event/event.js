@@ -10,14 +10,9 @@ serve(function(request) {
 
     socket.addEventListener("message", async (evt) => {
         const data = typeof evt.data === "string" ? evt.data : "";
-        if (data?.trim()) {
-            await event.put("messages", JSON.stringify({
-                name,
-                data: data === "exit" ? `${name} 已断开连接` : data.trim(),
-            }));
-        }
-        if (data === "exit") {
-            socket.close();
+        const message = data.trim();
+        if (message) {
+            await event.put("messages", JSON.stringify({ name, data: message }));
         }
     });
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,22 +7,19 @@
 </head>
 <body>
     <h1>Server-Sent Events</h1>
-    <div id="messages"></div>
+    <p>The page connects to <code>/events</code> and appends each incoming event.</p>
+    <pre id="messages"></pre>
 
     <script>
         const messages = document.getElementById("messages");
         const source = new EventSource("/events");
 
         source.addEventListener("message", (event) => {
-            const div = document.createElement("div");
-            div.textContent = event.data;
-            messages.appendChild(div);
+            messages.textContent += `${event.data}\n`;
         });
 
         source.onerror = () => {
-            const div = document.createElement("div");
-            div.textContent = "stream closed";
-            messages.appendChild(div);
+            messages.textContent += "stream closed\n";
             source.close();
         };
     </script>
