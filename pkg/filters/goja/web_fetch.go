@@ -16,8 +16,10 @@ import (
 	"github.com/dop251/goja_nodejs/eventloop"
 )
 
-type lookupNetIPFunc func(context.Context, string, string) ([]netip.Addr, error)
-type dialContextFunc func(context.Context, string, string) (net.Conn, error)
+type (
+	lookupNetIPFunc func(context.Context, string, string) ([]netip.Addr, error)
+	dialContextFunc func(context.Context, string, string) (net.Conn, error)
+)
 
 func newFetchClient(cfg FetchConfig) *http.Client {
 	return &http.Client{

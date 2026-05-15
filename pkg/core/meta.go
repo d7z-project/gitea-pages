@@ -50,14 +50,16 @@ type PageMetaContent struct {
 	ErrorMsg     string    `json:"error"`         // 错误消息 (作为 500 错误日志暴露至前端)
 	RefreshAt    time.Time `json:"refresh_at"`    // 下次刷新时间
 
-	Alias   []string `json:"alias"`   // alias
-	Filters []Filter `json:"filters"` // 路由消息
+	Alias    []string     `json:"alias"`    // alias
+	Filters  []Filter     `json:"filters"`  // 路由消息
+	Security PageSecurity `json:"security"` // 页面安全策略
 }
 
 func NewEmptyPageMetaContent() *PageMetaContent {
 	return &PageMetaContent{
 		IsPage:    false,
 		RefreshAt: time.Now(),
+		Security:  DefaultPageSecurity(),
 		Filters: []Filter{
 			{
 				Path:   "**",
@@ -280,10 +282,13 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 		return nil // 配置文件不存在不是错误
 	}
 
-	cfg := new(PageConfig)
+	cfg := &PageConfig{
+		Security: DefaultPageSecurity(),
+	}
 	if err = yaml.Unmarshal([]byte(data), cfg); err != nil {
 		return errors.Wrap(err, "parse .pages.yaml failed")
 	}
+	ApplyPageSecurityDefaults(&cfg.Security)
 
 	// 处理别名
 	for _, item := range cfg.Alias {
@@ -307,6 +312,7 @@ func (s *ServerMeta) parsePageConfig(ctx context.Context, meta *PageMetaContent,
 	}
 	meta.Alias = alias
 	meta.Private = cfg.Private
+	meta.Security = cfg.Security
 	// 处理自定义路由
 	for _, r := range cfg.Routes {
 		for _, item := range strings.Split(r.Path, ",") {

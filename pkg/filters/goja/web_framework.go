@@ -113,27 +113,6 @@ const frameworkBootstrap = `
     });
   }
 
-  async function cors(response, options) {
-    const opts = options || {};
-    const origin = opts.origin || "*";
-    const methods = opts.methods || "GET, POST, PUT, PATCH, DELETE, OPTIONS";
-    const headers = opts.headers || "content-type, authorization";
-    const exposeHeaders = opts.exposeHeaders;
-    const credentials = opts.credentials;
-    const nextHeaders = {
-      "access-control-allow-origin": origin,
-      "access-control-allow-methods": Array.isArray(methods) ? methods.join(", ") : methods,
-      "access-control-allow-headers": Array.isArray(headers) ? headers.join(", ") : headers,
-    };
-    if (exposeHeaders) {
-      nextHeaders["access-control-expose-headers"] = Array.isArray(exposeHeaders) ? exposeHeaders.join(", ") : exposeHeaders;
-    }
-    if (credentials) {
-      nextHeaders["access-control-allow-credentials"] = "true";
-    }
-    return await withHeaders(response, nextHeaders);
-  }
-
   async function setCookie(response, name, value, options) {
     return await withHeaders(response, {
       "set-cookie": serializeCookie(name, value, options),
@@ -238,7 +217,6 @@ const frameworkBootstrap = `
     methodNotAllowed,
     cookie,
     withHeaders,
-    cors,
     setCookie,
     clearCookie,
     sse,

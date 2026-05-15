@@ -57,18 +57,7 @@ The `reverse_proxy` route filter is enabled by default and can be configured glo
 filters:
   reverse_proxy:
     enabled: true
-    strip_request_headers:
-      - Authorization
-      - Cookie
-      - Forwarded
-      - Proxy-Authorization
-      - X-Forwarded-For
-      - X-Forwarded-Host
-      - X-Forwarded-Proto
-      - X-Page-Host
-      - X-Page-IP
-      - X-Page-Refer
-      - X-Real-IP
+    forward_authorization: false
 ```
 
 Per-page route example in `.pages.yaml`:
@@ -86,6 +75,9 @@ Notes:
 - `target` must be an absolute `https://` URL.
 - Targets that resolve to loopback, private, or link-local addresses are rejected.
 - `prefix` is removed from the matched request path before proxying.
+- `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and `X-Page-*` are always rebuilt by the proxy filter.
+- Cookie forwarding is controlled by the page `security` config.
+- `Authorization` is dropped by default. Set `forward_authorization: true` only when the upstream explicitly needs it.
 
 ## JavaScript Filter
 
@@ -103,11 +95,44 @@ routes:
   - path: "**"
     js:
       exec: index.js
+security:
+  cors:
+    origins:
+      - "https://app.example.com"
+    credentials: true
+  cookies:
+    require_https: true
+    allow_cross_origin: false
+  headers:
+    cross_origin_resource_policy: same-origin
 ```
+
+`security` is page-level and applies to direct/static responses, Goja routes, WebSocket upgrades, auth routes, and `reverse_proxy` routes for that page.
+
+Defaults:
+
+- Cross-origin requests are rejected unless `security.cors.origins` explicitly allows the request `Origin`.
+- Cookies are disabled on `http`.
+- Cross-origin cookies are disabled unless both `security.cookies.allow_cross_origin` and `security.cors.credentials` allow them.
+- `Cross-Origin-Resource-Policy` defaults to `same-origin`.
+
+Fields:
+
+- `security.cors.origins`: allowed cross-origin origins. Empty means same-origin only.
+- `security.cors.methods`: allowed methods returned in preflight responses. Default: `GET, POST, PUT, PATCH, DELETE, OPTIONS`.
+- `security.cors.headers`: allowed request headers returned in preflight responses. Default: `content-type, authorization`.
+- `security.cors.expose`: response headers exposed to browsers.
+- `security.cors.credentials`: enables `Access-Control-Allow-Credentials` for allowed cross-origin requests.
+- `security.cors.max_age`: preflight cache time in seconds. Default: `600`.
+- `security.cookies.enabled`: enables cookie handling for the page. Default: `true`.
+- `security.cookies.require_https`: strips request `Cookie` and response `Set-Cookie` on `http`. Default: `true`.
+- `security.cookies.allow_cross_origin`: allows cross-origin cookies when CORS credentials are also enabled. Default: `false`.
+- `security.headers.cross_origin_resource_policy`: value for `Cross-Origin-Resource-Policy`. Default: `same-origin`.
+- `security.headers.frame_options`: optional `X-Frame-Options` value.
 
 ## TODO
 
-- [ ] Support CORS
+- [x] Support CORS
 - [ ] Support custom caching strategies (HTTP cache-control)
 - [ ] ~~http01 automatic certificate issuance~~: Handled by Caddy
 - [ ] ~~Web hook triggers for updates~~: Not a high priority for real-time needs

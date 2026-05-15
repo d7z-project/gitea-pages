@@ -207,7 +207,28 @@ func NewPageServer(
 func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	sessionID, _ := uuid.NewRandom()
 	request.Header.Set("Session-ID", sessionID.String())
-	request = request.WithContext(core.ContextWithRequestInfo(request.Context(), core.ResolveRequestInfo(request, s.trustedProxy)))
+	requestInfo := core.ResolveRequestInfo(request, s.trustedProxy)
+	request = request.WithContext(core.ContextWithRequestInfo(request.Context(), requestInfo))
+	var meta *core.PageContent
+	var err error
+	if !core.IsReservedPath(request.URL.Path) {
+		domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
+		meta, err = s.meta.ParseDomainMeta(request.Context(), domain, request.URL.Path)
+		if err != nil {
+			s.handleRequestError(w, request, sessionID, err)
+			return
+		}
+	}
+	securityConfig := core.DefaultPageSecurity()
+	if meta != nil {
+		securityConfig = meta.Security
+	}
+	security := core.BuildSecurityResult(request, requestInfo, securityConfig)
+	applyRequestSecurity(request, security)
+	if enforceRequestSecurity(w, request, security) {
+		return
+	}
+	w = &securityResponseWriter{ResponseWriter: w, security: security}
 	writer := utils.NewWrittenResponseWriter(w)
 	defer func() {
 		if e := recover(); e != nil {
@@ -221,16 +242,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			}
 		}
 	}()
-	err := s.Serve(writer, request)
+	err = s.servePage(writer, request, meta)
 	if err != nil {
-		slog.Debug("bad request", "error", err, "request", request.RequestURI, "id", sessionID)
-		if !writer.IsWritten() {
-			s.errorHandler(writer, request, err)
-		}
+		s.handleRequestError(writer, request, sessionID, err)
 	}
 }
 
-func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Request) error {
+func (s *Server) handleRequestError(writer http.ResponseWriter, request *http.Request, sessionID uuid.UUID, err error) {
+	slog.Debug("bad request", "error", err, "request", request.RequestURI, "id", sessionID)
+	if wrapped, ok := writer.(*utils.WrittenResponseWriter); ok && wrapped.IsWritten() {
+		return
+	}
+	s.errorHandler(writer, request, err)
+}
+
+func (s *Server) servePage(writer *utils.WrittenResponseWriter, request *http.Request, meta *core.PageContent) error {
 	if core.IsReservedPath(request.URL.Path) {
 		if s.auth == nil {
 			http.NotFound(writer, request)
@@ -238,12 +264,7 @@ func (s *Server) Serve(writer *utils.WrittenResponseWriter, request *http.Reques
 		}
 		return s.auth.Handle(writer, request)
 	}
-	ctx := request.Context()
-	domain := portExp.ReplaceAllString(strings.ToLower(request.Host), "")
-	meta, err := s.meta.ParseDomainMeta(ctx, domain, request.URL.Path)
-	if err != nil {
-		return err
-	}
+	var err error
 	if s.auth != nil {
 		if err = s.auth.AttachAuth(request); err != nil {
 			return err

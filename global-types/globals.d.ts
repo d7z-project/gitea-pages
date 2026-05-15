@@ -58,13 +58,6 @@ declare global {
         cookie(request: Request, name: string): string | null;
         cookie(request: Request): Record<string, string>;
         withHeaders(response: Response, headers: Record<string, string>): Promise<Response>;
-        cors(response: Response, options?: {
-            origin?: string;
-            methods?: string | string[];
-            headers?: string | string[];
-            exposeHeaders?: string | string[];
-            credentials?: boolean;
-        }): Promise<Response>;
         setCookie(response: Response, name: string, value: string, options?: {
             maxAge?: number;
             domain?: string;

@@ -57,18 +57,7 @@ trusted_proxies:
 filters:
   reverse_proxy:
     enabled: true
-    strip_request_headers:
-      - Authorization
-      - Cookie
-      - Forwarded
-      - Proxy-Authorization
-      - X-Forwarded-For
-      - X-Forwarded-Host
-      - X-Forwarded-Proto
-      - X-Page-Host
-      - X-Page-IP
-      - X-Page-Refer
-      - X-Real-IP
+    forward_authorization: false
 ```
 
 `.pages.yaml` 中的路由示例：
@@ -86,6 +75,9 @@ routes:
 - `target` 必须是绝对 `https://` URL。
 - 如果目标地址解析到回环、私网或链路本地地址，请求会被拒绝。
 - 转发时会先从匹配路径中裁掉 `prefix`。
+- `Forwarded`、`X-Forwarded-*`、`X-Real-IP` 和 `X-Page-*` 会始终由代理过滤器重建。
+- Cookie 是否继续转发由页面 `security` 配置统一控制。
+- 默认不会透传 `Authorization`；只有在上游明确需要时，才应设置 `forward_authorization: true`。
 
 ## JavaScript Filter
 
@@ -103,11 +95,44 @@ routes:
   - path: "**"
     js:
       exec: index.js
+security:
+  cors:
+    origins:
+      - "https://app.example.com"
+    credentials: true
+  cookies:
+    require_https: true
+    allow_cross_origin: false
+  headers:
+    cross_origin_resource_policy: same-origin
 ```
+
+`security` 是页面级配置，会统一作用于该页面的 direct/static 响应、Goja 路由、WebSocket 升级、认证路由和 `reverse_proxy` 路由。
+
+默认行为：
+
+- 未在 `security.cors.origins` 中显式允许时，跨域请求会被拒绝。
+- `http` 下默认禁用 Cookie。
+- 只有同时允许 `security.cookies.allow_cross_origin` 和 `security.cors.credentials` 时，才允许跨域 Cookie。
+- `Cross-Origin-Resource-Policy` 默认为 `same-origin`。
+
+字段说明：
+
+- `security.cors.origins`：允许的跨域来源。为空时表示只允许同源。
+- `security.cors.methods`：预检响应返回的允许方法。默认：`GET, POST, PUT, PATCH, DELETE, OPTIONS`。
+- `security.cors.headers`：预检响应返回的允许请求头。默认：`content-type, authorization`。
+- `security.cors.expose`：暴露给浏览器的响应头。
+- `security.cors.credentials`：对已允许的跨域请求开启 `Access-Control-Allow-Credentials`。
+- `security.cors.max_age`：预检缓存秒数。默认：`600`。
+- `security.cookies.enabled`：是否启用该页面的 Cookie 处理。默认：`true`。
+- `security.cookies.require_https`：在 `http` 下移除请求 `Cookie` 和响应 `Set-Cookie`。默认：`true`。
+- `security.cookies.allow_cross_origin`：允许跨域 Cookie；仍需同时开启 CORS credentials。默认：`false`。
+- `security.headers.cross_origin_resource_policy`：`Cross-Origin-Resource-Policy` 响应头值。默认：`same-origin`。
+- `security.headers.frame_options`：可选的 `X-Frame-Options` 响应头值。
 
 ## TODO
 
-- [ ] 支持跨域
+- [x] 支持跨域
 - [ ] 支持自定义缓存策略 (http cache-control)
 - [ ] ~~http01 自动签发证书~~: 交由 Caddy 完成
 - [ ] ~~Web 钩子触发更新~~: 对实时性需求不大

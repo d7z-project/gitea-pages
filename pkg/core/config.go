@@ -6,9 +6,10 @@ import (
 )
 
 type PageConfig struct {
-	Alias   []string          `yaml:"alias"`   // 重定向地址
-	Routes  []PageConfigRoute `yaml:"routes"`  // 路由配置
-	Private bool              `yaml:"private"` // 是否私有
+	Alias    []string          `yaml:"alias"`   // 重定向地址
+	Routes   []PageConfigRoute `yaml:"routes"`  // 路由配置
+	Private  bool              `yaml:"private"` // 是否私有
+	Security PageSecurity      `yaml:"security"`
 }
 
 type PageConfigRoute struct {

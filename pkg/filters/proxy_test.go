@@ -12,7 +12,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-func TestRewriteProxyRequestStripsSensitiveHeadersAndRebuildsForwarding(t *testing.T) {
+func TestRewriteProxyRequestSanitizesForwardingAndDropsAuthorizationByDefault(t *testing.T) {
 	target, err := url.Parse("https://upstream.example/base")
 	require.NoError(t, err)
 
@@ -21,13 +21,13 @@ func TestRewriteProxyRequestStripsSensitiveHeadersAndRebuildsForwarding(t *testi
 	req.RemoteAddr = "198.51.100.20:1234"
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("Cookie", "session=secret")
-	req.Header.Set("X-Test-Strip", "drop-me")
+	req.Header.Set("Proxy-Authorization", "Basic upstream")
 	req.Header.Set("X-Forwarded-For", "203.0.113.10")
 	req.Header.Set("X-Forwarded-Proto", "https")
 
 	outReq := req.Clone(req.Context())
 	pr := &httputil.ProxyRequest{In: req, Out: outReq}
-	rewriteProxyRequest(pr, req, target, "/data", []string{"Authorization", "Cookie", "X-Test-Strip"}, core.FilterContext{
+	rewriteProxyRequest(pr, req, target, "/data", false, core.FilterContext{
 		PageContent: &core.PageContent{Owner: "org1", Repo: "repo1", Path: "api/data"},
 	})
 
@@ -36,8 +36,8 @@ func TestRewriteProxyRequestStripsSensitiveHeadersAndRebuildsForwarding(t *testi
 	assert.Equal(t, "/base/data", pr.Out.URL.Path)
 	assert.Equal(t, "q=ok", pr.Out.URL.RawQuery)
 	assert.Empty(t, pr.Out.Header.Get("Authorization"))
-	assert.Empty(t, pr.Out.Header.Get("Cookie"))
-	assert.Empty(t, pr.Out.Header.Get("X-Test-Strip"))
+	assert.Empty(t, pr.Out.Header.Get("Proxy-Authorization"))
+	assert.Equal(t, "session=secret", pr.Out.Header.Get("Cookie"))
 	assert.Equal(t, "198.51.100.20", pr.Out.Header.Get("X-Forwarded-For"))
 	assert.Equal(t, `for=198.51.100.20;proto=https;host=org1.example.com`, pr.Out.Header.Get("Forwarded"))
 	assert.Equal(t, "https", pr.Out.Header.Get("X-Forwarded-Proto"))
@@ -45,6 +45,24 @@ func TestRewriteProxyRequestStripsSensitiveHeadersAndRebuildsForwarding(t *testi
 	assert.Equal(t, "198.51.100.20", pr.Out.Header.Get("X-Real-IP"))
 	assert.Equal(t, "198.51.100.20", pr.Out.Header.Get("X-Page-IP"))
 	assert.Equal(t, "org1.example.com", pr.Out.Header.Get("X-Page-Host"))
+}
+
+func TestRewriteProxyRequestCanForwardAuthorization(t *testing.T) {
+	target, err := url.Parse("https://upstream.example/base")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "https://pages.example/repo1/api/data?q=ok", nil)
+	req.Host = "org1.example.com"
+	req.RemoteAddr = "198.51.100.20:1234"
+	req.Header.Set("Authorization", "Bearer secret")
+
+	outReq := req.Clone(req.Context())
+	pr := &httputil.ProxyRequest{In: req, Out: outReq}
+	rewriteProxyRequest(pr, req, target, "/data", true, core.FilterContext{
+		PageContent: &core.PageContent{Owner: "org1", Repo: "repo1", Path: "api/data"},
+	})
+
+	assert.Equal(t, "Bearer secret", pr.Out.Header.Get("Authorization"))
 }
 
 func TestRewriteProxyRequestTrustsConfiguredForwardedChain(t *testing.T) {
@@ -62,7 +80,7 @@ func TestRewriteProxyRequestTrustsConfiguredForwardedChain(t *testing.T) {
 
 	outReq := req.Clone(req.Context())
 	pr := &httputil.ProxyRequest{In: req, Out: outReq}
-	rewriteProxyRequest(pr, req, target, "/", defaultProxyStripHeaders, core.FilterContext{
+	rewriteProxyRequest(pr, req, target, "/", false, core.FilterContext{
 		PageContent: &core.PageContent{Owner: "org1", Repo: "repo1", Path: "api"},
 	})
 
@@ -88,7 +106,7 @@ func TestRewriteProxyRequestTrustsConfiguredIPv6ForwardedChain(t *testing.T) {
 
 	outReq := req.Clone(req.Context())
 	pr := &httputil.ProxyRequest{In: req, Out: outReq}
-	rewriteProxyRequest(pr, req, target, "/", defaultProxyStripHeaders, core.FilterContext{
+	rewriteProxyRequest(pr, req, target, "/", false, core.FilterContext{
 		PageContent: &core.PageContent{Owner: "org1", Repo: "repo1", Path: "api"},
 	})
 
@@ -113,7 +131,7 @@ func TestRewriteProxyRequestBuildsForwardedForMappedIPv6Peer(t *testing.T) {
 
 	outReq := req.Clone(req.Context())
 	pr := &httputil.ProxyRequest{In: req, Out: outReq}
-	rewriteProxyRequest(pr, req, target, "/", defaultProxyStripHeaders, core.FilterContext{
+	rewriteProxyRequest(pr, req, target, "/", false, core.FilterContext{
 		PageContent: &core.PageContent{Owner: "org1", Repo: "repo1", Path: "api"},
 	})
 

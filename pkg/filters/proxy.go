@@ -16,22 +16,9 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-var defaultProxyStripHeaders = []string{
-	"Authorization",
-	"Cookie",
-	"Forwarded",
-	"Proxy-Authorization",
-	"X-Forwarded-For",
-	"X-Forwarded-Host",
-	"X-Forwarded-Proto",
-	"X-Page-Host",
-	"X-Page-IP",
-	"X-Page-Refer",
-	"X-Real-IP",
-}
-
 type proxyGlobalConfig struct {
-	StripRequestHeaders []string `json:"strip_request_headers"`
+	ForwardAuthorization bool `json:"forward_authorization"`
+	StripRequestHeaders  any  `json:"strip_request_headers"`
 }
 
 type proxyRouteConfig struct {
@@ -46,10 +33,8 @@ func FilterInstProxy(globalParams core.Params) (core.FilterInstance, error) {
 			return nil, err
 		}
 	}
-	if len(global.StripRequestHeaders) == 0 {
-		global.StripRequestHeaders = append([]string(nil), defaultProxyStripHeaders...)
-	} else {
-		global.StripRequestHeaders = normalizeHeaderNames(global.StripRequestHeaders)
+	if global.StripRequestHeaders != nil {
+		return nil, errors.New("reverse_proxy.strip_request_headers is no longer supported; use forward_authorization instead")
 	}
 	transport := newProxyTransport()
 	return func(config core.Params) (core.FilterCall, error) {
@@ -64,8 +49,6 @@ func FilterInstProxy(globalParams core.Params) (core.FilterInstance, error) {
 		if err != nil {
 			return nil, err
 		}
-		stripHeaders := append([]string(nil), global.StripRequestHeaders...)
-
 		return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
 			proxyPath := "/" + ctx.Path
 			targetPath := strings.TrimPrefix(proxyPath, param.Prefix)
@@ -75,7 +58,7 @@ func FilterInstProxy(globalParams core.Params) (core.FilterInstance, error) {
 			proxy := &httputil.ReverseProxy{
 				Transport: transport,
 				Rewrite: func(pr *httputil.ProxyRequest) {
-					rewriteProxyRequest(pr, request, targetURL, targetPath, stripHeaders, ctx)
+					rewriteProxyRequest(pr, request, targetURL, targetPath, global.ForwardAuthorization, ctx)
 				},
 			}
 			slog.Debug("proxy route matched", "prefix", param.Prefix, "target", param.Target,
@@ -86,7 +69,7 @@ func FilterInstProxy(globalParams core.Params) (core.FilterInstance, error) {
 	}, nil
 }
 
-func rewriteProxyRequest(pr *httputil.ProxyRequest, in *http.Request, target *url.URL, targetPath string, stripHeaders []string, ctx core.FilterContext) {
+func rewriteProxyRequest(pr *httputil.ProxyRequest, in *http.Request, target *url.URL, targetPath string, forwardAuthorization bool, ctx core.FilterContext) {
 	pr.Out.URL.Path = targetPath
 	pr.Out.URL.RawPath = targetPath
 	pr.SetURL(target)
@@ -95,9 +78,7 @@ func rewriteProxyRequest(pr *httputil.ProxyRequest, in *http.Request, target *ur
 	} else {
 		pr.Out.URL.RawQuery = target.RawQuery + "&" + pr.Out.URL.RawQuery
 	}
-	for _, header := range stripHeaders {
-		pr.Out.Header.Del(header)
-	}
+	sanitizeProxyRequestHeaders(pr.Out.Header, forwardAuthorization)
 	origin := core.RequestInfoFromRequest(in)
 	pr.Out.Header.Set("X-Real-IP", origin.ClientIP)
 	pr.Out.Header.Set("X-Page-IP", origin.ClientIP)
@@ -124,21 +105,19 @@ func parseProxyTarget(raw string) (*url.URL, error) {
 	return target, nil
 }
 
-func normalizeHeaderNames(headers []string) []string {
-	seen := make(map[string]struct{}, len(headers))
-	result := make([]string, 0, len(headers))
-	for _, header := range headers {
-		header = http.CanonicalHeaderKey(strings.TrimSpace(header))
-		if header == "" {
-			continue
-		}
-		if _, ok := seen[header]; ok {
-			continue
-		}
-		seen[header] = struct{}{}
-		result = append(result, header)
+func sanitizeProxyRequestHeaders(headers http.Header, forwardAuthorization bool) {
+	headers.Del("Forwarded")
+	headers.Del("Proxy-Authorization")
+	headers.Del("X-Forwarded-For")
+	headers.Del("X-Forwarded-Host")
+	headers.Del("X-Forwarded-Proto")
+	headers.Del("X-Page-Host")
+	headers.Del("X-Page-IP")
+	headers.Del("X-Page-Refer")
+	headers.Del("X-Real-IP")
+	if !forwardAuthorization {
+		headers.Del("Authorization")
 	}
-	return result
 }
 
 func setForwardingHeaders(headers http.Header, origin core.RequestInfo, host string) {

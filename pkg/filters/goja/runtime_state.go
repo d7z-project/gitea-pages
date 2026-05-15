@@ -43,13 +43,9 @@ func (r *runtimeState) beginClosing() {
 	r.closing.Store(true)
 }
 
-func (r *runtimeState) isClosing() bool {
-	return r != nil && r.closing.Load()
-}
-
-func (r *runtimeState) runOnLoop(loop *eventloop.EventLoop, fn func(*goja.Runtime)) bool {
+func (r *runtimeState) runOnLoop(loop *eventloop.EventLoop, fn func(*goja.Runtime)) {
 	if r != nil && r.closing.Load() {
-		return false
+		return
 	}
 	loop.RunOnLoop(func(vm *goja.Runtime) {
 		if r != nil && r.closing.Load() {
@@ -57,7 +53,6 @@ func (r *runtimeState) runOnLoop(loop *eventloop.EventLoop, fn func(*goja.Runtim
 		}
 		fn(vm)
 	})
-	return true
 }
 
 func (r *runtimeState) wait(timeout time.Duration) bool {

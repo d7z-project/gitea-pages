@@ -90,11 +90,12 @@ Available helpers:
 - `http.methodNotAllowed`
 - `http.cookie`
 - `http.withHeaders`
-- `http.cors`
 - `http.setCookie`
 - `http.clearCookie`
 - `http.sse`
 - `http.router`
+
+Cross-origin access, WebSocket origin checks, and cookie sharing are controlled by the page `security` config in `.pages.yaml`, not by goja helpers.
 
 ## WebSocket
 

@@ -84,19 +84,8 @@ filters:
   reverse_proxy:
     # 设为 false 可全局禁用 reverse_proxy 路由
     enabled: true
-    # 转发前移除的请求头，留空时使用内置安全默认值
-    strip_request_headers:
-      - Authorization
-      - Cookie
-      - Forwarded
-      - Proxy-Authorization
-      - X-Forwarded-For
-      - X-Forwarded-Host
-      - X-Forwarded-Proto
-      - X-Page-Host
-      - X-Page-IP
-      - X-Page-Refer
-      - X-Real-IP
+    # 是否把原始 Authorization 请求头继续转发给上游
+    forward_authorization: false
   js:
     # 是否启用 debug 页面
     debug: true
