@@ -11,40 +11,109 @@ import (
 	"net/http"
 	nurl "net/url"
 	"strings"
+	"sync/atomic"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/eventloop"
 )
 
+type bodySource interface {
+	newStream() *readableStreamState
+	clone() (bodySource, error)
+	empty() bool
+}
+
+type bufferedBodySource struct {
+	data []byte
+}
+
+type streamingBodySource struct {
+	open func() (io.ReadCloser, error)
+}
+
 type webBodyState struct {
-	data        []byte
 	contentType string
-	used        *bool
+	used        *atomic.Bool
+	stream      *readableStreamState
+	loop        *eventloop.EventLoop
+	runtime     *runtimeState
 }
 
-type webBodyReaderState struct {
-	body     *webBodyState
-	consumed bool
+type webFormDataState struct {
+	values map[string][]string
 }
 
-func newBodyState(data []byte, headers http.Header, used *bool) *webBodyState {
+func newBufferedBodySource(data []byte) bodySource {
+	if len(data) == 0 {
+		return nil
+	}
+	return &bufferedBodySource{data: append([]byte(nil), data...)}
+}
+
+func newStreamingBodySource(open func() (io.ReadCloser, error)) bodySource {
+	if open == nil {
+		return nil
+	}
+	return &streamingBodySource{open: open}
+}
+
+func (s *bufferedBodySource) newStream() *readableStreamState {
+	data := append([]byte(nil), s.data...)
+	return &readableStreamState{
+		open: func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(data)), nil
+		},
+	}
+}
+
+func (s *bufferedBodySource) clone() (bodySource, error) {
+	return &bufferedBodySource{data: append([]byte(nil), s.data...)}, nil
+}
+
+func (s *bufferedBodySource) empty() bool {
+	return s == nil || len(s.data) == 0
+}
+
+func (s *streamingBodySource) newStream() *readableStreamState {
+	return &readableStreamState{open: s.open}
+}
+
+func (s *streamingBodySource) clone() (bodySource, error) {
+	return nil, errors.New("body stream cannot be cloned")
+}
+
+func (s *streamingBodySource) empty() bool {
+	return s == nil || s.open == nil
+}
+
+func newBodyState(headers http.Header, used *atomic.Bool, source bodySource, loop *eventloop.EventLoop, runtime *runtimeState) *webBodyState {
 	contentType := ""
 	if headers != nil {
 		contentType = headers.Get("Content-Type")
 	}
+	var stream *readableStreamState
+	if source != nil && !source.empty() {
+		stream = source.newStream()
+	}
 	return &webBodyState{
-		data:        data,
 		contentType: contentType,
 		used:        used,
+		stream:      stream,
+		loop:        loop,
+		runtime:     runtime,
 	}
 }
 
 func newBodyObject(vm *goja.Runtime, state *webBodyState) goja.Value {
-	if state == nil || len(state.data) == 0 {
+	if state == nil || state.stream == nil {
 		return goja.Null()
 	}
 	obj := vm.NewObject()
-	_ = obj.Set("getReader", func() *goja.Object {
-		return newBodyReaderObject(vm, &webBodyReaderState{body: state})
+	_ = obj.Set("getReader", func() (*goja.Object, error) {
+		if err := claimWebBody(state); err != nil {
+			return nil, err
+		}
+		return newReadableStreamObject(vm, state.loop, state.runtime, state.stream), nil
 	})
 	return obj
 }
@@ -53,127 +122,135 @@ func attachBodyMethods(vm *goja.Runtime, obj *goja.Object, state *webBodyState) 
 	if obj == nil || state == nil {
 		return
 	}
-	bodyPromise := func(transform func([]byte) (any, error)) *goja.Promise {
+	bodyPromise := func(transform func([]byte) (goja.Value, error)) *goja.Promise {
 		promise, resolve, reject := vm.NewPromise()
-		data, err := consumeWebBody(state)
-		if err != nil {
-			_ = reject(err)
+		if state.runtime != nil && !state.runtime.startTask() {
+			_ = reject(vm.ToValue(errRuntimeClosing))
 			return promise
 		}
-		value, err := transform(data)
-		if err != nil {
-			_ = reject(err)
-			return promise
-		}
-		_ = resolve(vm.ToValue(value))
+		go func() {
+			if state.runtime != nil {
+				defer state.runtime.finishTask()
+			}
+			data, err := consumeWebBody(state)
+			settle := func() {
+				if err != nil {
+					_ = reject(vm.ToValue(err))
+					return
+				}
+				value, err := transform(data)
+				if err != nil {
+					_ = reject(vm.ToValue(err))
+					return
+				}
+				_ = resolve(value)
+			}
+			if state.runtime != nil && state.loop != nil {
+				state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
+					settle()
+				})
+				return
+			}
+			settle()
+		}()
 		return promise
 	}
 	_ = obj.Set("body", newBodyObject(vm, state))
 	_ = obj.DefineAccessorProperty("bodyUsed", vm.ToValue(func() bool {
-		return state.used != nil && *state.used
+		return state.used != nil && state.used.Load()
 	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
 	_ = obj.Set("text", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (any, error) {
-			return string(data), nil
+		return bodyPromise(func(data []byte) (goja.Value, error) {
+			return vm.ToValue(string(data)), nil
 		})
 	})
 	_ = obj.Set("json", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (any, error) {
+		return bodyPromise(func(data []byte) (goja.Value, error) {
 			var decoded any
+			if len(data) == 0 {
+				return goja.Null(), nil
+			}
 			if err := json.Unmarshal(data, &decoded); err != nil {
 				return nil, err
 			}
-			return decoded, nil
+			return vm.ToValue(decoded), nil
 		})
 	})
 	_ = obj.Set("arrayBuffer", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (any, error) {
-			return vm.NewArrayBuffer(data), nil
+		return bodyPromise(func(data []byte) (goja.Value, error) {
+			return vm.ToValue(vm.NewArrayBuffer(data)), nil
 		})
 	})
 	_ = obj.Set("bytes", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (any, error) {
+		return bodyPromise(func(data []byte) (goja.Value, error) {
 			return uint8ArrayValue(vm, data), nil
 		})
 	})
 	_ = obj.Set("blob", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (any, error) {
-			return newBlobObject(vm, data, state.contentType), nil
+		return bodyPromise(func(data []byte) (goja.Value, error) {
+			return vm.ToValue(newBlobObject(vm, data, state.contentType)), nil
 		})
 	})
 	_ = obj.Set("formData", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (any, error) {
+		return bodyPromise(func(data []byte) (goja.Value, error) {
 			form, err := parseFormData(state.contentType, data)
 			if err != nil {
 				return nil, err
 			}
-			return newFormDataObject(vm, form), nil
+			return vm.ToValue(newFormDataObject(vm, form)), nil
 		})
 	})
 }
 
-func newBodyReaderObject(vm *goja.Runtime, state *webBodyReaderState) *goja.Object {
-	obj := vm.NewObject()
-	_ = obj.Set("read", func() *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if state.consumed {
-			_ = resolve(vm.ToValue(map[string]any{
-				"done":  true,
-				"value": goja.Undefined(),
-			}))
-			return promise
-		}
-		data, err := consumeWebBody(state.body)
-		if err != nil {
-			_ = reject(err)
-			return promise
-		}
-		state.consumed = true
-		_ = resolve(vm.ToValue(map[string]any{
-			"done":  false,
-			"value": uint8ArrayValue(vm, data),
-		}))
-		return promise
-	})
-	return obj
+func claimWebBody(state *webBodyState) error {
+	if state == nil {
+		return nil
+	}
+	if state.used != nil && !state.used.CompareAndSwap(false, true) {
+		return errors.New("body stream already read")
+	}
+	return nil
 }
 
 func consumeWebBody(state *webBodyState) ([]byte, error) {
-	if state == nil {
+	if state == nil || state.stream == nil {
 		return nil, nil
 	}
-	if state.used != nil && *state.used {
-		return nil, errors.New("body stream already read")
+	if err := claimWebBody(state); err != nil {
+		return nil, err
 	}
-	if state.used != nil {
-		*state.used = true
+	var data []byte
+	for {
+		chunk, done, err := state.stream.read(defaultStreamChunkSize)
+		if err != nil {
+			return nil, err
+		}
+		if done {
+			return data, nil
+		}
+		data = append(data, chunk...)
 	}
-	return append([]byte(nil), state.data...), nil
 }
 
 func newBlobObject(vm *goja.Runtime, data []byte, contentType string) *goja.Object {
 	obj := vm.NewObject()
-	resolve := func(value any) *goja.Promise {
+	resolve := func(value goja.Value) *goja.Promise {
 		promise, doResolve, _ := vm.NewPromise()
-		_ = doResolve(vm.ToValue(value))
+		_ = doResolve(value)
 		return promise
 	}
 	_ = obj.Set("size", len(data))
 	_ = obj.Set("type", contentType)
 	_ = obj.Set("text", func() *goja.Promise {
-		return resolve(string(append([]byte(nil), data...)))
+		return resolve(vm.ToValue(string(append([]byte(nil), data...))))
 	})
 	_ = obj.Set("arrayBuffer", func() *goja.Promise {
-		return resolve(vm.NewArrayBuffer(append([]byte(nil), data...)))
+		return resolve(vm.ToValue(vm.NewArrayBuffer(append([]byte(nil), data...))))
 	})
 	_ = obj.Set("bytes", func() *goja.Promise {
 		return resolve(uint8ArrayValue(vm, data))
 	})
 	return obj
-}
-
-type webFormDataState struct {
-	values map[string][]string
 }
 
 func newFormDataObject(vm *goja.Runtime, values map[string][]string) *goja.Object {
@@ -277,6 +354,27 @@ func parseFormData(contentType string, data []byte) (map[string][]string, error)
 		return result, nil
 	default:
 		return nil, fmt.Errorf("unsupported form data content-type: %s", contentType)
+	}
+}
+
+func bodyBytesFromValue(vm *goja.Runtime, value goja.Value) ([]byte, error) {
+	if isNilish(value) {
+		return nil, nil
+	}
+	switch current := value.Export().(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return []byte(current), nil
+	case []byte:
+		return append([]byte(nil), current...), nil
+	case goja.ArrayBuffer:
+		return append([]byte(nil), current.Bytes()...), nil
+	default:
+		if bs, ok := arrayBufferViewBytes(vm, value); ok {
+			return bs, nil
+		}
+		return nil, fmt.Errorf("unsupported body type: %T", current)
 	}
 }
 

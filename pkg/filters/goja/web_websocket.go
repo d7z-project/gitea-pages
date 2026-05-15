@@ -41,8 +41,13 @@ func installWebSocket(ctx core.FilterContext, vm *goja.Runtime, writer http.Resp
 			done:      make(chan struct{}),
 			listeners: make(map[string][]goja.Callable),
 		}
+		closers.AddCloser(func() error {
+			socketState.closeConn(websocket.CloseGoingAway)
+			socketState.finish()
+			return nil
+		})
 		socketObj := newWebSocketObject(vm, socketState)
-		responseObj := newResponseObject(vm, &webResponseState{
+		responseObj := newResponseObject(vm, loop, runtime, &webResponseState{
 			status: http.StatusSwitchingProtocols,
 			headers: http.Header{
 				"Connection": []string{"Upgrade"},

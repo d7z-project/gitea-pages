@@ -7,3 +7,6 @@ routes:
     js:
       exec: "index.js"
 
+  - path: "storage/stream"
+    js:
+      exec: "index.js"

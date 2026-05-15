@@ -1,0 +1,4 @@
+routes:
+  - path: "stream"
+    js:
+      exec: "index.js"

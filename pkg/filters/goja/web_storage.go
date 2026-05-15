@@ -35,9 +35,10 @@ type storageDirentSnapshot struct {
 
 type storageWriteOptions struct {
 	encoding string
-	append   bool
 	mkdir    bool
 	mode     os.FileMode
+	create   bool
+	truncate bool
 }
 
 type storageMkdirOptions struct {
@@ -55,7 +56,7 @@ type storageRmOptions struct {
 	force     bool
 }
 
-func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState, store mwstorage.Storage) *goja.Object {
+func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState, closers *Closers, store mwstorage.Storage) *goja.Object {
 	obj := vm.NewObject()
 
 	_ = obj.Set("child", func(args ...goja.Value) goja.Value {
@@ -63,7 +64,82 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		for _, arg := range args {
 			parts = append(parts, arg.String())
 		}
-		return newStorageAPI(vm, loop, runtime, store.Child(parts...))
+		return newStorageAPI(vm, loop, runtime, closers, store.Child(parts...))
+	})
+
+	_ = obj.Set("openReadable", func(targetValue, optionsValue goja.Value) (*goja.Object, error) {
+		target, err := storageRequiredPath(targetValue, false)
+		if err != nil {
+			return nil, err
+		}
+		offset := int64(0)
+		if !isNilish(optionsValue) {
+			obj, ok := valueObject(vm, optionsValue)
+			if !ok {
+				return nil, errors.New("invalid read options")
+			}
+			if value, ok := objectInt64(obj, "offset"); ok && value > 0 {
+				offset = value
+			}
+		}
+		stream := &readableStreamState{
+			open: func() (io.ReadCloser, error) {
+				reader, err := store.Open(target)
+				if err != nil {
+					return nil, err
+				}
+				if offset == 0 {
+					return reader, nil
+				}
+				seeker, ok := reader.(io.Seeker)
+				if !ok {
+					_ = reader.Close()
+					return nil, errors.New("stream offset is not supported by this storage backend")
+				}
+				if _, err := seeker.Seek(offset, io.SeekStart); err != nil {
+					_ = reader.Close()
+					return nil, err
+				}
+				return reader, nil
+			},
+		}
+		closers.AddCloser(stream.close)
+		return newReadableStreamObject(vm, loop, runtime, stream), nil
+	})
+
+	_ = obj.Set("openWritable", func(targetValue, optionsValue goja.Value) (*goja.Object, error) {
+		target, err := storageRequiredPath(targetValue, false)
+		if err != nil {
+			return nil, err
+		}
+		options, err := parseStorageWriteOptions(vm, optionsValue)
+		if err != nil {
+			return nil, err
+		}
+		stream := &writableStreamState{
+			preOpen: func() error {
+				if !options.mkdir {
+					return nil
+				}
+				parent := path.Dir(target)
+				if parent == "." {
+					return nil
+				}
+				return store.MkdirAll(parent, 0o755)
+			},
+			open: func() (io.WriteCloser, error) {
+				flags := os.O_WRONLY
+				if options.create {
+					flags |= os.O_CREATE
+				}
+				if options.truncate {
+					flags |= os.O_TRUNC
+				}
+				return store.OpenFile(target, flags, options.mode)
+			},
+		}
+		closers.AddCloser(stream.close)
+		return newWritableStreamObject(vm, loop, runtime, stream, nil), nil
 	})
 
 	_ = obj.Set("access", func(target string) *goja.Promise {
@@ -243,33 +319,6 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return err
 		}
-		return storageWriteFile(store, target, body, options)
-	})
-
-	_ = obj.Set("appendFile", func(targetValue, dataValue, optionsValue goja.Value) *goja.Promise {
-		target, body, err := storageWriteInput(vm, targetValue, dataValue)
-		if err != nil {
-			return rejectedPromise(vm, err)
-		}
-		options, err := parseStorageWriteOptions(vm, optionsValue)
-		if err != nil {
-			return rejectedPromise(vm, err)
-		}
-		options.append = true
-		return storageAsyncVoid(vm, loop, runtime, func() error {
-			return storageWriteFile(store, target, body, options)
-		})
-	})
-	_ = obj.Set("appendFileSync", func(targetValue, dataValue, optionsValue goja.Value) error {
-		target, body, err := storageWriteInput(vm, targetValue, dataValue)
-		if err != nil {
-			return err
-		}
-		options, err := parseStorageWriteOptions(vm, optionsValue)
-		if err != nil {
-			return err
-		}
-		options.append = true
 		return storageWriteFile(store, target, body, options)
 	})
 
@@ -518,7 +567,11 @@ func parseStorageEncoding(vm *goja.Runtime, value goja.Value) (string, error) {
 }
 
 func parseStorageWriteOptions(vm *goja.Runtime, value goja.Value) (storageWriteOptions, error) {
-	options := storageWriteOptions{mode: 0o644}
+	options := storageWriteOptions{
+		mode:     0o644,
+		create:   true,
+		truncate: true,
+	}
 	if isNilish(value) {
 		return options, nil
 	}
@@ -532,11 +585,14 @@ func parseStorageWriteOptions(vm *goja.Runtime, value goja.Value) (storageWriteO
 		}
 		options.encoding = encoding
 	}
-	if appendMode, ok := objectBool(obj, "append"); ok {
-		options.append = appendMode
-	}
 	if mkdir, ok := objectBool(obj, "mkdir"); ok {
 		options.mkdir = mkdir
+	}
+	if create, ok := objectBool(obj, "create"); ok {
+		options.create = create
+	}
+	if truncate, ok := objectBool(obj, "truncate"); ok {
+		options.truncate = truncate
 	}
 	if mode, ok := objectInt64(obj, "mode"); ok && mode > 0 {
 		options.mode = os.FileMode(mode)
@@ -615,10 +671,11 @@ func storageWriteFile(store mwstorage.Storage, target string, body []byte, optio
 			}
 		}
 	}
-	flags := os.O_CREATE | os.O_WRONLY
-	if options.append {
-		flags |= os.O_APPEND
-	} else {
+	flags := os.O_WRONLY
+	if options.create {
+		flags |= os.O_CREATE
+	}
+	if options.truncate {
 		flags |= os.O_TRUNC
 	}
 	file, err := store.OpenFile(target, flags, options.mode)
@@ -704,11 +761,13 @@ func storageCopyFile(store mwstorage.Storage, src, dest string) error {
 		return err
 	}
 	defer in.Close()
-	data, err := io.ReadAll(in)
+	out, err := store.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
-	return storageWriteFile(store, dest, data, storageWriteOptions{mode: 0o644})
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 func snapshotStorageInfo(target string, info os.FileInfo) storageInfoSnapshot {

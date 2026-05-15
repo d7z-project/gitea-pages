@@ -42,7 +42,11 @@ func installSSE(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWr
 			queue:   make(chan sseMessage),
 			closeCh: make(chan struct{}),
 		}
-		responseObj := newResponseObject(vm, &webResponseState{
+		closers.AddCloser(func() error {
+			state.finish()
+			return nil
+		})
+		responseObj := newResponseObject(vm, loop, runtime, &webResponseState{
 			status: http.StatusOK,
 			headers: http.Header{
 				"Content-Type":      []string{"text/event-stream; charset=utf-8"},
@@ -61,7 +65,7 @@ func installSSE(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWr
 				writer.Header().Set("Connection", "keep-alive")
 				writer.Header().Set("X-Accel-Buffering", "no")
 				writer.WriteHeader(http.StatusOK)
-				if err := safeSSEFlush(flusher); err != nil {
+				if err := safeHTTPFlush(flusher); err != nil {
 					state.finish()
 					return err
 				}
@@ -77,7 +81,7 @@ func installSSE(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWr
 					case msg := <-state.queue:
 						_, err := io.WriteString(writer, msg.payload)
 						if err == nil {
-							err = safeSSEFlush(flusher)
+							err = safeHTTPFlush(flusher)
 						}
 						msg.result <- err
 						close(msg.result)
@@ -159,7 +163,7 @@ func newSSEStreamObject(vm *goja.Runtime, state *sseState) *goja.Object {
 	return obj
 }
 
-func safeSSEFlush(flusher http.Flusher) (err error) {
+func safeHTTPFlush(flusher http.Flusher) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("sse flush panic: %v", r)

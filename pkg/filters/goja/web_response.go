@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"sync/atomic"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/eventloop"
 )
 
 const internalResponseKey = "__page_internal_response__"
@@ -16,18 +18,19 @@ type webResponseState struct {
 	status     int
 	statusText string
 	headers    http.Header
-	body       []byte
-	used       bool
+	body       bodySource
+	used       atomic.Bool
 	upgrade    func() error
+	stream     *responseStreamState
 }
 
-func installResponse(vm *goja.Runtime) error {
+func installResponse(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState) error {
 	ctor := func(call goja.ConstructorCall) *goja.Object {
 		state, err := responseStateFromConstructor(vm, call)
 		if err != nil {
 			panic(vm.ToValue(err.Error()))
 		}
-		return newResponseObject(vm, state)
+		return newResponseObject(vm, loop, runtime, state)
 	}
 	fn := vm.ToValue(ctor)
 	obj := fn.ToObject(vm)
@@ -43,13 +46,13 @@ func installResponse(vm *goja.Runtime) error {
 		state := &webResponseState{
 			status:  http.StatusOK,
 			headers: make(http.Header),
-			body:    body,
+			body:    newBufferedBodySource(body),
 		}
 		state.headers.Set("Content-Type", "application/json")
 		if len(init) > 0 {
 			applyResponseInit(vm, state, init[0])
 		}
-		return newResponseObject(vm, state)
+		return newResponseObject(vm, loop, runtime, state)
 	})
 	_ = obj.Set("redirect", func(location string, status ...int) *goja.Object {
 		code := http.StatusFound
@@ -61,12 +64,12 @@ func installResponse(vm *goja.Runtime) error {
 			headers: make(http.Header),
 		}
 		state.headers.Set("Location", location)
-		return newResponseObject(vm, state)
+		return newResponseObject(vm, loop, runtime, state)
 	})
 	return vm.Set("Response", fn)
 }
 
-func newResponseObject(vm *goja.Runtime, state *webResponseState) *goja.Object {
+func newResponseObject(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState, state *webResponseState) *goja.Object {
 	if state.status == 0 {
 		state.status = http.StatusOK
 	}
@@ -74,7 +77,7 @@ func newResponseObject(vm *goja.Runtime, state *webResponseState) *goja.Object {
 		state.statusText = http.StatusText(state.status)
 	}
 	obj := vm.NewObject()
-	bodyState := newBodyState(state.body, state.headers, &state.used)
+	bodyState := newBodyState(state.headers, &state.used, state.body, loop, runtime)
 	_ = obj.Set(internalResponseKey, state)
 	_ = obj.Set("status", state.status)
 	_ = obj.Set("statusText", state.statusText)
@@ -83,15 +86,39 @@ func newResponseObject(vm *goja.Runtime, state *webResponseState) *goja.Object {
 		return state.status >= 200 && state.status < 300
 	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
 	attachBodyMethods(vm, obj, bodyState)
-	_ = obj.Set("clone", func() *goja.Object {
-		return newResponseObject(vm, &webResponseState{
-			status:     state.status,
-			statusText: state.statusText,
-			headers:    cloneHeaderValues(state.headers),
-			body:       append([]byte(nil), state.body...),
-		})
+	_ = obj.Set("clone", func() (*goja.Object, error) {
+		cloned, err := cloneResponseState(state)
+		if err != nil {
+			return nil, err
+		}
+		return newResponseObject(vm, loop, runtime, cloned), nil
 	})
 	return obj
+}
+
+func cloneResponseState(current *webResponseState) (*webResponseState, error) {
+	if current == nil {
+		return nil, nil
+	}
+	if current.stream != nil {
+		return nil, errors.New("response stream cannot be cloned")
+	}
+	var clonedBody bodySource
+	var err error
+	if current.body != nil {
+		clonedBody, err = current.body.clone()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &webResponseState{
+		status:     current.status,
+		statusText: current.statusText,
+		headers:    cloneHeaderValues(current.headers),
+		body:       clonedBody,
+		upgrade:    current.upgrade,
+		stream:     current.stream,
+	}, nil
 }
 
 func responseStateFromConstructor(vm *goja.Runtime, call goja.ConstructorCall) (*webResponseState, error) {
@@ -104,7 +131,7 @@ func responseStateFromConstructor(vm *goja.Runtime, call goja.ConstructorCall) (
 		if err != nil {
 			return nil, err
 		}
-		state.body = body
+		state.body = newBufferedBodySource(body)
 	}
 	if len(call.Arguments) > 1 {
 		applyResponseInit(vm, state, call.Arguments[1])
@@ -155,16 +182,27 @@ func writeResponseValue(vm *goja.Runtime, writer http.ResponseWriter, value goja
 		}
 		return fmt.Errorf("handler must return Response, got %s", reflect.TypeOf(value.Export()))
 	}
+	if state.stream != nil {
+		return state.stream.serve(writer)
+	}
 	for key, values := range state.headers {
 		for _, item := range values {
 			writer.Header().Add(key, item)
 		}
 	}
 	writer.WriteHeader(state.status)
-	if len(state.body) == 0 {
+	if state.body == nil || state.body.empty() {
 		return nil
 	}
-	_, err := writer.Write(state.body)
+	bodyState := newBodyState(state.headers, &state.used, state.body, nil, nil)
+	data, err := consumeWebBody(bodyState)
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	_, err = writer.Write(data)
 	return err
 }
 

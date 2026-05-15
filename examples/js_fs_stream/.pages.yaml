@@ -1,0 +1,4 @@
+routes:
+  - path: "inspect"
+    js:
+      exec: "index.js"

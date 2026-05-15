@@ -7,7 +7,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -84,31 +83,35 @@ func (l *LocalProvider) List(_ context.Context, _, _, _, path string) ([]core.Di
 }
 
 func (l *LocalProvider) Open(_ context.Context, _, _, _, path string, _ http.Header) (*http.Response, error) {
-	var all []byte
-	recorder := httptest.NewRecorder()
 	l.overlayMu.RLock()
 	data, ok := l.overlay[strings.Trim(path, "/")]
 	l.overlayMu.RUnlock()
+	headers := make(http.Header)
 	if ok {
-		all = append([]byte(nil), data...)
-		recorder.Header().Add("Content-Length", strconv.FormatInt(int64(len(data)), 10))
-	} else {
-		open, err := os.Open(filepath.Join(l.path, path))
-		if err != nil {
-			return nil, errors.Join(err, os.ErrNotExist)
-		}
-		defer open.Close()
-		all, err = io.ReadAll(open)
-		if err != nil {
-			return nil, errors.Join(err, os.ErrNotExist)
-		}
-		stat, _ := open.Stat()
-		recorder.Header().Add("Content-Length", strconv.FormatInt(stat.Size(), 10))
-		recorder.Header().Add("Last-Modified", stat.ModTime().Format(http.TimeFormat))
+		headers.Add("Content-Length", strconv.FormatInt(int64(len(data)), 10))
+		headers.Add("Content-Type", mime.TypeByExtension(filepath.Ext(path)))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     headers,
+			Body:       io.NopCloser(bytes.NewReader(append([]byte(nil), data...))),
+		}, nil
 	}
 
-	recorder.Body = bytes.NewBuffer(all)
-	recorder.Header().Add("Content-Type", mime.TypeByExtension(filepath.Ext(path)))
-
-	return recorder.Result(), nil
+	open, err := os.Open(filepath.Join(l.path, path))
+	if err != nil {
+		return nil, errors.Join(err, os.ErrNotExist)
+	}
+	stat, err := open.Stat()
+	if err != nil {
+		_ = open.Close()
+		return nil, errors.Join(err, os.ErrNotExist)
+	}
+	headers.Add("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	headers.Add("Last-Modified", stat.ModTime().Format(http.TimeFormat))
+	headers.Add("Content-Type", mime.TypeByExtension(filepath.Ext(path)))
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     headers,
+		Body:       open,
+	}, nil
 }

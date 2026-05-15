@@ -1,15 +1,16 @@
 package goja
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	nurl "net/url"
 	"strings"
+	"sync/atomic"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/eventloop"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
@@ -20,26 +21,26 @@ type webRequestState struct {
 	url      string
 	remoteIP string
 	headers  http.Header
-	body     []byte
-	used     bool
+	body     bodySource
+	used     atomic.Bool
 	signal   *goja.Object
 	abort    *abortSignalState
 }
 
-func installRequest(vm *goja.Runtime) error {
+func installRequest(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState) error {
 	ctor := func(call goja.ConstructorCall) *goja.Object {
 		state, err := requestStateFromConstructor(vm, call)
 		if err != nil {
 			panic(vm.ToValue(err.Error()))
 		}
-		return newRequestObject(vm, state)
+		return newRequestObject(vm, loop, runtime, state)
 	}
 	return vm.Set("Request", vm.ToValue(ctor))
 }
 
-func newRequestObject(vm *goja.Runtime, state *webRequestState) *goja.Object {
+func newRequestObject(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState, state *webRequestState) *goja.Object {
 	obj := vm.NewObject()
-	bodyState := newBodyState(state.body, state.headers, &state.used)
+	bodyState := newBodyState(state.headers, &state.used, state.body, loop, runtime)
 	_ = obj.Set(internalRequestKey, state)
 	_ = obj.Set("method", state.method)
 	_ = obj.Set("url", state.url)
@@ -48,16 +49,12 @@ func newRequestObject(vm *goja.Runtime, state *webRequestState) *goja.Object {
 	_ = obj.Set("ip", state.remoteIP)
 	_ = obj.Set("RemoteIP", state.remoteIP)
 	attachBodyMethods(vm, obj, bodyState)
-	_ = obj.Set("clone", func() *goja.Object {
-		return newRequestObject(vm, &webRequestState{
-			method:   state.method,
-			url:      state.url,
-			remoteIP: state.remoteIP,
-			headers:  cloneHeaderValues(state.headers),
-			body:     append([]byte(nil), state.body...),
-			signal:   state.signal,
-			abort:    state.abort,
-		})
+	_ = obj.Set("clone", func() (*goja.Object, error) {
+		cloned, err := cloneRequestState(state)
+		if err != nil {
+			return nil, err
+		}
+		return newRequestObject(vm, loop, runtime, cloned), nil
 	})
 	return obj
 }
@@ -72,31 +69,41 @@ func newDefaultRequestState(vm *goja.Runtime) *webRequestState {
 	}
 }
 
-func cloneRequestState(current *webRequestState) *webRequestState {
+func cloneRequestState(current *webRequestState) (*webRequestState, error) {
 	if current == nil {
-		return nil
+		return nil, nil
+	}
+	var clonedBody bodySource
+	var err error
+	if current.body != nil {
+		clonedBody, err = current.body.clone()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &webRequestState{
 		method:   current.method,
 		url:      current.url,
 		remoteIP: current.remoteIP,
 		headers:  cloneHeaderValues(current.headers),
-		body:     append([]byte(nil), current.body...),
+		body:     clonedBody,
 		signal:   current.signal,
 		abort:    current.abort,
-	}
+	}, nil
 }
 
-func requestStateFromInput(vm *goja.Runtime, input goja.Value) *webRequestState {
+func requestStateFromInput(vm *goja.Runtime, input goja.Value) (*webRequestState, error) {
 	if current, ok := requestStateFromValue(vm, input); ok {
-		state := cloneRequestState(current)
-		state.used = false
-		return state
+		state, err := cloneRequestState(current)
+		if err != nil {
+			return nil, err
+		}
+		return state, nil
 	}
 
 	state := newDefaultRequestState(vm)
 	state.url = input.String()
-	return state
+	return state, nil
 }
 
 func applyRequestInit(vm *goja.Runtime, state *webRequestState, init goja.Value) error {
@@ -120,7 +127,7 @@ func applyRequestInit(vm *goja.Runtime, state *webRequestState, init goja.Value)
 		if err != nil {
 			return err
 		}
-		state.body = body
+		state.body = newBufferedBodySource(body)
 	}
 	if value, ok := objectValue(initObj, "signal"); ok {
 		signal, abort, err := abortSignalFromValue(vm, value)
@@ -139,8 +146,10 @@ func requestStateFromConstructor(vm *goja.Runtime, call goja.ConstructorCall) (*
 		return nil, errors.New("request requires input")
 	}
 
-	state := requestStateFromInput(vm, call.Arguments[0])
-
+	state, err := requestStateFromInput(vm, call.Arguments[0])
+	if err != nil {
+		return nil, err
+	}
 	if len(call.Arguments) > 1 {
 		if err := applyRequestInit(vm, state, call.Arguments[1]); err != nil {
 			return nil, err
@@ -165,54 +174,44 @@ func requestStateFromValue(vm *goja.Runtime, value goja.Value) (*webRequestState
 	return state, ok
 }
 
-func bodyBytesFromValue(vm *goja.Runtime, value goja.Value) ([]byte, error) {
-	if isNilish(value) {
-		return nil, nil
-	}
-	switch current := value.Export().(type) {
-	case nil:
-		return nil, nil
-	case string:
-		return []byte(current), nil
-	case []byte:
-		return append([]byte(nil), current...), nil
-	case goja.ArrayBuffer:
-		return append([]byte(nil), current.Bytes()...), nil
-	default:
-		if bs, ok := arrayBufferViewBytes(vm, value); ok {
-			return bs, nil
-		}
-		return nil, fmt.Errorf("unsupported body type: %T", current)
-	}
-}
-
-func newIncomingRequestObject(vm *goja.Runtime, req *http.Request, maxBodyBytes int64) (*goja.Object, error) {
-	var reader io.Reader = bytes.NewReader(nil)
-	if req.Body != nil {
-		reader = req.Body
-	}
-	if maxBodyBytes > 0 && req.Body != nil {
-		reader = io.LimitReader(req.Body, maxBodyBytes+1)
-	}
-	body, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
-	}
-	if maxBodyBytes > 0 && int64(len(body)) > maxBodyBytes {
-		return nil, fmt.Errorf("request body exceeds limit: %d", maxBodyBytes)
-	}
-	req.Body = cloneBody(body)
+func newIncomingRequestObject(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState, req *http.Request, maxBodyBytes int64, closers *Closers) (*goja.Object, error) {
 	info := core.RequestInfoFromRequest(req)
 	signal, abort := newAbortSignal(vm)
-	return newRequestObject(vm, &webRequestState{
+	var source bodySource
+	if req.Body != nil {
+		closers.AddCloser(req.Body.Close)
+		var (
+			read int64
+			used bool
+		)
+		source = newStreamingBodySource(func() (io.ReadCloser, error) {
+			if used {
+				return nil, errors.New("body stream already read")
+			}
+			used = true
+			reader := req.Body
+			if maxBodyBytes <= 0 {
+				return reader, nil
+			}
+			return newLimitedReadCloser(reader, func(n int) error {
+				read += int64(n)
+				if read > maxBodyBytes {
+					return fmt.Errorf("request body exceeds limit: %d", maxBodyBytes)
+				}
+				return nil
+			}), nil
+		})
+	}
+	requestObj := newRequestObject(vm, loop, runtime, &webRequestState{
 		method:   req.Method,
 		url:      absoluteRequestURL(req, info),
 		remoteIP: info.ClientIP,
 		headers:  cloneHeaderValues(req.Header),
-		body:     body,
+		body:     source,
 		signal:   signal,
 		abort:    abort,
-	}), nil
+	})
+	return requestObj, nil
 }
 
 func absoluteRequestURL(req *http.Request, info core.RequestInfo) string {

@@ -3,6 +3,7 @@ package goja
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -39,6 +40,7 @@ func installHostGlobals(
 	loop *eventloop.EventLoop,
 	eventPendingLimit int,
 	runtime *runtimeState,
+	closers *Closers,
 ) (*goja.Object, error) {
 	if eventPendingLimit <= 0 {
 		eventPendingLimit = defaultEventPendingLimit
@@ -127,10 +129,45 @@ func installHostGlobals(
 		"readTextSync": func(path string) (string, error) {
 			return ctx.PageVFS.ReadString(ctx, path)
 		},
+		"openReadable": func(path string, options ...goja.Value) (*goja.Object, error) {
+			offset := int64(0)
+			if len(options) > 0 && !isNilish(options[0]) {
+				obj, ok := valueObject(vm, options[0])
+				if !ok {
+					return nil, errors.New("invalid read options")
+				}
+				if value, ok := objectInt64(obj, "offset"); ok && value > 0 {
+					offset = value
+				}
+			}
+			stream := &readableStreamState{
+				open: func() (io.ReadCloser, error) {
+					reader, err := ctx.PageVFS.Open(ctx, path)
+					if err != nil {
+						return nil, err
+					}
+					if offset == 0 {
+						return reader, nil
+					}
+					seeker, ok := reader.(io.Seeker)
+					if !ok {
+						_ = reader.Close()
+						return nil, errors.New("stream offset is not supported by this fs backend")
+					}
+					if _, err := seeker.Seek(offset, io.SeekStart); err != nil {
+						_ = reader.Close()
+						return nil, err
+					}
+					return reader, nil
+				},
+			}
+			closers.AddCloser(stream.close)
+			return newReadableStreamObject(vm, loop, runtime, stream), nil
+		},
 	}); err != nil {
 		return nil, err
 	}
-	if err := vm.Set("storage", newStorageAPI(vm, loop, runtime, ctx.Storage)); err != nil {
+	if err := vm.Set("storage", newStorageAPI(vm, loop, runtime, closers, ctx.Storage)); err != nil {
 		return nil, err
 	}
 	if err := vm.Set("kv", map[string]any{

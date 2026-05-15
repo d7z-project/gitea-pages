@@ -51,10 +51,10 @@ func initRuntime(
 	if err := installHeaders(vm); err != nil {
 		return nil, err
 	}
-	if err := installRequest(vm); err != nil {
+	if err := installRequest(vm, jsLoop, runtime); err != nil {
 		return nil, err
 	}
-	if err := installResponse(vm); err != nil {
+	if err := installResponse(vm, jsLoop, runtime); err != nil {
 		return nil, err
 	}
 	if err := installTextCodecs(vm); err != nil {
@@ -66,10 +66,13 @@ func initRuntime(
 	if err := installFrameworkHelpers(vm); err != nil {
 		return nil, err
 	}
-	if err := installFetch(ctx, vm, jsLoop, sharedClient, global.Fetch, runtime); err != nil {
+	if err := installResponseStream(ctx, vm, jsLoop, runtime, closers); err != nil {
 		return nil, err
 	}
-	_, err := installHostGlobals(ctx, vm, jsLoop, global.Realtime.EventBuffer, runtime)
+	if err := installFetch(ctx, vm, jsLoop, sharedClient, global.Fetch, runtime, closers); err != nil {
+		return nil, err
+	}
+	_, err := installHostGlobals(ctx, vm, jsLoop, global.Realtime.EventBuffer, runtime, closers)
 	if err != nil {
 		return nil, err
 	}
@@ -87,5 +90,5 @@ func initRuntime(
 		}
 		closers.AddCloser(closer.Close)
 	}
-	return newIncomingRequestObject(vm, request, global.Request.MaxBodyBytes)
+	return newIncomingRequestObject(vm, jsLoop, runtime, request, global.Request.MaxBodyBytes, closers)
 }

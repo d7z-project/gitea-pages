@@ -1,11 +1,9 @@
 package goja
 
 import (
-	"bytes"
 	"crypto/md5"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -152,6 +150,9 @@ func runProgram(
 			runtime.beginClosing()
 			_ = closers.Close()
 			vm.Interrupt("context done")
+			timer := time.NewTimer(20 * time.Millisecond)
+			defer timer.Stop()
+			<-timer.C
 			finish(ctx.Err())
 		}()
 
@@ -209,14 +210,31 @@ func runProgram(
 					}()
 					return
 				}
+				if responseWritesAsync(vm, value) {
+					go func() {
+						finish(writeResponseValue(vm, writer, value))
+					}()
+					return
+				}
 				finish(writeResponseValue(vm, writer, value))
 			}, finish)
+			return
+		}
+		if responseWritesAsync(vm, result) {
+			go func() {
+				finish(writeResponseValue(vm, writer, result))
+			}()
 			return
 		}
 		finish(writeResponseValue(vm, writer, result))
 	})
 
 	return <-resultCh
+}
+
+func responseWritesAsync(vm *goja.Runtime, value goja.Value) bool {
+	state, ok := responseStateFromValue(vm, value)
+	return ok && state.stream != nil
 }
 
 func exportPromise(result goja.Value) (*goja.Promise, bool) {
@@ -278,8 +296,4 @@ func (c *Closers) Close() error {
 		return errors.Join(errs...)
 	}
 	return nil
-}
-
-func cloneBody(data []byte) io.ReadCloser {
-	return io.NopCloser(bytes.NewReader(data))
 }

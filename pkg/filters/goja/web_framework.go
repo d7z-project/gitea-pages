@@ -128,6 +128,10 @@ const frameworkBootstrap = `
     return createEventStream();
   }
 
+  function stream(init) {
+    return createStreamResponse(init);
+  }
+
   function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -220,6 +224,7 @@ const frameworkBootstrap = `
     setCookie,
     clearCookie,
     sse,
+    stream,
     router() {
       return new Router();
     },

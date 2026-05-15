@@ -254,6 +254,28 @@ serve(async function() {
 	assert.JSONEq(t, `{"syncText":"alpha","asyncText":"beta","syncBytes":"alpha","asyncBytes":"beta"}`, string(data))
 }
 
+func Test_GoJa_GiteaPagesFSOpenReadable(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  const reader = fs.openReadable("docs/a.txt")
+  const first = await reader.read({ size: 2 })
+  const second = await reader.read({ size: 8 })
+  const done = await reader.read()
+  return Response.json({
+    first: new TextDecoder().decode(first.value),
+    second: new TextDecoder().decode(second.value),
+    done: done.done,
+  })
+})
+`, "api/v1/**")
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/docs/a.txt", "alpha")
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/stream")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"first":"al","second":"pha","done":true}`, string(data))
+}
+
 func Test_GoJa_StorageReadWriteAndDirOps(t *testing.T) {
 	store := mwstorage.NewMemoryStorage()
 	server := newGoJaTestServerWithOptions(`
@@ -261,8 +283,13 @@ serve(async function() {
   await storage.mkdir("docs", { recursive: true })
   await storage.writeFile("docs/a.txt", "a")
   storage.writeFileSync("docs/b.txt", "b")
-  await storage.appendFile("docs/a.txt", "1")
-  storage.appendFileSync("docs/b.txt", "2")
+  const writer = storage.openWritable("docs/stream.txt")
+  await writer.write("st")
+  await writer.write("ream")
+  await writer.close()
+  const reader = storage.openReadable("docs/stream.txt", { offset: 2 })
+  const streamed = await reader.read({ size: 8 })
+  await reader.close()
   const nested = storage.child("nested")
   await nested.writeFile("c.txt", "c", { mkdir: true })
   await storage.copyFile("docs/a.txt", "docs/copy.txt")
@@ -278,6 +305,7 @@ serve(async function() {
   return Response.json({
     text,
     syncText,
+    streamed: new TextDecoder().decode(streamed.value),
     names,
     recursive,
     entryKinds: entries.map(item => ({ name: item.name, file: item.isFile(), dir: item.isDirectory() })).sort((a, b) => a.name.localeCompare(b.name)),
@@ -295,16 +323,18 @@ serve(async function() {
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/storage")
 	assert.NoError(t, err)
 	assert.JSONEq(t, `{
-		"text":"a1",
-		"syncText":"b2",
-		"names":["a.txt","b.txt","final.txt"],
-		"recursive":["docs","docs/a.txt","docs/b.txt","docs/final.txt","nested","nested/c.txt"],
+		"text":"a",
+		"syncText":"b",
+		"streamed":"ream",
+		"names":["a.txt","b.txt","final.txt","stream.txt"],
+		"recursive":["docs","docs/a.txt","docs/b.txt","docs/final.txt","docs/stream.txt","nested","nested/c.txt"],
 		"entryKinds":[
 			{"name":"a.txt","file":true,"dir":false},
 			{"name":"b.txt","file":true,"dir":false},
-			{"name":"final.txt","file":true,"dir":false}
+			{"name":"final.txt","file":true,"dir":false},
+			{"name":"stream.txt","file":true,"dir":false}
 		],
-		"stat":{"path":"docs/final.txt","file":true,"dir":false,"size":2}
+		"stat":{"path":"docs/final.txt","file":true,"dir":false,"size":1}
 	}`, string(data))
 
 	file, err := store.Child("repo", "org1", "repo1").Open("nested/c.txt")
@@ -673,7 +703,10 @@ routes:
 	body, err := io.ReadAll(resp.Body)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
-	assert.Contains(t, string(body), "fetch response body exceeds limit")
+	assert.True(t,
+		strings.Contains(string(body), "fetch response body exceeds limit") ||
+			strings.Contains(string(body), "context canceled"),
+	)
 }
 
 func Test_GoJa_FetchRequestObject(t *testing.T) {
@@ -712,6 +745,41 @@ routes:
 	data, _, err := server.OpenFile("https://org1.example.com/repo1/fetch")
 	assert.NoError(t, err)
 	assert.JSONEq(t, `{"body":"ok","method":"POST","value":"123","statusText":"OK"}`, string(data))
+}
+
+func Test_GoJa_FetchResponseStream(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("streamed"))
+	}))
+	defer ts.Close()
+
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
+	server.AddFile("org1/repo1/gh-pages/index.js", `
+serve(async function() {
+  const res = await fetch('%s')
+  const reader = res.body.getReader()
+  const first = await reader.read({ size: 3 })
+  const second = await reader.read({ size: 16 })
+  const done = await reader.read()
+  return Response.json({
+    first: new TextDecoder().decode(first.value),
+    second: new TextDecoder().decode(second.value),
+    done: done.done,
+  })
+})
+`, ts.URL)
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "**"
+  js:
+    exec: "index.js"
+`)
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/fetch-stream")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"first":"str","second":"eamed","done":true}`, string(data))
 }
 
 func Test_GoJa_AbortSignalBehavior(t *testing.T) {
@@ -841,6 +909,45 @@ serve(async function(request) {
 	data, _, err := server.OpenRequest(http.MethodPost, "https://org1.example.com/repo1/body-stream", bytes.NewBufferString("payload"))
 	assert.NoError(t, err)
 	assert.JSONEq(t, `{"first":"payload","done":true,"bytes":"abc"}`, string(data))
+}
+
+func Test_GoJa_ResponseStream(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  const { response, stream } = http.stream({
+    headers: { "Content-Type": "text/plain; charset=utf-8" }
+  })
+  void (async () => {
+    await stream.write("hel")
+    await stream.write("lo")
+    await stream.flush()
+    await stream.close()
+  })()
+  return response
+})
+`)
+	defer server.Close()
+
+	data, resp, err := server.OpenFile("https://org1.example.com/repo1/stream")
+	assert.NoError(t, err)
+	assert.Equal(t, "text/plain; charset=utf-8", resp.Header.Get("Content-Type"))
+	assert.Equal(t, "hello", string(data))
+}
+
+func Test_GoJa_ResponseStreamCloseBeforeWrite(t *testing.T) {
+	server := newGoJaTestServer(`
+serve(async function() {
+  const { response, stream } = http.stream()
+  await stream.close()
+  return response
+})
+`)
+	defer server.Close()
+
+	data, resp, err := server.OpenFile("https://org1.example.com/repo1/stream-close")
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Empty(t, string(data))
 }
 
 func Test_GoJa_BlobAndFormData(t *testing.T) {

@@ -78,6 +78,10 @@ declare global {
             stream: EventStream;
             response: Response;
         };
+        stream(init?: ResponseInit): {
+            stream: WritableByteStream;
+            response: Response;
+        };
         router(): Router;
     }
 
@@ -112,6 +116,27 @@ declare global {
         readText(path: string): Promise<string>;
         readSync(path: string): Uint8Array;
         readTextSync(path: string): string;
+        openReadable(path: string, options?: { offset?: number }): ReadableByteStream;
+    }
+
+    interface ReadableByteStreamReadResult {
+        done: boolean;
+        value?: Uint8Array;
+    }
+
+    interface ReadableByteStream {
+        read(options?: { size?: number }): Promise<ReadableByteStreamReadResult>;
+        cancel(reason?: string): Promise<void>;
+        close(): Promise<void>;
+        readonly closed: boolean;
+    }
+
+    interface WritableByteStream {
+        write(chunk: string | Uint8Array | ArrayBuffer): Promise<void>;
+        flush(): Promise<void>;
+        close(): Promise<void>;
+        abort(reason?: string): Promise<void>;
+        readonly closed: boolean;
     }
 
     type StorageEncoding = "utf8";
@@ -140,8 +165,9 @@ declare global {
     interface StorageWriteFileOptions {
         encoding?: StorageEncoding;
         mode?: number;
-        append?: boolean;
         mkdir?: boolean;
+        create?: boolean;
+        truncate?: boolean;
     }
 
     interface StorageMkdirOptions {
@@ -175,12 +201,12 @@ declare global {
         lstatSync(path: string): StorageStat;
         readdir(path?: string, options?: StorageReaddirOptions): Promise<string[] | StorageDirent[]>;
         readdirSync(path?: string, options?: StorageReaddirOptions): string[] | StorageDirent[];
+        openReadable(path: string, options?: { offset?: number }): ReadableByteStream;
+        openWritable(path: string, options?: Omit<StorageWriteFileOptions, "encoding">): WritableByteStream;
         readFile(path: string, options?: StorageReadFileOptions | StorageEncoding): Promise<Uint8Array | string>;
         readFileSync(path: string, options?: StorageReadFileOptions | StorageEncoding): Uint8Array | string;
         writeFile(path: string, data: string | Uint8Array | ArrayBuffer, options?: StorageWriteFileOptions): Promise<void>;
         writeFileSync(path: string, data: string | Uint8Array | ArrayBuffer, options?: StorageWriteFileOptions): void;
-        appendFile(path: string, data: string | Uint8Array | ArrayBuffer, options?: Omit<StorageWriteFileOptions, "append">): Promise<void>;
-        appendFileSync(path: string, data: string | Uint8Array | ArrayBuffer, options?: Omit<StorageWriteFileOptions, "append">): void;
         mkdir(path: string, options?: StorageMkdirOptions): Promise<void>;
         mkdirSync(path: string, options?: StorageMkdirOptions): void;
         rm(path: string, options?: StorageRmOptions): Promise<void>;

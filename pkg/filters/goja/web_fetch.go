@@ -81,7 +81,7 @@ func restrictedDialContext(cfg FetchConfig, lookup lookupNetIPFunc, dial dialCon
 	}
 }
 
-func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLoop, client *http.Client, cfg FetchConfig, runtime *runtimeState) error {
+func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLoop, client *http.Client, cfg FetchConfig, runtime *runtimeState, closers *Closers) error {
 	return vm.Set("fetch", func(resource goja.Value, init ...goja.Value) *goja.Promise {
 		promise, resolve, reject := vm.NewPromise()
 		if !cfg.Enabled {
@@ -89,7 +89,11 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 			return promise
 		}
 
-		requestState := requestStateFromInput(vm, resource)
+		requestState, err := requestStateFromInput(vm, resource)
+		if err != nil {
+			_ = reject(err)
+			return promise
+		}
 		if len(init) > 0 && !isNilish(init[0]) {
 			if err := applyRequestInit(vm, requestState, init[0]); err != nil {
 				_ = reject(err)
@@ -108,11 +112,6 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 			_ = reject(errRuntimeClosing)
 			return promise
 		}
-
-		body := io.Reader(nil)
-		if len(requestState.body) > 0 {
-			body = bytes.NewReader(requestState.body)
-		}
 		headers := cloneHeaderValues(requestState.headers)
 
 		go func() {
@@ -129,6 +128,20 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 					case <-reqCtx.Done():
 					}
 				}()
+			}
+
+			var body io.Reader
+			if requestState.body != nil && !requestState.body.empty() {
+				payload, err := consumeWebBody(newBodyState(requestState.headers, &requestState.used, requestState.body, nil, runtime))
+				if err != nil {
+					runtime.runOnLoop(loop, func(vm *goja.Runtime) {
+						_ = reject(err)
+					})
+					return
+				}
+				if len(payload) > 0 {
+					body = bytes.NewReader(payload)
+				}
 			}
 
 			req, err := http.NewRequestWithContext(reqCtx, requestState.method, requestState.url, body)
@@ -151,38 +164,71 @@ func installFetch(ctx context.Context, vm *goja.Runtime, loop *eventloop.EventLo
 				})
 				return
 			}
-			defer resp.Body.Close()
-
-			reader := io.Reader(resp.Body)
-			if cfg.MaxResponseBodyBytes > 0 {
-				reader = io.LimitReader(resp.Body, cfg.MaxResponseBodyBytes+1)
-			}
-			respBody, err := io.ReadAll(reader)
-			if err != nil {
-				runtime.runOnLoop(loop, func(*goja.Runtime) {
-					_ = reject(err)
-				})
-				return
-			}
-			if cfg.MaxResponseBodyBytes > 0 && int64(len(respBody)) > cfg.MaxResponseBodyBytes {
-				runtime.runOnLoop(loop, func(*goja.Runtime) {
+			if cfg.MaxResponseBodyBytes > 0 && resp.ContentLength > cfg.MaxResponseBodyBytes {
+				_ = resp.Body.Close()
+				runtime.runOnLoop(loop, func(vm *goja.Runtime) {
 					_ = reject(errors.New("fetch response body exceeds limit"))
 				})
 				return
 			}
+			closers.AddCloser(resp.Body.Close)
 
 			runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-				_ = resolve(newResponseObject(vm, &webResponseState{
+				var (
+					read int64
+					used bool
+				)
+				bodySource := newStreamingBodySource(func() (io.ReadCloser, error) {
+					if used {
+						return nil, errors.New("body stream already read")
+					}
+					used = true
+					if cfg.MaxResponseBodyBytes <= 0 {
+						return resp.Body, nil
+					}
+					return newLimitedReadCloser(resp.Body, func(n int) error {
+						read += int64(n)
+						if read > cfg.MaxResponseBodyBytes {
+							return errors.New("fetch response body exceeds limit")
+						}
+						return nil
+					}), nil
+				})
+				_ = resolve(newResponseObject(vm, loop, runtime, &webResponseState{
 					status:     resp.StatusCode,
 					statusText: http.StatusText(resp.StatusCode),
 					headers:    cloneHeaderValues(resp.Header),
-					body:       respBody,
+					body:       bodySource,
 				}))
 			})
 		}()
 
 		return promise
 	})
+}
+
+type limitedReadCloser struct {
+	reader io.ReadCloser
+	onRead func(int) error
+}
+
+func newLimitedReadCloser(reader io.ReadCloser, onRead func(int) error) io.ReadCloser {
+	return &limitedReadCloser{reader: reader, onRead: onRead}
+}
+
+func (l *limitedReadCloser) Read(p []byte) (int, error) {
+	n, err := l.reader.Read(p)
+	if n > 0 && l.onRead != nil {
+		if limitErr := l.onRead(n); limitErr != nil {
+			_ = l.reader.Close()
+			return n, limitErr
+		}
+	}
+	return n, err
+}
+
+func (l *limitedReadCloser) Close() error {
+	return l.reader.Close()
 }
 
 func validateFetchTarget(rawURL string, cfg FetchConfig) error {
