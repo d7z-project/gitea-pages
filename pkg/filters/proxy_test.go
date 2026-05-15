@@ -39,6 +39,7 @@ func TestRewriteProxyRequestStripsSensitiveHeadersAndRebuildsForwarding(t *testi
 	assert.Empty(t, pr.Out.Header.Get("Cookie"))
 	assert.Empty(t, pr.Out.Header.Get("X-Test-Strip"))
 	assert.Equal(t, "198.51.100.20", pr.Out.Header.Get("X-Forwarded-For"))
+	assert.Equal(t, `for=198.51.100.20;proto=https;host=org1.example.com`, pr.Out.Header.Get("Forwarded"))
 	assert.Equal(t, "https", pr.Out.Header.Get("X-Forwarded-Proto"))
 	assert.Equal(t, "org1.example.com", pr.Out.Header.Get("X-Forwarded-Host"))
 	assert.Equal(t, "198.51.100.20", pr.Out.Header.Get("X-Real-IP"))
@@ -65,10 +66,60 @@ func TestRewriteProxyRequestTrustsConfiguredForwardedChain(t *testing.T) {
 		PageContent: &core.PageContent{Owner: "org1", Repo: "repo1", Path: "api"},
 	})
 
-	assert.Equal(t, "198.51.100.10, 10.0.0.1, 127.0.0.1", pr.Out.Header.Get("X-Forwarded-For"))
+	assert.Equal(t, "198.51.100.10", pr.Out.Header.Get("X-Forwarded-For"))
+	assert.Equal(t, `for=198.51.100.10;proto=https;host=org1.example.com`, pr.Out.Header.Get("Forwarded"))
 	assert.Equal(t, "https", pr.Out.Header.Get("X-Forwarded-Proto"))
 	assert.Equal(t, "198.51.100.10", pr.Out.Header.Get("X-Real-IP"))
 	assert.Equal(t, "198.51.100.10", pr.Out.Header.Get("X-Page-IP"))
+}
+
+func TestRewriteProxyRequestTrustsConfiguredIPv6ForwardedChain(t *testing.T) {
+	target, err := url.Parse("https://upstream.example")
+	require.NoError(t, err)
+	policy, err := core.NewTrustedProxyPolicy([]string{"2001:db8:1::/48"})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.example/repo1/api", nil)
+	req.Host = "org1.example.com"
+	req.RemoteAddr = "[2001:db8:1::2]:1234"
+	req.Header.Set("X-Forwarded-For", "[2001:db8:feed::10]:4321, 2001:db8:1::1")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req = req.WithContext(core.ContextWithRequestInfo(req.Context(), core.ResolveRequestInfo(req, policy)))
+
+	outReq := req.Clone(req.Context())
+	pr := &httputil.ProxyRequest{In: req, Out: outReq}
+	rewriteProxyRequest(pr, req, target, "/", defaultProxyStripHeaders, core.FilterContext{
+		PageContent: &core.PageContent{Owner: "org1", Repo: "repo1", Path: "api"},
+	})
+
+	assert.Equal(t, "2001:db8:feed::10", pr.Out.Header.Get("X-Forwarded-For"))
+	assert.Equal(t, `for="[2001:db8:feed::10]";proto=https;host=org1.example.com`, pr.Out.Header.Get("Forwarded"))
+	assert.Equal(t, "https", pr.Out.Header.Get("X-Forwarded-Proto"))
+	assert.Equal(t, "2001:db8:feed::10", pr.Out.Header.Get("X-Real-IP"))
+	assert.Equal(t, "2001:db8:feed::10", pr.Out.Header.Get("X-Page-IP"))
+}
+
+func TestRewriteProxyRequestBuildsForwardedForMappedIPv6Peer(t *testing.T) {
+	target, err := url.Parse("https://upstream.example")
+	require.NoError(t, err)
+	policy, err := core.NewTrustedProxyPolicy([]string{"127.0.0.1/32"})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.example/repo1/api", nil)
+	req.Host = "org1.example.com"
+	req.RemoteAddr = "[::ffff:127.0.0.1]:1234"
+	req.Header.Set("Forwarded", `for=198.51.100.10;proto=https`)
+	req = req.WithContext(core.ContextWithRequestInfo(req.Context(), core.ResolveRequestInfo(req, policy)))
+
+	outReq := req.Clone(req.Context())
+	pr := &httputil.ProxyRequest{In: req, Out: outReq}
+	rewriteProxyRequest(pr, req, target, "/", defaultProxyStripHeaders, core.FilterContext{
+		PageContent: &core.PageContent{Owner: "org1", Repo: "repo1", Path: "api"},
+	})
+
+	assert.Equal(t, "198.51.100.10", pr.Out.Header.Get("X-Forwarded-For"))
+	assert.Equal(t, `for=198.51.100.10;proto=https;host=org1.example.com`, pr.Out.Header.Get("Forwarded"))
+	assert.Equal(t, "198.51.100.10", pr.Out.Header.Get("X-Real-IP"))
 }
 
 func TestParseProxyTargetRequiresHTTPS(t *testing.T) {

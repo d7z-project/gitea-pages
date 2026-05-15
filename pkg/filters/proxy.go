@@ -105,22 +105,7 @@ func rewriteProxyRequest(pr *httputil.ProxyRequest, in *http.Request, target *ur
 	pr.Out.Header.Set("X-Page-Host", in.Host)
 	pr.Out.Header.Set("X-Forwarded-Host", in.Host)
 	pr.Out.Header.Set("X-Forwarded-Proto", origin.Scheme)
-	if !origin.TrustedProxy || origin.PeerIP == "" {
-		pr.Out.Header.Set("X-Forwarded-For", origin.ClientIP)
-		return
-	}
-	chain := make([]string, 0, 8)
-	for _, value := range in.Header.Values("X-Forwarded-For") {
-		for _, part := range strings.Split(value, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			chain = append(chain, part)
-		}
-	}
-	chain = append(chain, origin.PeerIP)
-	pr.Out.Header.Set("X-Forwarded-For", strings.Join(chain, ", "))
+	setForwardingHeaders(pr.Out.Header, origin, in.Host)
 }
 
 func parseProxyTarget(raw string) (*url.URL, error) {
@@ -154,6 +139,45 @@ func normalizeHeaderNames(headers []string) []string {
 		result = append(result, header)
 	}
 	return result
+}
+
+func setForwardingHeaders(headers http.Header, origin core.RequestInfo, host string) {
+	if origin.ClientIP == "" {
+		return
+	}
+	headers.Set("X-Forwarded-For", origin.ClientIP)
+	headers.Set("Forwarded", formatForwardedHeader(origin.ClientIP, origin.Scheme, host))
+}
+
+func formatForwardedHeader(clientIP, scheme, host string) string {
+	element := "for=" + formatForwardedNode(clientIP)
+	if scheme == "http" || scheme == "https" {
+		element += ";proto=" + scheme
+	}
+	if host != "" {
+		element += ";host=" + formatForwardedValue(host)
+	}
+	return element
+}
+
+func formatForwardedNode(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if strings.Contains(addr, ":") && !strings.HasPrefix(addr, "[") {
+		return formatForwardedValue("[" + addr + "]")
+	}
+	return formatForwardedValue(addr)
+}
+
+func formatForwardedValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return `""`
+	}
+	if strings.ContainsAny(value, `:;, "=\\`) {
+		replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+		return `"` + replacer.Replace(value) + `"`
+	}
+	return value
 }
 
 func newProxyTransport() http.RoundTripper {

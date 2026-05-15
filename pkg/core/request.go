@@ -15,10 +15,10 @@ type TrustedProxyPolicy struct {
 }
 
 type RequestInfo struct {
-	ClientIP     string
-	PeerIP       string
-	Scheme       string
-	TrustedProxy bool
+	ClientIP string
+	PeerIP   string
+	Scheme   string
+	Host     string
 }
 
 func NewTrustedProxyPolicy(entries []string) (*TrustedProxyPolicy, error) {
@@ -33,14 +33,14 @@ func NewTrustedProxyPolicy(entries []string) (*TrustedProxyPolicy, error) {
 			if err != nil {
 				return nil, err
 			}
-			policy.prefixes = append(policy.prefixes, prefix.Masked())
+			policy.prefixes = append(policy.prefixes, normalizeTrustedPrefix(prefix))
 			continue
 		}
 		addr, err := netip.ParseAddr(entry)
 		if err != nil {
 			return nil, err
 		}
-		policy.prefixes = append(policy.prefixes, netip.PrefixFrom(addr, addr.BitLen()))
+		policy.prefixes = append(policy.prefixes, normalizeTrustedPrefix(netip.PrefixFrom(addr, addr.BitLen())))
 	}
 	return policy, nil
 }
@@ -76,17 +76,15 @@ func RequestInfoFromRequest(r *http.Request) RequestInfo {
 }
 
 func ResolveRequestInfo(r *http.Request, policy *TrustedProxyPolicy) RequestInfo {
-	peerIP := ""
-	if r != nil {
-		peerIP = strings.TrimSpace(r.RemoteAddr)
-		if host, _, err := net.SplitHostPort(peerIP); err == nil {
-			peerIP = host
-		}
-	}
+	peerIP, peerAddr, peerAddrOK := resolvePeerAddr(r)
 	info := RequestInfo{
 		ClientIP: peerIP,
 		PeerIP:   peerIP,
 		Scheme:   "http",
+		Host:     "",
+	}
+	if r != nil {
+		info.Host = r.Host
 	}
 	if r != nil && r.TLS != nil {
 		info.Scheme = "https"
@@ -94,46 +92,35 @@ func ResolveRequestInfo(r *http.Request, policy *TrustedProxyPolicy) RequestInfo
 	if r == nil {
 		return info
 	}
-	peerAddr, ok := parseAddr(peerIP)
-	if policy == nil || !ok || !policy.isTrusted(peerAddr) {
+	if policy == nil || !peerAddrOK || !policy.isTrusted(peerAddr) {
 		return info
 	}
-	info.TrustedProxy = true
-
-	chain := make([]netip.Addr, 0, 8)
-	for _, value := range r.Header.Values("X-Forwarded-For") {
-		for _, part := range strings.Split(value, ",") {
-			if addr, ok := parseAddr(part); ok {
-				chain = append(chain, addr)
-			}
-		}
+	clientIP, scheme, host := parseTrustedForwarding(r, policy, peerAddr)
+	if clientIP != "" {
+		info.ClientIP = clientIP
 	}
-	chain = append(chain, peerAddr)
-	for i := len(chain) - 1; i >= 0; i-- {
-		if !policy.isTrusted(chain[i]) {
-			info.ClientIP = chain[i].String()
-			break
-		}
+	if scheme != "" {
+		info.Scheme = scheme
 	}
-	if info.ClientIP == peerIP {
-		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
-			if addr, ok := parseAddr(realIP); ok {
-				info.ClientIP = addr.String()
-			}
-		} else if len(chain) > 0 {
-			info.ClientIP = chain[0].String()
-		}
-	}
-	for _, value := range r.Header.Values("X-Forwarded-Proto") {
-		for _, part := range strings.Split(value, ",") {
-			part = strings.ToLower(strings.TrimSpace(part))
-			if part == "http" || part == "https" {
-				info.Scheme = part
-				return info
-			}
-		}
+	if host != "" {
+		info.Host = host
 	}
 	return info
+}
+
+func resolvePeerAddr(r *http.Request) (string, netip.Addr, bool) {
+	if r == nil {
+		return "", netip.Addr{}, false
+	}
+	peerIP := strings.TrimSpace(r.RemoteAddr)
+	if host, _, err := net.SplitHostPort(peerIP); err == nil {
+		peerIP = host
+	}
+	peerAddr, ok := parseAddr(peerIP)
+	if ok {
+		peerIP = peerAddr.String()
+	}
+	return peerIP, peerAddr, ok
 }
 
 func parseAddr(raw string) (netip.Addr, bool) {
@@ -149,4 +136,183 @@ func parseAddr(raw string) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 	return addr.Unmap(), true
+}
+
+func normalizeTrustedPrefix(prefix netip.Prefix) netip.Prefix {
+	prefix = prefix.Masked()
+	addr := prefix.Addr()
+	if addr.Is4In6() && prefix.Bits() >= 96 {
+		return netip.PrefixFrom(addr.Unmap(), prefix.Bits()-96).Masked()
+	}
+	return prefix
+}
+
+func parseTrustedForwarding(r *http.Request, policy *TrustedProxyPolicy, peerAddr netip.Addr) (string, string, string) {
+	if clientIP, scheme, host, ok := parseForwardedValues(r.Header.Values("Forwarded"), policy, peerAddr); ok {
+		return clientIP, scheme, host
+	}
+	return parseLegacyForwardedValues(
+		r.Header.Values("X-Forwarded-For"),
+		r.Header.Values("X-Forwarded-Proto"),
+		r.Header.Values("X-Forwarded-Host"),
+		r.Header.Values("X-Real-IP"),
+		policy,
+		peerAddr,
+	)
+}
+
+func parseLegacyForwardedValues(forValues, protoValues, hostValues, realIPValues []string, policy *TrustedProxyPolicy, peerAddr netip.Addr) (string, string, string) {
+	chain := make([]netip.Addr, 0, 8)
+	for _, value := range forValues {
+		for _, part := range strings.Split(value, ",") {
+			if addr, ok := parseAddr(part); ok {
+				chain = append(chain, addr)
+			}
+		}
+	}
+	clientIP := resolveClientIPFromChain(chain, policy, peerAddr)
+	if clientIP == "" {
+		for _, value := range realIPValues {
+			if addr, ok := parseAddr(value); ok {
+				clientIP = addr.String()
+				break
+			}
+		}
+	}
+	return clientIP, firstForwardedProto(protoValues), firstForwardedHost(hostValues)
+}
+
+func parseForwardedValues(values []string, policy *TrustedProxyPolicy, peerAddr netip.Addr) (string, string, string, bool) {
+	chain := make([]netip.Addr, 0, 8)
+	proto := ""
+	host := ""
+	for _, value := range values {
+		for _, element := range splitHeaderValues(value, ',') {
+			var forwardedAddr netip.Addr
+			var hasForwardedAddr bool
+			for _, param := range splitHeaderValues(element, ';') {
+				key, rawValue, ok := strings.Cut(param, "=")
+				if !ok {
+					continue
+				}
+				key = strings.ToLower(strings.TrimSpace(key))
+				rawValue = trimQuotedString(strings.TrimSpace(rawValue))
+				switch key {
+				case "for":
+					if hasForwardedAddr {
+						continue
+					}
+					if addr, ok := parseForwardedNode(rawValue); ok {
+						forwardedAddr = addr
+						hasForwardedAddr = true
+					}
+				case "proto":
+					if proto != "" {
+						continue
+					}
+					current := strings.ToLower(strings.TrimSpace(rawValue))
+					if current == "http" || current == "https" {
+						proto = current
+					}
+				case "host":
+					if host == "" {
+						host = rawValue
+					}
+				}
+			}
+			if hasForwardedAddr {
+				chain = append(chain, forwardedAddr)
+			}
+		}
+	}
+	if len(chain) == 0 {
+		return "", "", "", false
+	}
+	return resolveClientIPFromChain(chain, policy, peerAddr), proto, host, true
+}
+
+func resolveClientIPFromChain(chain []netip.Addr, policy *TrustedProxyPolicy, peerAddr netip.Addr) string {
+	if len(chain) > 0 {
+		for i := len(chain) - 1; i >= 0; i-- {
+			if !policy.isTrusted(chain[i]) {
+				return chain[i].String()
+			}
+		}
+		return chain[0].String()
+	}
+	if !policy.isTrusted(peerAddr) {
+		return peerAddr.String()
+	}
+	return ""
+}
+
+func firstForwardedProto(values []string) string {
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.ToLower(strings.TrimSpace(part))
+			if part == "http" || part == "https" {
+				return part
+			}
+		}
+	}
+	return ""
+}
+
+func firstForwardedHost(values []string) string {
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				return part
+			}
+		}
+	}
+	return ""
+}
+
+func parseForwardedNode(raw string) (netip.Addr, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return netip.Addr{}, false
+	}
+	if strings.EqualFold(raw, "unknown") || strings.HasPrefix(raw, "_") {
+		return netip.Addr{}, false
+	}
+	return parseAddr(raw)
+}
+
+func splitHeaderValues(raw string, sep rune) []string {
+	parts := make([]string, 0, 4)
+	var current strings.Builder
+	inQuotes := false
+	escape := false
+	for _, r := range raw {
+		switch {
+		case escape:
+			current.WriteRune(r)
+			escape = false
+		case r == '\\' && inQuotes:
+			escape = true
+		case r == '"':
+			inQuotes = !inQuotes
+			current.WriteRune(r)
+		case r == sep && !inQuotes:
+			parts = append(parts, strings.TrimSpace(current.String()))
+			current.Reset()
+		default:
+			current.WriteRune(r)
+		}
+	}
+	parts = append(parts, strings.TrimSpace(current.String()))
+	return parts
+}
+
+func trimQuotedString(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		raw = raw[1 : len(raw)-1]
+	}
+	raw = strings.ReplaceAll(raw, `\"`, `"`)
+	raw = strings.ReplaceAll(raw, `\\`, `\`)
+	return raw
 }
