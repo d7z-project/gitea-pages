@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"log/slog"
@@ -175,7 +176,9 @@ func main() {
 		slog.Debug("shutdown gracefully")
 		_ = svc.Close()
 	}()
-	_ = svc.ListenAndServe()
+	if err = svc.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalln(err)
+	}
 }
 
 func parseSameSite(value string) http.SameSite {

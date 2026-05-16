@@ -198,7 +198,10 @@ func LoadConfig(path string) (*Config, error) {
 	if c.Page.DefaultBranch == "" {
 		c.Page.DefaultBranch = "gh-pages"
 	}
-	defaultErr := utils.MustTemplate(defaultErrPage)
+	defaultErr, err := utils.NewTemplate().Parse(defaultErrPage)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse built-in error template")
+	}
 	c.pageErrUnauthorized, err = loadErrorTemplate(c.Page.ErrUnauthorized, defaultErr)
 	if err != nil {
 		return nil, err
@@ -230,7 +233,11 @@ func loadErrorTemplate(path string, fallback *template.Template) (*template.Temp
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read file %s", path)
 	}
-	return utils.MustTemplate(string(data)), nil
+	parse, err := utils.NewTemplate().Parse(string(data))
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse template %s", path)
+	}
+	return parse, nil
 }
 
 func loadProviderConfigs(data []byte, section string, commonKeys map[string]struct{}) (map[string]json.RawMessage, error) {
