@@ -25,12 +25,12 @@ type Config struct {
 
 	TrustedProxies []string `yaml:"trusted_proxies"` // 受信任反向代理网段
 
-	DB             ConfigDatabase `yaml:"db"`       // 程序内部使用的存储
-	UserDB         ConfigDatabase `yaml:"user_db"`  // 用户脚本使用的存储
+	DB             ConfigDatabase `yaml:"db"`       // 程序内部使用的 KV 存储
+	UserDB         ConfigDatabase `yaml:"user_db"`  // 用户脚本使用的 KV 存储
 	LegacyDatabase ConfigDatabase `yaml:"database"` // 兼容旧配置
 
-	Event   ConfigEvent   `yaml:"event"`   // 事件传递
-	Storage ConfigStorage `yaml:"storage"` // goja 文件存储
+	Event   ConfigEvent   `yaml:"event"`   // shared/version event 使用的事件总线
+	Storage ConfigStorage `yaml:"storage"` // goja storage.* 脚本存储
 
 	Provider ConfigProvider `yaml:"provider"` // 内容 Provider 配置
 
@@ -40,9 +40,9 @@ type Config struct {
 
 	Page ConfigPage `yaml:"page"` // 页面配置
 
-	StaticDir string `yaml:"static"` // 静态资源提供路径
+	StaticDir string `yaml:"static"` // 额外静态资源目录
 
-	Filters map[string]map[string]any `yaml:"filters"` // 渲染器配置
+	Filters map[string]map[string]any `yaml:"filters"` // 全局 filter 配置
 
 	pageErrUnauthorized, pageErrForbidden, pageErrNotFound, pageErrMethodDenied, pageErrUnknown *template.Template
 }
@@ -131,8 +131,8 @@ type ConfigCache struct {
 	MetaRefresh           time.Duration `yaml:"meta_refresh"`            // 刷新时间
 	MetaRefreshConcurrent int           `yaml:"meta_refresh_concurrent"` // 并发刷新限制
 
-	Blob              string           `yaml:"blob"`               // 缓存归档位置
-	BlobTTL           time.Duration    `yaml:"blob_ttl"`           // 缓存归档位置
+	Blob              string           `yaml:"blob"`               // 响应数据缓存
+	BlobTTL           time.Duration    `yaml:"blob_ttl"`           // 响应数据缓存时长
 	BlobLimit         units.Base2Bytes `yaml:"blob_limit"`         // 单个文件最大大小
 	DirTTL            time.Duration    `yaml:"dir_ttl"`            // 目录列表缓存时间
 	BlobConcurrent    uint64           `yaml:"blob_concurrent"`    // 并发缓存限制

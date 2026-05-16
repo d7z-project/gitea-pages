@@ -1,10 +1,12 @@
 package goja
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dop251/goja"
@@ -18,11 +20,13 @@ type webSocketState struct {
 	vm        *goja.Runtime
 	runtime   *runtimeState
 	ctx       core.FilterContext
+	written   func() bool
 	conn      *websocket.Conn
 	connMu    sync.RWMutex
 	writeMu   sync.Mutex
 	done      chan struct{}
 	doneOnce  sync.Once
+	activated atomic.Bool
 	listeners map[string][]goja.Callable
 	onopen    goja.Callable
 	onmessage goja.Callable
@@ -38,6 +42,7 @@ func installWebSocket(ctx core.FilterContext, vm *goja.Runtime, writer http.Resp
 			vm:        vm,
 			runtime:   runtime,
 			ctx:       ctx,
+			written:   writtenResponseFunc(writer),
 			done:      make(chan struct{}),
 			listeners: make(map[string][]goja.Callable),
 		}
@@ -53,20 +58,7 @@ func installWebSocket(ctx core.FilterContext, vm *goja.Runtime, writer http.Resp
 				"Connection": []string{"Upgrade"},
 				"Upgrade":    []string{"websocket"},
 			},
-			upgrade: func() error {
-				upgrader := websocket.Upgrader{}
-				conn, err := upgrader.Upgrade(writer, request, nil)
-				if err != nil {
-					return err
-				}
-				socketState.connMu.Lock()
-				socketState.conn = conn
-				socketState.connMu.Unlock()
-				closers.AddCloser(conn.Close)
-				socketState.start()
-				<-socketState.done
-				return nil
-			},
+			upgrade: func() error { return socketState.serve(writer, request, closers) },
 		})
 		result := vm.NewObject()
 		_ = result.Set("socket", socketObj)
@@ -106,45 +98,29 @@ func newWebSocketObject(vm *goja.Runtime, state *webSocketState) *goja.Object {
 		state.listeners[name] = append(state.listeners[name], fn)
 	})
 	_ = obj.Set("send", func(data goja.Value) *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if !state.runtime.startTask() {
-			_ = reject(vm.ToValue(errRuntimeClosing))
-			return promise
+		if state.unavailable() {
+			return rejectedPromise(vm, responseIOUnavailableError("websocket"))
 		}
-		go func() {
-			defer state.runtime.finishTask()
+		messageType := websocket.TextMessage
+		payload, err := bodyBytesFromValue(vm, data)
+		if err != nil {
+			return rejectedPromise(vm, err)
+		}
+		if isNilish(data) {
+			messageType = websocket.BinaryMessage
+		} else if _, ok := data.Export().(string); !ok {
+			messageType = websocket.BinaryMessage
+		}
+		return asyncVoidPromise(vm, state.loop, state.runtime, func() error {
 			conn, ok := state.currentConn()
 			if !ok {
-				state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
-					_ = reject(vm.ToValue("websocket is not open"))
-				})
-				return
-			}
-			messageType := websocket.TextMessage
-			payload, err := bodyBytesFromValue(vm, data)
-			if err != nil {
-				state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
-					_ = reject(vm.ToValue(err))
-				})
-				return
-			}
-			if isNilish(data) {
-				messageType = websocket.BinaryMessage
-			} else if _, ok := data.Export().(string); !ok {
-				messageType = websocket.BinaryMessage
+				return errors.New("websocket is not open")
 			}
 			state.writeMu.Lock()
-			err = conn.WriteMessage(messageType, payload)
+			err := conn.WriteMessage(messageType, payload)
 			state.writeMu.Unlock()
-			state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
-				if err != nil {
-					_ = reject(vm.ToValue(err))
-					return
-				}
-				_ = resolve(goja.Undefined())
-			})
-		}()
-		return promise
+			return err
+		})
 	})
 	_ = obj.Set("close", func(code ...int) {
 		closeCode := websocket.CloseNormalClosure
@@ -197,6 +173,30 @@ func (s *webSocketState) start() {
 	if s.runtime.startTask() {
 		go s.readLoop()
 	}
+}
+
+func (s *webSocketState) unavailable() bool {
+	return s.written() && !s.activated.Load()
+}
+
+func (s *webSocketState) serve(writer http.ResponseWriter, request *http.Request, closers *Closers) error {
+	if s.unavailable() {
+		return responseIOUnavailableError("websocket")
+	}
+	upgrader := websocket.Upgrader{}
+	s.activated.Store(true)
+	conn, err := upgrader.Upgrade(writer, request, nil)
+	if err != nil {
+		s.activated.Store(false)
+		return err
+	}
+	s.connMu.Lock()
+	s.conn = conn
+	s.connMu.Unlock()
+	closers.AddCloser(conn.Close)
+	s.start()
+	<-s.done
+	return nil
 }
 
 func (s *webSocketState) pingLoop() {

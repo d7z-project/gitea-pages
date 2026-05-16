@@ -132,6 +132,7 @@ declare global {
     }
 
     interface WritableByteStream {
+        ready(): Promise<void>;
         write(chunk: string | Uint8Array | ArrayBuffer): Promise<void>;
         flush(): Promise<void>;
         close(): Promise<void>;

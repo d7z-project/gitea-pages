@@ -2,10 +2,14 @@ package goja
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"sync"
 	"sync/atomic"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/eventloop"
+	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
 const internalAbortSignalKey = "__page_internal_abort_signal__"
@@ -91,6 +95,126 @@ func objectBool(obj *goja.Object, key string) (bool, bool) {
 		return false, false
 	}
 	return value.ToBoolean(), true
+}
+
+func resolveHandler(vm *goja.Runtime, handler goja.Value) (goja.Callable, goja.Value, error) {
+	if isNilish(handler) {
+		return nil, nil, errInvalidHandler
+	}
+	if fn, ok := goja.AssertFunction(handler); ok {
+		return fn, goja.Undefined(), nil
+	}
+	obj, ok := valueObject(vm, handler)
+	if !ok {
+		return nil, nil, errInvalidHandler
+	}
+	fetchValue, ok := objectValue(obj, "fetch")
+	if !ok {
+		return nil, nil, errInvalidHandler
+	}
+	fetchFn, ok := goja.AssertFunction(fetchValue)
+	if !ok {
+		return nil, nil, errInvalidHandler
+	}
+	return fetchFn, obj, nil
+}
+
+func responseIOUnavailableError(name string) error {
+	return fmt.Errorf("%s is unavailable: response already committed", name)
+}
+
+func rejectedPromise(vm *goja.Runtime, err error) *goja.Promise {
+	promise, _, reject := vm.NewPromise()
+	_ = reject(vm.ToValue(err))
+	return promise
+}
+
+func resolvedPromise(vm *goja.Runtime, value goja.Value) *goja.Promise {
+	promise, resolve, _ := vm.NewPromise()
+	_ = resolve(value)
+	return promise
+}
+
+func syncVoidPromise(vm *goja.Runtime, work func() error) *goja.Promise {
+	if err := work(); err != nil {
+		return rejectedPromise(vm, err)
+	}
+	return resolvedPromise(vm, goja.Undefined())
+}
+
+func defineClosedAccessor(obj *goja.Object, vm *goja.Runtime, closed func() bool) {
+	_ = obj.DefineAccessorProperty("closed", vm.ToValue(closed), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+}
+
+func asyncValuePromise[T any](
+	vm *goja.Runtime,
+	loop *eventloop.EventLoop,
+	runtime *runtimeState,
+	work func() (T, error),
+	toValue func(*goja.Runtime, T) (goja.Value, error),
+) *goja.Promise {
+	promise, resolve, reject := vm.NewPromise()
+	if runtime != nil && !runtime.startTask() {
+		_ = reject(vm.ToValue(errRuntimeClosing))
+		return promise
+	}
+	go func() {
+		if runtime != nil {
+			defer runtime.finishTask()
+		}
+		result, err := work()
+		settle := func(loopVM *goja.Runtime) {
+			if err != nil {
+				_ = reject(loopVM.ToValue(err))
+				return
+			}
+			value, convertErr := toValue(loopVM, result)
+			if convertErr != nil {
+				_ = reject(loopVM.ToValue(convertErr))
+				return
+			}
+			_ = resolve(value)
+		}
+		if loop == nil {
+			settle(vm)
+			return
+		}
+		if runtime != nil {
+			runtime.runOnLoop(loop, settle)
+			return
+		}
+		loop.RunOnLoop(settle)
+	}()
+	return promise
+}
+
+func asyncVoidPromise(
+	vm *goja.Runtime,
+	loop *eventloop.EventLoop,
+	runtime *runtimeState,
+	work func() error,
+) *goja.Promise {
+	return asyncValuePromise(vm, loop, runtime, func() (struct{}, error) {
+		return struct{}{}, work()
+	}, func(*goja.Runtime, struct{}) (goja.Value, error) {
+		return goja.Undefined(), nil
+	})
+}
+
+func writtenResponseFunc(writer http.ResponseWriter) func() bool {
+	return func() bool {
+		return utils.IsWrittenResponseWriter(writer)
+	}
+}
+
+func safeHTTPFlush(flusher http.Flusher) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("http flush panic: %v", r)
+		}
+	}()
+	flusher.Flush()
+	return nil
 }
 
 func installTextCodecs(vm *goja.Runtime) error {

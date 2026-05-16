@@ -122,50 +122,22 @@ func attachBodyMethods(vm *goja.Runtime, obj *goja.Object, state *webBodyState) 
 	if obj == nil || state == nil {
 		return
 	}
-	bodyPromise := func(transform func([]byte) (goja.Value, error)) *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if state.runtime != nil && !state.runtime.startTask() {
-			_ = reject(vm.ToValue(errRuntimeClosing))
-			return promise
-		}
-		go func() {
-			if state.runtime != nil {
-				defer state.runtime.finishTask()
-			}
-			data, err := consumeWebBody(state)
-			settle := func() {
-				if err != nil {
-					_ = reject(vm.ToValue(err))
-					return
-				}
-				value, err := transform(data)
-				if err != nil {
-					_ = reject(vm.ToValue(err))
-					return
-				}
-				_ = resolve(value)
-			}
-			if state.runtime != nil && state.loop != nil {
-				state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
-					settle()
-				})
-				return
-			}
-			settle()
-		}()
-		return promise
+	bodyPromise := func(transform func(*goja.Runtime, []byte) (goja.Value, error)) *goja.Promise {
+		return asyncValuePromise(vm, state.loop, state.runtime, func() ([]byte, error) {
+			return consumeWebBody(state)
+		}, transform)
 	}
 	_ = obj.Set("body", newBodyObject(vm, state))
 	_ = obj.DefineAccessorProperty("bodyUsed", vm.ToValue(func() bool {
 		return state.used != nil && state.used.Load()
 	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
 	_ = obj.Set("text", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (goja.Value, error) {
+		return bodyPromise(func(vm *goja.Runtime, data []byte) (goja.Value, error) {
 			return vm.ToValue(string(data)), nil
 		})
 	})
 	_ = obj.Set("json", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (goja.Value, error) {
+		return bodyPromise(func(vm *goja.Runtime, data []byte) (goja.Value, error) {
 			var decoded any
 			if len(data) == 0 {
 				return goja.Null(), nil
@@ -177,22 +149,22 @@ func attachBodyMethods(vm *goja.Runtime, obj *goja.Object, state *webBodyState) 
 		})
 	})
 	_ = obj.Set("arrayBuffer", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (goja.Value, error) {
+		return bodyPromise(func(vm *goja.Runtime, data []byte) (goja.Value, error) {
 			return vm.ToValue(vm.NewArrayBuffer(data)), nil
 		})
 	})
 	_ = obj.Set("bytes", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (goja.Value, error) {
+		return bodyPromise(func(vm *goja.Runtime, data []byte) (goja.Value, error) {
 			return uint8ArrayValue(vm, data), nil
 		})
 	})
 	_ = obj.Set("blob", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (goja.Value, error) {
+		return bodyPromise(func(vm *goja.Runtime, data []byte) (goja.Value, error) {
 			return vm.ToValue(newBlobObject(vm, data, state.contentType)), nil
 		})
 	})
 	_ = obj.Set("formData", func() *goja.Promise {
-		return bodyPromise(func(data []byte) (goja.Value, error) {
+		return bodyPromise(func(vm *goja.Runtime, data []byte) (goja.Value, error) {
 			form, err := parseFormData(state.contentType, data)
 			if err != nil {
 				return nil, err
@@ -234,21 +206,16 @@ func consumeWebBody(state *webBodyState) ([]byte, error) {
 
 func newBlobObject(vm *goja.Runtime, data []byte, contentType string) *goja.Object {
 	obj := vm.NewObject()
-	resolve := func(value goja.Value) *goja.Promise {
-		promise, doResolve, _ := vm.NewPromise()
-		_ = doResolve(value)
-		return promise
-	}
 	_ = obj.Set("size", len(data))
 	_ = obj.Set("type", contentType)
 	_ = obj.Set("text", func() *goja.Promise {
-		return resolve(vm.ToValue(string(append([]byte(nil), data...))))
+		return resolvedPromise(vm, vm.ToValue(string(append([]byte(nil), data...))))
 	})
 	_ = obj.Set("arrayBuffer", func() *goja.Promise {
-		return resolve(vm.ToValue(vm.NewArrayBuffer(append([]byte(nil), data...))))
+		return resolvedPromise(vm, vm.ToValue(vm.NewArrayBuffer(append([]byte(nil), data...))))
 	})
 	_ = obj.Set("bytes", func() *goja.Promise {
-		return resolve(uint8ArrayValue(vm, data))
+		return resolvedPromise(vm, uint8ArrayValue(vm, data))
 	})
 	return obj
 }

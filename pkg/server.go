@@ -256,12 +256,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	if enforceRequestSecurity(w, request, security) {
 		return
 	}
-	w = &securityResponseWriter{ResponseWriter: w, security: security}
-	writer := utils.NewWrittenResponseWriter(w)
+	trackedWriter := utils.NewWrittenResponseWriter(w)
+	writer := &securityResponseWriter{ResponseWriter: trackedWriter, security: security}
 	defer func() {
 		if e := recover(); e != nil {
 			slog.Error("panic!", "error", e, "id", sessionID)
-			if !writer.IsWritten() {
+			if !trackedWriter.IsWritten() {
 				if err, ok := e.(error); ok {
 					s.errorHandler(writer, request, err)
 				} else {
@@ -278,13 +278,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 
 func (s *Server) handleRequestError(writer http.ResponseWriter, request *http.Request, sessionID uuid.UUID, err error) {
 	slog.Debug("bad request", "error", err, "request", request.RequestURI, "id", sessionID)
-	if wrapped, ok := writer.(*utils.WrittenResponseWriter); ok && wrapped.IsWritten() {
+	if utils.IsWrittenResponseWriter(writer) {
 		return
 	}
 	s.errorHandler(writer, request, err)
 }
 
-func (s *Server) servePage(writer *utils.WrittenResponseWriter, request *http.Request, meta *core.PageContent) error {
+func (s *Server) servePage(writer http.ResponseWriter, request *http.Request, meta *core.PageContent) error {
 	if core.IsReservedPath(request.URL.Path) {
 		if s.auth == nil {
 			http.NotFound(writer, request)

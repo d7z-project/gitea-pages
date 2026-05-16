@@ -82,42 +82,18 @@ func installHostGlobals(
 			return vm.ToValue(items), nil
 		},
 		"read": func(path string) *goja.Promise {
-			promise, resolve, reject := vm.NewPromise()
-			if !runtime.startTask() {
-				_ = reject(vm.ToValue(errRuntimeClosing))
-				return promise
-			}
-			go func() {
-				defer runtime.finishTask()
-				data, err := ctx.PageVFS.Read(ctx, path)
-				runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-					if err != nil {
-						_ = reject(vm.ToValue(err))
-						return
-					}
-					_ = resolve(uint8ArrayValue(vm, data))
-				})
-			}()
-			return promise
+			return asyncValuePromise(vm, loop, runtime, func() ([]byte, error) {
+				return ctx.PageVFS.Read(ctx, path)
+			}, func(vm *goja.Runtime, data []byte) (goja.Value, error) {
+				return uint8ArrayValue(vm, data), nil
+			})
 		},
 		"readText": func(path string) *goja.Promise {
-			promise, resolve, reject := vm.NewPromise()
-			if !runtime.startTask() {
-				_ = reject(vm.ToValue(errRuntimeClosing))
-				return promise
-			}
-			go func() {
-				defer runtime.finishTask()
-				data, err := ctx.PageVFS.ReadString(ctx, path)
-				runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-					if err != nil {
-						_ = reject(vm.ToValue(err))
-						return
-					}
-					_ = resolve(vm.ToValue(data))
-				})
-			}()
-			return promise
+			return asyncValuePromise(vm, loop, runtime, func() (string, error) {
+				return ctx.PageVFS.ReadString(ctx, path)
+			}, func(vm *goja.Runtime, data string) (goja.Value, error) {
+				return vm.ToValue(data), nil
+			})
 		},
 		"readSync": func(path string) (goja.Value, error) {
 			data, err := ctx.PageVFS.Read(ctx, path)
@@ -246,23 +222,9 @@ func newEventAPI(
 			return promise
 		},
 		"put": func(key, value string) *goja.Promise {
-			promise, resolve, reject := vm.NewPromise()
-			if !runtime.startTask() {
-				_ = reject(vm.ToValue(errRuntimeClosing))
-				return promise
-			}
-			go func() {
-				defer runtime.finishTask()
-				err := publishFn(ctx, key, value)
-				runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-					if err != nil {
-						_ = reject(vm.ToValue(err))
-						return
-					}
-					_ = resolve(goja.Undefined())
-				})
-			}()
-			return promise
+			return asyncVoidPromise(vm, loop, runtime, func() error {
+				return publishFn(ctx, key, value)
+			})
 		},
 	}
 }

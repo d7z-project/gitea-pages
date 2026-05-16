@@ -22,6 +22,11 @@ const (
 	runtimeShutdownTimeout        = 2 * time.Second
 )
 
+var (
+	errMissingHandler = errors.New("missing handler registration; call serve(handler)")
+	errInvalidHandler = errors.New("handler must be a function or an object with fetch(request)")
+)
+
 type FetchConfig struct {
 	Enabled              bool     `json:"enabled"`
 	MaxResponseBodyBytes int64    `json:"max_response_body_bytes"`
@@ -34,9 +39,7 @@ type RequestConfig struct {
 }
 
 type RealtimeConfig struct {
-	WebSocket   bool `json:"websocket"`
-	SSE         bool `json:"sse"`
-	EventBuffer int  `json:"event_buffer"`
+	EventBuffer int `json:"event_buffer"`
 }
 
 type Config struct {
@@ -57,8 +60,6 @@ func init() {
 func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
 	var global Config
 	global.EnableDebug = true
-	global.Realtime.WebSocket = true
-	global.Realtime.SSE = true
 	global.Realtime.EventBuffer = defaultEventPendingLimit
 	global.Fetch.Enabled = true
 	global.Fetch.MaxResponseBodyBytes = defaultFetchBodyLimit
@@ -166,70 +167,47 @@ func runProgram(
 			finish(err)
 			return
 		}
-		handler := vm.Get(internalHandlerName)
-		if isNilish(handler) {
-			finish(errors.New("missing handler registration; call serve(handler)"))
-			return
-		}
-		var result goja.Value
-		if fn, ok := goja.AssertFunction(handler); ok {
-			result, err = fn(goja.Undefined(), requestObj)
-		} else {
-			obj, ok := valueObject(vm, handler)
-			if !ok {
-				finish(fmt.Errorf("invalid handler: %s", handler.String()))
-				return
-			}
-			fetchValue, ok := objectValue(obj, "fetch")
-			if !ok {
-				finish(errors.New("handler must be a function or an object with fetch(request)"))
-				return
-			}
-			fetchFn, ok := goja.AssertFunction(fetchValue)
-			if !ok {
-				finish(errors.New("handler must be a function or an object with fetch(request)"))
-				return
-			}
-			result, err = fetchFn(obj, requestObj)
-		}
+		result, err := callRegisteredHandler(vm, requestObj)
 		if err != nil {
 			finish(err)
 			return
 		}
-		if upgrade, ok := upgradeResponseValue(vm, result); ok {
-			go func() {
-				finish(upgrade())
-			}()
-			return
+		complete := func(value goja.Value) {
+			if upgrade, ok := upgradeResponseValue(vm, value); ok {
+				go func() {
+					finish(upgrade())
+				}()
+				return
+			}
+			write := func() {
+				finish(writeResponseValue(vm, writer, value))
+			}
+			if responseWritesAsync(vm, value) {
+				go write()
+				return
+			}
+			write()
 		}
 		if promise, ok := exportPromise(result); ok {
-			finishPromise(vm, promise, func(value goja.Value) {
-				if upgrade, ok := upgradeResponseValue(vm, value); ok {
-					go func() {
-						finish(upgrade())
-					}()
-					return
-				}
-				if responseWritesAsync(vm, value) {
-					go func() {
-						finish(writeResponseValue(vm, writer, value))
-					}()
-					return
-				}
-				finish(writeResponseValue(vm, writer, value))
-			}, finish)
+			finishPromise(vm, promise, complete, finish)
 			return
 		}
-		if responseWritesAsync(vm, result) {
-			go func() {
-				finish(writeResponseValue(vm, writer, result))
-			}()
-			return
-		}
-		finish(writeResponseValue(vm, writer, result))
+		complete(result)
 	})
 
 	return <-resultCh
+}
+
+func callRegisteredHandler(vm *goja.Runtime, requestObj *goja.Object) (goja.Value, error) {
+	handler := vm.Get(internalHandlerName)
+	if isNilish(handler) {
+		return nil, errMissingHandler
+	}
+	fetchFn, thisValue, err := resolveHandler(vm, handler)
+	if err != nil {
+		return nil, err
+	}
+	return fetchFn(thisValue, requestObj)
 }
 
 func responseWritesAsync(vm *goja.Runtime, value goja.Value) bool {
@@ -263,37 +241,4 @@ func finishPromise(vm *goja.Runtime, promise *goja.Promise, resolveValue func(go
 	if _, err := vm.RunString(`__internal_promise.then(__internal_resolve).catch(__internal_reject)`); err != nil {
 		finish(err)
 	}
-}
-
-type Closers struct {
-	mu      sync.Mutex
-	closers []func() error
-}
-
-func NewClosers() *Closers {
-	return &Closers{
-		closers: make([]func() error, 0),
-	}
-}
-
-func (c *Closers) AddCloser(closer func() error) {
-	c.mu.Lock()
-	c.closers = append(c.closers, closer)
-	c.mu.Unlock()
-}
-
-func (c *Closers) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	var errs []error
-	for i := len(c.closers) - 1; i >= 0; i-- {
-		if err := c.closers[i](); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	c.closers = nil
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
 }

@@ -1390,3 +1390,133 @@ routes:
 	assert.Equal(t, "id: 1\n", line2)
 	assert.Equal(t, "data: {\"ok\":true}\n", line3)
 }
+
+func Test_GoJa_RealtimeIORejectsAfterCommit(t *testing.T) {
+	cases := []struct {
+		name      string
+		routePath string
+		script    string
+		ws        bool
+		assertion func(*testing.T, string)
+	}{
+		{
+			name:      "websocket rejects sse",
+			routePath: "ws-owns",
+			ws:        true,
+			script: `
+serve(function(request) {
+  const ws = upgradeWebSocket(request)
+  const sse = http.sse()
+
+  ws.socket.addEventListener("open", async () => {
+    try {
+      await sse.stream.send("bad")
+      await ws.socket.send("unexpected success")
+    } catch (err) {
+      await ws.socket.send(String(err))
+    }
+    ws.socket.close()
+  })
+
+  return ws.response
+})
+`,
+			assertion: func(t *testing.T, body string) {
+				assert.Equal(t, "event stream is unavailable: response already committed", body)
+			},
+		},
+		{
+			name:      "sse rejects websocket",
+			routePath: "sse-owns",
+			script: `
+serve(function(request) {
+  const ws = upgradeWebSocket(request)
+  const sse = http.sse()
+
+  ;(async () => {
+    await sse.stream.send("ready", { event: "message", id: "1" })
+    try {
+      await ws.socket.send("bad")
+      await sse.stream.send("unexpected success", { event: "error", id: "2" })
+    } catch (err) {
+      await sse.stream.send(String(err), { event: "error", id: "2" })
+    }
+    sse.stream.close()
+  })()
+
+  return sse.response
+})
+`,
+			assertion: func(t *testing.T, body string) {
+				assert.Contains(t, body, "data: ready\n")
+				assert.Contains(t, body, "event: error\n")
+				assert.Contains(t, body, "data: websocket is unavailable: response already committed\n")
+			},
+		},
+		{
+			name:      "response stream rejects websocket",
+			routePath: "stream-owns",
+			script: `
+serve(function(request) {
+  const out = http.stream()
+  const ws = upgradeWebSocket(request)
+
+  ;(async () => {
+    await new Promise(resolve => setTimeout(resolve, 20))
+    try {
+      await ws.socket.send("bad")
+      await out.stream.write("unexpected success")
+    } catch (err) {
+      await out.stream.write(String(err))
+    }
+    await out.stream.close()
+  })()
+
+  return out.response
+})
+`,
+			assertion: func(t *testing.T, body string) {
+				assert.Equal(t, "websocket is unavailable: response already committed", body)
+			},
+		},
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newGoJaTestServer(tc.script, tc.routePath)
+			defer server.Close()
+
+			httpServer := server.StartHTTPServer("org1.example.com")
+			defer httpServer.Close()
+
+			var body string
+			if tc.ws {
+				wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/repo1/" + tc.routePath
+				conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+				if !assert.NoError(t, err) {
+					return
+				}
+				defer conn.Close()
+
+				_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+				messageType, payload, err := conn.ReadMessage()
+				assert.NoError(t, err)
+				assert.Equal(t, websocket.TextMessage, messageType)
+				body = string(payload)
+			} else {
+				resp, err := client.Get(httpServer.URL + "/repo1/" + tc.routePath)
+				if !assert.NoError(t, err) {
+					return
+				}
+				defer resp.Body.Close()
+
+				payload, err := io.ReadAll(resp.Body)
+				assert.NoError(t, err)
+				body = string(payload)
+			}
+
+			tc.assertion(t, body)
+		})
+	}
+}

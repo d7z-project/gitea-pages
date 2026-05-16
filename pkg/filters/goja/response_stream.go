@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
@@ -21,6 +22,7 @@ type responseStreamState struct {
 	ctx     core.FilterContext
 	runtime *runtimeState
 	loop    *eventloop.EventLoop
+	written func() bool
 
 	mu      sync.Mutex
 	headers http.Header
@@ -34,12 +36,13 @@ type responseStreamState struct {
 	queue    chan responseStreamOp
 }
 
-func installResponseStream(ctx core.FilterContext, vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState, closers *Closers) error {
+func installResponseStream(ctx core.FilterContext, vm *goja.Runtime, writer http.ResponseWriter, loop *eventloop.EventLoop, runtime *runtimeState, closers *Closers) error {
 	return vm.Set("createStreamResponse", func(init ...goja.Value) *goja.Object {
 		state := &responseStreamState{
 			ctx:     ctx,
 			runtime: runtime,
 			loop:    loop,
+			written: writtenResponseFunc(writer),
 			headers: make(http.Header),
 			status:  http.StatusOK,
 			done:    make(chan struct{}),
@@ -69,71 +72,31 @@ func installResponseStream(ctx core.FilterContext, vm *goja.Runtime, loop *event
 func newResponseStreamObject(vm *goja.Runtime, state *responseStreamState) *goja.Object {
 	obj := vm.NewObject()
 	_ = obj.Set("write", func(chunk goja.Value) *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
 		data, err := bodyBytesFromValue(vm, chunk)
 		if err != nil {
-			_ = reject(vm.ToValue(err))
-			return promise
+			return rejectedPromise(vm, err)
 		}
-		if !state.runtime.startTask() {
-			_ = reject(vm.ToValue(errRuntimeClosing))
-			return promise
-		}
-		go func() {
-			defer state.runtime.finishTask()
-			err := state.write(data)
-			state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
-				if err != nil {
-					_ = reject(vm.ToValue(err))
-					return
-				}
-				_ = resolve(goja.Undefined())
-			})
-		}()
-		return promise
+		return asyncVoidPromise(vm, state.loop, state.runtime, func() error {
+			return state.write(data)
+		})
 	})
 	_ = obj.Set("flush", func() *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if !state.runtime.startTask() {
-			_ = reject(vm.ToValue(errRuntimeClosing))
-			return promise
-		}
-		go func() {
-			defer state.runtime.finishTask()
-			err := state.flush()
-			state.runtime.runOnLoop(state.loop, func(vm *goja.Runtime) {
-				if err != nil {
-					_ = reject(vm.ToValue(err))
-					return
-				}
-				_ = resolve(goja.Undefined())
-			})
-		}()
-		return promise
+		return asyncVoidPromise(vm, state.loop, state.runtime, state.flush)
+	})
+	_ = obj.Set("ready", func() *goja.Promise {
+		return asyncVoidPromise(vm, state.loop, state.runtime, state.ready)
 	})
 	_ = obj.Set("abort", func(_ ...goja.Value) *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if err := state.close(); err != nil {
-			_ = reject(vm.ToValue(err))
-			return promise
-		}
-		_ = resolve(goja.Undefined())
-		return promise
+		return syncVoidPromise(vm, state.close)
 	})
 	_ = obj.Set("close", func() *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if err := state.close(); err != nil {
-			_ = reject(vm.ToValue(err))
-			return promise
-		}
-		_ = resolve(goja.Undefined())
-		return promise
+		return syncVoidPromise(vm, state.close)
 	})
-	_ = obj.DefineAccessorProperty("closed", vm.ToValue(func() bool {
+	defineClosedAccessor(obj, vm, func() bool {
 		state.mu.Lock()
 		defer state.mu.Unlock()
 		return state.closed
-	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+	})
 	return obj
 }
 
@@ -144,6 +107,10 @@ func (s *responseStreamState) write(data []byte) error {
 		return errors.New("stream is closed")
 	}
 	if !s.started {
+		if s.written() {
+			s.mu.Unlock()
+			return responseIOUnavailableError("response stream")
+		}
 		s.pending = append(s.pending, append([]byte(nil), data...))
 		s.mu.Unlock()
 		return nil
@@ -160,6 +127,10 @@ func (s *responseStreamState) flush() error {
 		return errors.New("stream is closed")
 	}
 	if !s.started {
+		if s.written() {
+			s.mu.Unlock()
+			return responseIOUnavailableError("response stream")
+		}
 		s.mu.Unlock()
 		return nil
 	}
@@ -182,6 +153,34 @@ func (s *responseStreamState) close() error {
 	s.mu.Unlock()
 	result := make(chan error, 1)
 	return s.send(responseStreamOp{kind: "close", result: result})
+}
+
+func (s *responseStreamState) ready() error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		s.mu.Lock()
+		started := s.started
+		closed := s.closed
+		written := !started && s.written()
+		s.mu.Unlock()
+		if started {
+			return nil
+		}
+		if written {
+			return responseIOUnavailableError("response stream")
+		}
+		if closed {
+			return errors.New("stream is closed")
+		}
+		select {
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		case <-s.done:
+			return errors.New("stream is closed")
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *responseStreamState) send(op responseStreamOp) error {
@@ -214,13 +213,17 @@ func (s *responseStreamState) serve(writer http.ResponseWriter) error {
 		s.mu.Unlock()
 		return errors.New("response stream already started")
 	}
+	if s.written() {
+		s.mu.Unlock()
+		return responseIOUnavailableError("response stream")
+	}
 	for key, values := range s.headers {
 		for _, value := range values {
 			writer.Header().Add(key, value)
 		}
 	}
-	writer.WriteHeader(s.status)
 	s.started = true
+	writer.WriteHeader(s.status)
 	pending := s.pending
 	s.pending = nil
 	closed := s.closed

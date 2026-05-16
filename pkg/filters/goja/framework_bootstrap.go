@@ -124,8 +124,53 @@ const frameworkBootstrap = `
     return await setCookie(response, name, "", opts);
   }
 
+  function encodeSSEPayload(data, options) {
+    const eventName = options?.event || "";
+    const eventID = options?.id || "";
+    const retry = Number(options?.retry || 0);
+    let payload = "";
+    if (eventName) payload += "event: " + eventName + "\n";
+    if (eventID) payload += "id: " + eventID + "\n";
+    if (retry > 0) payload += "retry: " + retry + "\n";
+    for (const line of String(data).replace(/\r/g, "").split("\n")) {
+      payload += "data: " + line + "\n";
+    }
+    return payload + "\n";
+  }
+
   function sse() {
-    return createEventStream();
+    const raw = stream({
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        "connection": "keep-alive",
+        "x-accel-buffering": "no",
+      },
+    });
+
+    return {
+      stream: {
+        async send(data, options) {
+          try {
+            await raw.stream.ready();
+            await raw.stream.write(encodeSSEPayload(data, options));
+          } catch (error) {
+            const message = String(error);
+            if (message === "response stream is unavailable: response already committed") {
+              throw "event stream is unavailable: response already committed";
+            }
+            throw message;
+          }
+        },
+        close() {
+          void raw.stream.close();
+        },
+        get closed() {
+          return raw.stream.closed;
+        },
+      },
+      response: raw.response,
+    };
   }
 
   function stream(init) {

@@ -7,7 +7,7 @@ domain: example.com
 trusted_proxies:
   - 127.0.0.1/32
   - 10.0.0.0/8
-# 程序内部使用的存储
+# 程序内部使用的 KV 存储
 # KV URL 示例:
 #   memory://
 #   mem://
@@ -17,18 +17,21 @@ trusted_proxies:
 #   badger:///var/lib/gitea-pages/badger?prefix=gitea-pages
 db:
   url: "memory://"
-# 用户脚本使用的存储，可省略；省略时回退到 db
+# 用户脚本使用的 KV 存储，可省略；省略时回退到 db
 # 同样使用上面的 KV URL 写法
 user_db:
   url: ""
-# 事件传递配置
-# Subscriber URL 示例:
+# 兼容旧配置：
+# database:
+#   url: "memory://"
+# 事件总线配置，shared/version event 都走这里
+# Event URL 示例:
 #   memory://
 #   mem://
 #   etcd://127.0.0.1:2379?prefix=gitea-pages-events
 event:
   url: "memory://"
-# goja storage 配置，按 repo 做隔离
+# goja storage.* 脚本存储，按 repo 做隔离
 # Storage URL 示例:
 #   memory://
 #   mem://
@@ -42,19 +45,21 @@ provider:
   type: gitea
   gitea:
     server: https://gitea.com
-    # 服务端访问 Gitea API 的 token,需要 user , org , repo 的 read 权限
+    # 服务端访问 Gitea API 的 token，需要 user / org / repo 的只读权限
     token: token
+    # 开启页面登录时需要这三项；三者要么都填，要么都不填
     client_id: client-id
     client_secret: client-secret
     redirect_url: https://pages.example.com/.pages/auth/callback
+    # 登录时向 Gitea 请求的 OAuth scope
     scopes:
       - read:user
       - read:repository
     # 测试环境可开启 http，生产环境保持 false
     allow_insecure_http: false
 auth:
-  # 省略整个 auth 配置表示禁用页面鉴权；public repo 不走 auth
-  # private: true 的 repo 会要求登录，并以当前用户的 repo read 权限判定是否放行
+  # 省略整个 auth 配置表示禁用站点登录能力
+  # public repo 不走 auth；private: true 的 repo 会要求登录，并以当前用户的 repo read 权限判定是否放行
   session_ttl: 24h
   state_ttl: 5m
   authz_cache_ttl: 30s
@@ -98,19 +103,22 @@ cache:
 page:
   # 默认页面分支
   default_branch: gh-pages
-  # 默认 401 页面模板
+  # 默认 401 页面模板，本地文件路径；为空时使用内置模板
   401: /path/to/html.gotmpl
-  # 默认 403 页面模板
+  # 默认 403 页面模板，本地文件路径；为空时使用内置模板
   403: /path/to/html.gotmpl
-  # 默认 404 页面模板
+  # 默认 404 页面模板，本地文件路径；为空时使用内置模板
   404: /path/to/html.gotmpl
-  # 默认 405 页面模板
+  # 默认 405 页面模板，本地文件路径；为空时使用内置模板
   405: /path/to/html.gotmpl
-  # 默认 500 页面模板
+  # 默认 500 页面模板，本地文件路径；为空时使用内置模板
   500: /path/to/html.gotmpl
+# 额外静态资源目录；为空表示禁用
+static: ""
 filters:
+  # 所有 filters.* 块都支持 enabled: false 全局禁用
   reverse_proxy:
-    # 设为 false 可全局禁用 reverse_proxy 路由
+    # 设为 false 可全局禁用 reverse_proxy filter
     enabled: true
     # 是否把原始 Authorization 请求头继续转发给上游
     forward_authorization: false
@@ -118,13 +126,26 @@ filters:
     deny_hosts: []
     # 拒绝的目标 IP / CIDR；会同时匹配字面量 IP 和 DNS 解析结果
     deny_cidrs: []
+  redirect:
+    enabled: true
+  direct:
+    enabled: true
+  template:
+    enabled: true
+  failback:
+    enabled: true
+  block:
+    enabled: true
+  "404":
+    enabled: true
   js:
-    # 是否启用 debug 页面
+    # 是否允许 JS filter 输出 debug 页面
+    # 仍需路由里显式设置 debug: true，且请求 URL 带 ?debug=true
     debug: true
-    # 实时能力
+    # 实时能力配置
     realtime:
-      websocket: true
-      sse: true
+      # shared/version event 的每个 key 在单次请求中的待处理消息上限
+      event_buffer: 256
     # 请求体读取限制，0 表示不限制
     request:
       max_body_bytes: 0
@@ -137,13 +158,21 @@ filters:
       allowed_hosts: []
       # 开启后拒绝直连私网/环回 IP
       block_private_network: false
-    # 仓库文件系统 API
-    fs:
-      # 是否允许脚本列目录
-      enabled: true
 
 # .pages.yaml 路由示例
 #
+# alias:
+#   - pages.example.com
+# private: false
+# security:
+#   cors:
+#     origins:
+#       - https://app.example.com
+#   cookies:
+#     enabled: true
+#     require_https: true
+#   headers:
+#     cross_origin_resource_policy: same-origin
 # routes:
 #   - path: "/api/**"
 #     reverse_proxy:
@@ -151,3 +180,26 @@ filters:
 #       prefix: /api
 #       # 必须是绝对 HTTPS URL；实际连接会在解析后按 deny_hosts / deny_cidrs 过滤
 #       target: https://example-upstream.com
+#   - path: "/app/**"
+#     js:
+#       exec: index.js
+#       # 允许该路由在 ?debug=true 时输出调试页
+#       debug: true
+#   - path: "/public/**"
+#     direct:
+#       prefix: assets
+#   - path: "/docs/**"
+#     template:
+#       prefix: templates
+#   - path: "/old/**"
+#     redirect:
+#       targets:
+#         - new.example.com
+#       code: 302
+#   - path: "/blocked/**"
+#     block:
+#       code: 403
+#       message: Forbidden
+#   - path: "/fallback/**"
+#     failback:
+#       path: /fallback/index.html

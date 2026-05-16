@@ -1,7 +1,6 @@
 package goja
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/dop251/goja"
@@ -27,22 +26,8 @@ func initRuntime(
 	buffer.Enable(vm)
 	url.Enable(vm)
 	if err := vm.Set("serve", func(handler goja.Value) error {
-		if isNilish(handler) {
-			return errors.New("invalid handler")
-		}
-		if _, ok := goja.AssertFunction(handler); ok {
-			return vm.GlobalObject().Set(internalHandlerName, handler)
-		}
-		obj, ok := valueObject(vm, handler)
-		if !ok {
-			return errors.New("handler must be a function or an object with fetch(request)")
-		}
-		fetchValue, ok := objectValue(obj, "fetch")
-		if !ok {
-			return errors.New("handler must be a function or an object with fetch(request)")
-		}
-		if _, ok := goja.AssertFunction(fetchValue); !ok {
-			return errors.New("handler must be a function or an object with fetch(request)")
+		if _, _, err := resolveHandler(vm, handler); err != nil {
+			return err
 		}
 		return vm.GlobalObject().Set(internalHandlerName, handler)
 	}); err != nil {
@@ -66,7 +51,7 @@ func initRuntime(
 	if err := installFrameworkHelpers(vm); err != nil {
 		return nil, err
 	}
-	if err := installResponseStream(ctx, vm, jsLoop, runtime, closers); err != nil {
+	if err := installResponseStream(ctx, vm, debug, jsLoop, runtime, closers); err != nil {
 		return nil, err
 	}
 	if err := installFetch(ctx, vm, jsLoop, sharedClient, global.Fetch, runtime, closers); err != nil {
@@ -76,19 +61,10 @@ func initRuntime(
 	if err != nil {
 		return nil, err
 	}
-	if global.Realtime.WebSocket {
-		closer, err := installWebSocket(ctx, vm, debug, request, jsLoop, runtime)
-		if err != nil {
-			return nil, err
-		}
-		closers.AddCloser(closer.Close)
+	closer, err := installWebSocket(ctx, vm, debug, request, jsLoop, runtime)
+	if err != nil {
+		return nil, err
 	}
-	if global.Realtime.SSE {
-		closer, err := installSSE(ctx, vm, debug, jsLoop, runtime)
-		if err != nil {
-			return nil, err
-		}
-		closers.AddCloser(closer.Close)
-	}
+	closers.AddCloser(closer.Close)
 	return newIncomingRequestObject(vm, jsLoop, runtime, request, global.Request.MaxBodyBytes, closers)
 }

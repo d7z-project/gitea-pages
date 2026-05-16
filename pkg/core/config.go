@@ -8,16 +8,16 @@ import (
 )
 
 type PageConfig struct {
-	Alias    []string          `yaml:"alias"`   // 重定向地址
-	Routes   []PageConfigRoute `yaml:"routes"`  // 路由配置
-	Private  bool              `yaml:"private"` // 是否私有
-	Security PageSecurity      `yaml:"security"`
+	Alias    []string          `yaml:"alias"`    // 页面附加域名 / 别名
+	Routes   []PageConfigRoute `yaml:"routes"`   // 路由配置
+	Private  bool              `yaml:"private"`  // 是否私有
+	Security PageSecurity      `yaml:"security"` // 页面安全策略
 }
 
 type PageConfigRoute struct {
-	Path   string         `yaml:"path"`
-	Type   string         `yaml:"type"`
-	Params map[string]any `yaml:"params"`
+	Path   string         `yaml:"path"`   // 路由匹配模式
+	Type   string         `yaml:"type"`   // filter 名称
+	Params map[string]any `yaml:"params"` // filter 参数
 }
 
 func (p *PageConfigRoute) UnmarshalYAML(value *yaml.Node) error {

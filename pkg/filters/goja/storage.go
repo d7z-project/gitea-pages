@@ -147,7 +147,7 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		return storageAsyncVoid(vm, loop, runtime, func() error {
+		return asyncVoidPromise(vm, loop, runtime, func() error {
 			_, err := store.Stat(normalized)
 			return err
 		})
@@ -168,7 +168,7 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 			_ = resolve(false)
 			return promise
 		}
-		return storageAsyncValue(vm, loop, runtime, func() (bool, error) {
+		return asyncValuePromise(vm, loop, runtime, func() (bool, error) {
 			_, err := store.Stat(normalized)
 			if err == nil {
 				return true, nil
@@ -177,8 +177,8 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 				return false, nil
 			}
 			return false, err
-		}, func(vm *goja.Runtime, exists bool) goja.Value {
-			return vm.ToValue(exists)
+		}, func(vm *goja.Runtime, exists bool) (goja.Value, error) {
+			return vm.ToValue(exists), nil
 		})
 	})
 	_ = obj.Set("existsSync", func(target string) bool {
@@ -195,14 +195,14 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		return storageAsyncValue(vm, loop, runtime, func() (storageInfoSnapshot, error) {
+		return asyncValuePromise(vm, loop, runtime, func() (storageInfoSnapshot, error) {
 			info, err := store.Stat(normalized)
 			if err != nil {
 				return storageInfoSnapshot{}, err
 			}
 			return snapshotStorageInfo(normalized, info), nil
-		}, func(vm *goja.Runtime, info storageInfoSnapshot) goja.Value {
-			return storageInfoValue(vm, info)
+		}, func(vm *goja.Runtime, info storageInfoSnapshot) (goja.Value, error) {
+			return storageInfoValue(vm, info), nil
 		})
 	})
 	_ = obj.Set("statSync", func(target string) (goja.Value, error) {
@@ -228,10 +228,10 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		return storageAsyncValue(vm, loop, runtime, func() ([]storageDirentSnapshot, error) {
+		return asyncValuePromise(vm, loop, runtime, func() ([]storageDirentSnapshot, error) {
 			return storageReadDir(store, normalized, options.recursive)
-		}, func(vm *goja.Runtime, entries []storageDirentSnapshot) goja.Value {
-			return storageReaddirValue(vm, entries, options)
+		}, func(vm *goja.Runtime, entries []storageDirentSnapshot) (goja.Value, error) {
+			return storageReaddirValue(vm, entries, options), nil
 		})
 	})
 	_ = obj.Set("readdirSync", func(targetValue, optionsValue goja.Value) (goja.Value, error) {
@@ -259,18 +259,18 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		return storageAsyncValue(vm, loop, runtime, func() ([]byte, error) {
+		return asyncValuePromise(vm, loop, runtime, func() ([]byte, error) {
 			file, err := store.Open(target)
 			if err != nil {
 				return nil, err
 			}
 			defer file.Close()
 			return io.ReadAll(file)
-		}, func(vm *goja.Runtime, data []byte) goja.Value {
+		}, func(vm *goja.Runtime, data []byte) (goja.Value, error) {
 			if encoding == "utf8" {
-				return vm.ToValue(string(data))
+				return vm.ToValue(string(data)), nil
 			}
-			return uint8ArrayValue(vm, data)
+			return uint8ArrayValue(vm, data), nil
 		})
 	})
 	_ = obj.Set("readFileSync", func(targetValue, optionsValue goja.Value) (goja.Value, error) {
@@ -306,7 +306,7 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		return storageAsyncVoid(vm, loop, runtime, func() error {
+		return asyncVoidPromise(vm, loop, runtime, func() error {
 			return storageWriteFile(store, target, body, options)
 		})
 	})
@@ -331,7 +331,7 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		return storageAsyncVoid(vm, loop, runtime, func() error {
+		return asyncVoidPromise(vm, loop, runtime, func() error {
 			if target == "." {
 				return nil
 			}
@@ -368,7 +368,7 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		return storageAsyncVoid(vm, loop, runtime, func() error {
+		return asyncVoidPromise(vm, loop, runtime, func() error {
 			return storageRemove(store, target, options)
 		})
 	})
@@ -389,7 +389,7 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		return storageAsyncVoid(vm, loop, runtime, func() error {
+		return asyncVoidPromise(vm, loop, runtime, func() error {
 			return storageUnlink(store, normalized)
 		})
 	})
@@ -409,7 +409,7 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if overwrite, ok := storageRenameOverwrite(vm, optionsValue); ok && overwrite {
 			return rejectedPromise(vm, errors.New("rename overwrite is not supported"))
 		}
-		return storageAsyncVoid(vm, loop, runtime, func() error {
+		return asyncVoidPromise(vm, loop, runtime, func() error {
 			return store.Rename(oldPath, newPath)
 		})
 	})
@@ -429,7 +429,7 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		return storageAsyncVoid(vm, loop, runtime, func() error {
+		return asyncVoidPromise(vm, loop, runtime, func() error {
 			return storageCopyFile(store, src, dest)
 		})
 	})
@@ -446,40 +446,6 @@ func newStorageAPI(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtime
 	})
 
 	return obj
-}
-
-func storageAsyncVoid(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState, work func() error) *goja.Promise {
-	return storageAsyncValue(vm, loop, runtime, func() (struct{}, error) {
-		return struct{}{}, work()
-	}, func(vm *goja.Runtime, _ struct{}) goja.Value {
-		return goja.Undefined()
-	})
-}
-
-func storageAsyncValue[T any](vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState, work func() (T, error), toValue func(*goja.Runtime, T) goja.Value) *goja.Promise {
-	promise, resolve, reject := vm.NewPromise()
-	if !runtime.startTask() {
-		_ = reject(vm.ToValue(errRuntimeClosing))
-		return promise
-	}
-	go func() {
-		defer runtime.finishTask()
-		result, err := work()
-		runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-			if err != nil {
-				_ = reject(vm.ToValue(err))
-				return
-			}
-			_ = resolve(toValue(vm, result))
-		})
-	}()
-	return promise
-}
-
-func rejectedPromise(vm *goja.Runtime, err error) *goja.Promise {
-	promise, _, reject := vm.NewPromise()
-	_ = reject(vm.ToValue(err))
-	return promise
 }
 
 func storageRequiredPath(value goja.Value, allowRoot bool) (string, error) {

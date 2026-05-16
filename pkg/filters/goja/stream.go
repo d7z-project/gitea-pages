@@ -42,122 +42,59 @@ func newReadableStreamObject(vm *goja.Runtime, loop *eventloop.EventLoop, runtim
 		if len(options) > 0 {
 			size = streamReadSize(vm, options[0])
 		}
-		promise, resolve, reject := vm.NewPromise()
-		if !runtime.startTask() {
-			_ = reject(vm.ToValue(errRuntimeClosing))
-			return promise
+		type readResult struct {
+			value []byte
+			done  bool
 		}
-		go func() {
-			defer runtime.finishTask()
+		return asyncValuePromise(vm, loop, runtime, func() (readResult, error) {
 			value, done, err := state.read(size)
-			runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-				if err != nil {
-					_ = reject(vm.ToValue(err))
-					return
-				}
-				result := map[string]any{"done": done}
-				if !done {
-					result["value"] = uint8ArrayValue(vm, value)
-				}
-				_ = resolve(vm.ToValue(result))
-			})
-		}()
-		return promise
+			return readResult{value: value, done: done}, err
+		}, func(vm *goja.Runtime, result readResult) (goja.Value, error) {
+			payload := map[string]any{"done": result.done}
+			if !result.done {
+				payload["value"] = uint8ArrayValue(vm, result.value)
+			}
+			return vm.ToValue(payload), nil
+		})
 	})
 	_ = obj.Set("cancel", func(_ ...goja.Value) *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if err := state.close(); err != nil {
-			_ = reject(vm.ToValue(err))
-			return promise
-		}
-		_ = resolve(goja.Undefined())
-		return promise
+		return syncVoidPromise(vm, state.close)
 	})
 	_ = obj.Set("close", func() *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if err := state.close(); err != nil {
-			_ = reject(vm.ToValue(err))
-			return promise
-		}
-		_ = resolve(goja.Undefined())
-		return promise
+		return syncVoidPromise(vm, state.close)
 	})
-	_ = obj.DefineAccessorProperty("closed", vm.ToValue(func() bool {
+	defineClosedAccessor(obj, vm, func() bool {
 		return state.isClosed()
-	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+	})
 	return obj
 }
 
 func newWritableStreamObject(vm *goja.Runtime, loop *eventloop.EventLoop, runtime *runtimeState, state *writableStreamState, flushFn func() error) *goja.Object {
 	obj := vm.NewObject()
 	_ = obj.Set("write", func(chunk goja.Value) *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
 		data, err := bodyBytesFromValue(vm, chunk)
 		if err != nil {
-			_ = reject(vm.ToValue(err))
-			return promise
+			return rejectedPromise(vm, err)
 		}
-		if !runtime.startTask() {
-			_ = reject(vm.ToValue(errRuntimeClosing))
-			return promise
-		}
-		go func() {
-			defer runtime.finishTask()
-			err := state.write(data)
-			runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-				if err != nil {
-					_ = reject(vm.ToValue(err))
-					return
-				}
-				_ = resolve(goja.Undefined())
-			})
-		}()
-		return promise
+		return asyncVoidPromise(vm, loop, runtime, func() error {
+			return state.write(data)
+		})
 	})
 	_ = obj.Set("flush", func() *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
 		if flushFn == nil {
-			_ = resolve(goja.Undefined())
-			return promise
+			return resolvedPromise(vm, goja.Undefined())
 		}
-		if !runtime.startTask() {
-			_ = reject(vm.ToValue(errRuntimeClosing))
-			return promise
-		}
-		go func() {
-			defer runtime.finishTask()
-			err := flushFn()
-			runtime.runOnLoop(loop, func(vm *goja.Runtime) {
-				if err != nil {
-					_ = reject(vm.ToValue(err))
-					return
-				}
-				_ = resolve(goja.Undefined())
-			})
-		}()
-		return promise
+		return asyncVoidPromise(vm, loop, runtime, flushFn)
 	})
 	_ = obj.Set("abort", func(_ ...goja.Value) *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if err := state.close(); err != nil {
-			_ = reject(vm.ToValue(err))
-			return promise
-		}
-		_ = resolve(goja.Undefined())
-		return promise
+		return syncVoidPromise(vm, state.close)
 	})
 	_ = obj.Set("close", func() *goja.Promise {
-		promise, resolve, reject := vm.NewPromise()
-		if err := state.close(); err != nil {
-			_ = reject(vm.ToValue(err))
-			return promise
-		}
-		_ = resolve(goja.Undefined())
-		return promise
+		return syncVoidPromise(vm, state.close)
 	})
-	_ = obj.DefineAccessorProperty("closed", vm.ToValue(func() bool {
+	defineClosedAccessor(obj, vm, func() bool {
 		return state.isClosed()
-	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+	})
 	return obj
 }
 
