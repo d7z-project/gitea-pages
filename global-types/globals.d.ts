@@ -303,6 +303,7 @@ declare global {
             retry?: number;
         }): Promise<void>;
         close(): void;
+        readonly closed: boolean;
     }
 }
 

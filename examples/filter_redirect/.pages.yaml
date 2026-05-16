@@ -1,0 +1,6 @@
+routes:
+  - path: "legacy,legacy/**"
+    redirect:
+      targets:
+        - example.com
+      code: 302

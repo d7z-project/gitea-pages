@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Version Event Example</title>
+</head>
+<body>
+<h1>Version Event Example</h1>
+<p>This page uses <code>versionEvent</code>, so messages stay scoped to the current page commit.</p>
+
+<form id="publish-form">
+    <input id="message" name="message" value="hello version event">
+    <button type="submit">Publish</button>
+</form>
+
+<pre id="messages"></pre>
+
+<script>
+    const messages = document.getElementById("messages");
+    const form = document.getElementById("publish-form");
+    const messageInput = document.getElementById("message");
+    const source = new EventSource("/version/stream");
+
+    function append(line) {
+        messages.textContent += `${line}\n`;
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    source.addEventListener("message", (event) => {
+        append(event.data);
+    });
+
+    source.onerror = () => {
+        append("[system] stream closed");
+    };
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const message = messageInput.value.trim();
+        if (!message) {
+            return;
+        }
+        const body = new URLSearchParams({ message });
+        await fetch("/version/publish", {
+            method: "POST",
+            headers: {
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body,
+        });
+        messageInput.value = "";
+    });
+</script>
+</body>
+</html>

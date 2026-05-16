@@ -1,0 +1,7 @@
+routes:
+  - path: "inspect"
+    js:
+      exec: "index.js"
+  - path: "assets/**"
+    direct:
+      prefix: fixtures

@@ -98,6 +98,7 @@ Available helpers:
 - `http.setCookie`
 - `http.clearCookie`
 - `http.sse`
+- `http.stream`
 - `http.router`
 
 Cross-origin access, WebSocket origin checks, and cookie sharing are controlled by the page `security` config in `.pages.yaml`, not by goja helpers.
@@ -164,8 +165,13 @@ Or reference them from a script file:
 See:
 
 - [examples/js_hello_world](../../../examples/js_hello_world)
+- [examples/js_fetch](../../../examples/js_fetch)
+- [examples/js_http_helpers](../../../examples/js_http_helpers)
 - [examples/js_kv](../../../examples/js_kv)
 - [examples/js_storage](../../../examples/js_storage)
+- [examples/js_version_event](../../../examples/js_version_event)
 - [examples/js_ws](../../../examples/js_ws)
 - [examples/js_ws_event](../../../examples/js_ws_event)
 - [examples/js_sse](../../../examples/js_sse)
+- [examples/js_stream_response](../../../examples/js_stream_response)
+- [examples/js_fs_stream](../../../examples/js_fs_stream)

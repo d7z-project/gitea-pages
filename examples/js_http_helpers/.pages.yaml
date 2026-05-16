@@ -1,4 +1,4 @@
 routes:
-  - path: "ws"
+  - path: "helpers,helpers/**"
     js:
       exec: "index.js"

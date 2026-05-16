@@ -1,0 +1,4 @@
+routes:
+  - path: "pages/**"
+    template:
+      prefix: templates

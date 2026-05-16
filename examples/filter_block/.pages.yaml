@@ -1,0 +1,5 @@
+routes:
+  - path: "admin,admin/**"
+    block:
+      code: 403
+      message: This area is blocked by the block filter.

@@ -2,11 +2,12 @@ routes:
   - path: "storage"
     js:
       exec: "index.js"
-
   - path: "storage/write"
     js:
       exec: "index.js"
-
+  - path: "storage/manage"
+    js:
+      exec: "index.js"
   - path: "storage/stream"
     js:
       exec: "index.js"

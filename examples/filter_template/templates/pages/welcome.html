@@ -1,0 +1,7 @@
+{{ load "partials/header.html" }}
+
+<p>Owner: {{ .Meta.Org }}</p>
+<p>Repo: {{ .Meta.Repo }}</p>
+<p>Commit: {{ .Meta.Commit }}</p>
+<p>Request path: {{ .Request.Path }}</p>
+<p>Request method: {{ .Request.Method }}</p>

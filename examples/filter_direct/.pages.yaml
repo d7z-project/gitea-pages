@@ -1,0 +1,4 @@
+routes:
+  - path: "download/**"
+    direct:
+      prefix: assets

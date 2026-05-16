@@ -1,0 +1,4 @@
+routes:
+  - path: "docs/**"
+    direct:
+      prefix: assets

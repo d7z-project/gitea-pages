@@ -1,0 +1,4 @@
+routes:
+  - path: "app/**"
+    failback:
+      path: /app/index.html

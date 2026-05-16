@@ -1,0 +1,5 @@
+routes:
+  - path: "api/**"
+    reverse_proxy:
+      prefix: /api
+      target: https://httpbin.org

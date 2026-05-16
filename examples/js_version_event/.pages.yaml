@@ -1,4 +1,4 @@
 routes:
-  - path: "ws"
+  - path: "version/**"
     js:
       exec: "index.js"
