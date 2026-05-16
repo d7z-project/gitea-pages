@@ -7,9 +7,11 @@ GLOBAL_TYPES_DIR := global-types
 
 
 ifeq ($(GOOS),windows)
-GO_DIST_NAME := gitea-pages.exe
+GO_SERVER_NAME := gitea-pages.exe
+GO_LOCAL_NAME := local-server.exe
 else
-GO_DIST_NAME := gitea-pages
+GO_SERVER_NAME := gitea-pages
+GO_LOCAL_NAME := local-server
 endif
 
 fmt:
@@ -21,13 +23,14 @@ fmt:
 release: dist/gitea-pages-$(GOOS)-$(GOARCH).tar.gz
 
 dist/gitea-pages-$(GOOS)-$(GOARCH).tar.gz:  $(shell find . -type f -name "*.go" ) go.mod go.sum
-	@echo Compile $@ via $(GO_DIST_NAME) && \
+	@echo Compile $@ via $(GO_SERVER_NAME) && \
 	mkdir -p dist && \
-	rm -f dist/$(GO_DIST_NAME) && \
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/$(GO_DIST_NAME) ./cmd/server && \
+	rm -f dist/$(GO_SERVER_NAME) && \
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/$(GO_SERVER_NAME) ./cmd/server && \
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/$(GO_LOCAL_NAME) ./cmd/local && \
 	cd dist && \
-	tar zcf gitea-pages-$(GOOS)-$(GOARCH).tar.gz $(GO_DIST_NAME) ../LICENSE ../config.yaml ../cmd/server/errors.html.tmpl ../README.md ../README_*.md && \
-	rm -f $(GO_DIST_NAME)
+	tar zcf gitea-pages-$(GOOS)-$(GOARCH).tar.gz $(GO_SERVER_NAME) $(GO_LOCAL_NAME) ../LICENSE ../config.yaml ../cmd/server/errors.html.tmpl ../README.md ../README_*.md && \
+	rm -f $(GO_SERVER_NAME) $(GO_LOCAL_NAME)
 
 gitea-pages: $(shell find . -type f -name "*.go" ) go.mod go.sum
 	@CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o $@ ./cmd/server
