@@ -4,32 +4,41 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"gopkg.d7z.net/gitea-pages/tests/core"
+	testcore "gopkg.d7z.net/gitea-pages/tests/core"
 )
 
-func Test_filter_failback(t *testing.T) {
-	server := core.NewDefaultTestServer()
+func Test_Filter_FailbackServesFallbackForMissingRoute(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
 	defer server.Close()
-	server.AddFile("org1/repo1/gh-pages/index.html", "hello world")
-	server.AddFile("org1/repo1/gh-pages/404.html", "404 page")
+	server.AddFile("org1/repo1/gh-pages/index.html", "home")
+	server.AddFile("org1/repo1/gh-pages/app/index.html", "app shell")
+	server.AddFile("org1/repo1/gh-pages/app/existing.txt", "real file")
 	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
 routes:
-- path: "**"
+- path: "app/**"
   failback:
-    path: index.html
-  
+    path: app/index.html
 `)
-	//data, _, err := server.OpenFile("https://org1.example.com/repo1/")
-	//assert.NoError(t, err)
-	//assert.Equal(t, "hello world", string(data))
-	//
-	//// 测试默认回退
-	//data, _, err = server.OpenFile("https://org1.example.com/repo1/404")
-	//assert.NoError(t, err)
-	//assert.Equal(t, "hello world", string(data))
 
-	// 测试存在的页面
-	data, _, err := server.OpenFile("https://org1.example.com/repo1/404.html")
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/app/dashboard")
 	assert.NoError(t, err)
-	assert.Equal(t, "404 page", string(data))
+	assert.Equal(t, "app shell", string(data))
+}
+
+func Test_Filter_FailbackKeepsExistingFileResponse(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "home")
+	server.AddFile("org1/repo1/gh-pages/app/index.html", "app shell")
+	server.AddFile("org1/repo1/gh-pages/app/existing.txt", "real file")
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "app/**"
+  failback:
+    path: app/index.html
+`)
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/app/existing.txt")
+	assert.NoError(t, err)
+	assert.Equal(t, "real file", string(data))
 }
