@@ -1,0 +1,5 @@
+- 对 `pkg/filters` 的改动要注意更新 `examples`, 添加/修改/删除 案例
+- 在 `pkg/filters/goja` 中修改了 api 要在 global-types 中更新，函数要加上简短注释, 新增 goja 的 api 时先参考现有代码使用现有的可用的公共封装函数
+- 编写代码时注意清理大块的重复代码，不要封装过多单次使用的小函数，清理已经没作用的测试，优化大的代码块结构
+- NewPageServer的设计更新要注意适当更新 cmd/server , cmd/local 和 tests/core/dummy.go 
+- 各个 filter 在 tests/ 下添加测试，命名为 filter_<filter_name>_...._test.go
