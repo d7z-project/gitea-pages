@@ -3,3 +3,4 @@
 - 编写代码时注意清理大块的重复代码，不要封装过多单次使用的小函数，清理已经没作用的测试，优化大的代码块结构
 - NewPageServer的设计更新要注意适当更新 cmd/server , cmd/local 和 tests/core/dummy.go 
 - 各个 filter 在 tests/ 下添加测试，命名为 filter_<filter_name>_...._test.go
+- 如果要提交代码 先执行 make fmt 和 make lint 格式化代码和清理
