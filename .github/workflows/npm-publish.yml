@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'global-types/**'
+      - '.github/workflows/npm-publish.yml'
 
 jobs:
   publish-global-types:
