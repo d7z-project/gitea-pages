@@ -1,6 +1,9 @@
 GOPATH := $(shell go env GOPATH)
 GOARCH ?= $(shell go env GOARCH)
 GOOS ?= $(shell go env GOOS)
+NPM ?= npm
+NPM_DIST_TAG ?= dev
+GLOBAL_TYPES_DIR := global-types
 
 
 ifeq ($(GOOS),windows)
@@ -54,6 +57,34 @@ lint:
 lint-fix:
 	@(test -f "$(GOPATH)/bin/golangci-lint" || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.0) && \
 	"$(GOPATH)/bin/golangci-lint" run -c .golangci.yml --fix
+
+.PHONY: push
+push:
+	@set -eu; \
+	if [ -n "$$(git status --porcelain)" ]; then \
+		echo "refuse to publish: git worktree is not clean" >&2; \
+		exit 1; \
+	fi; \
+	exact_tag="$$(git describe --tags --exact-match HEAD 2>/dev/null || true)"; \
+	if [ -n "$$exact_tag" ]; then \
+		version="$${exact_tag#v}"; \
+	else \
+		base_tag="$$(git describe --tags --abbrev=0 HEAD 2>/dev/null || true)"; \
+		if [ -z "$$base_tag" ]; then \
+			echo "refuse to publish: no reachable git tag found for HEAD" >&2; \
+			exit 1; \
+		fi; \
+		commit_count="$$(git rev-list --count "$$base_tag"..HEAD)"; \
+		short_sha="$$(git rev-parse --short HEAD)"; \
+		version="$${base_tag#v}-dev.$$commit_count.$$short_sha"; \
+	fi; \
+	tmp_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$tmp_dir"' EXIT INT TERM HUP; \
+	cp -R "$(GLOBAL_TYPES_DIR)"/. "$$tmp_dir"/; \
+	echo "publishing $(GLOBAL_TYPES_DIR) version $$version with dist-tag $(NPM_DIST_TAG)"; \
+	cd "$$tmp_dir" && \
+		node -e 'const fs=require("fs"); const version=process.argv[1]; for (const file of ["package.json","package-lock.json"]) { if (!fs.existsSync(file)) continue; const data=JSON.parse(fs.readFileSync(file,"utf8")); data.version=version; if (data.packages && data.packages[""]) data.packages[""].version=version; fs.writeFileSync(file, JSON.stringify(data, null, 2)+"\n"); }' "$$version" && \
+		"$(NPM)" publish --tag "$(NPM_DIST_TAG)" --access public
 
 EXAMPLE_DIRS := $(shell find examples -maxdepth 1 -type d ! -path "examples" | sort)
 .PHONY: $(EXAMPLE_DIRS)
