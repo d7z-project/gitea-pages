@@ -1,20 +1,16 @@
 package filters
 
 import (
-	"io"
 	"log/slog"
-	"mime"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/pkg/errors"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-func FilterInstDirect(_ core.Params) (core.FilterInstance, error) {
+func FilterInstDirect(init core.GlobalFilterInit) (core.FilterInstance, error) {
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
 			Prefix string `json:"prefix"`
@@ -60,17 +56,7 @@ func FilterInstDirect(_ core.Params) (core.FilterInstance, error) {
 			if err != nil {
 				return err
 			}
-
-			writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(path)))
-			lastMod, err := time.Parse(http.TimeFormat, resp.Header.Get("Last-Modified"))
-			if err == nil {
-				if seeker, ok := resp.Body.(io.ReadSeeker); ok {
-					http.ServeContent(writer, request, filepath.Base(path), lastMod, seeker)
-					return nil
-				}
-			}
-			_, err = io.Copy(writer, resp.Body)
-			return err
+			return writeStaticFileResponse(writer, request, path, resp, init.Server.StaticCacheControl)
 		}, nil
 	}, nil
 }

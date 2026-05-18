@@ -7,7 +7,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-func FilterInstBlock(_ core.Params) (core.FilterInstance, error) {
+func FilterInstBlock(_ core.GlobalFilterInit) (core.FilterInstance, error) {
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
 			Code    int    `json:"code"`

@@ -9,7 +9,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-func FilterInstDefaultNotFound(_ core.Params) (core.FilterInstance, error) {
+func FilterInstDefaultNotFound(_ core.GlobalFilterInit) (core.FilterInstance, error) {
 	return func(config core.Params) (core.FilterCall, error) {
 		return func(ctx core.FilterContext, writer http.ResponseWriter, request *http.Request, next core.NextCall) error {
 			err := next(ctx, writer, request)

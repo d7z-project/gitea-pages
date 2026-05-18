@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"gopkg.d7z.net/gitea-pages/pkg"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
@@ -134,11 +136,7 @@ func main() {
 	if config.Filters == nil {
 		config.Filters = make(map[string]map[string]any)
 	}
-	pageServer, err := pkg.NewPageServer(
-		backend,
-		config.Domain,
-		db,
-		userDB,
+	serverOptions := []pkg.ServerOption{
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(event),
 		pkg.WithStorage(fileStorage),
@@ -148,6 +146,22 @@ func main() {
 		pkg.WithFilterConfig(config.Filters),
 		pkg.WithTrustedProxies(config.TrustedProxies),
 		pkg.WithAuth(authService),
+	}
+	if config.Server.StaticCacheMaxAge != nil {
+		filterServerConfig := core.FilterServerConfig{}
+		if *config.Server.StaticCacheMaxAge <= 0 {
+			filterServerConfig.StaticCacheControl = ""
+		} else {
+			filterServerConfig.StaticCacheControl = fmt.Sprintf("public, max-age=%d", int64(*config.Server.StaticCacheMaxAge/time.Second))
+		}
+		serverOptions = append(serverOptions, pkg.WithFilterServerConfig(filterServerConfig))
+	}
+	pageServer, err := pkg.NewPageServer(
+		backend,
+		config.Domain,
+		db,
+		userDB,
+		serverOptions...,
 	)
 	if err != nil {
 		log.Fatalln(err)

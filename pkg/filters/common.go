@@ -19,7 +19,7 @@ var registeredFilters = map[string]core.GlobalFilter{
 	"js":            goja.FilterInstGoJa,
 }
 
-func DefaultFilters(config map[string]map[string]any) (map[string]core.FilterInstance, error) {
+func DefaultFilters(config map[string]map[string]any, server core.FilterServerConfig) (map[string]core.FilterInstance, error) {
 	if config == nil {
 		return nil, errors.New("config is nil")
 	}
@@ -42,7 +42,10 @@ func DefaultFilters(config map[string]map[string]any) (map[string]core.FilterIns
 			slog.Debug("skip filter", "key", key)
 			continue
 		}
-		inst, err := instance(item)
+		inst, err := instance(core.GlobalFilterInit{
+			Config: item,
+			Server: server,
+		})
 		if err != nil {
 			return nil, err
 		}

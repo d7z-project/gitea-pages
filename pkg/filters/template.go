@@ -10,7 +10,7 @@ import (
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 )
 
-func FilterInstTemplate(_ core.Params) (core.FilterInstance, error) {
+func FilterInstTemplate(_ core.GlobalFilterInit) (core.FilterInstance, error) {
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
 			Prefix string `json:"prefix"`

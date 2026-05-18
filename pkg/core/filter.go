@@ -77,7 +77,16 @@ type FilterCall func(
 	next NextCall,
 ) error
 
+type FilterServerConfig struct {
+	StaticCacheControl string
+}
+
+type GlobalFilterInit struct {
+	Config Params
+	Server FilterServerConfig
+}
+
 type (
-	GlobalFilter   func(config Params) (FilterInstance, error)
+	GlobalFilter   func(init GlobalFilterInit) (FilterInstance, error)
 	FilterInstance func(route Params) (FilterCall, error)
 )

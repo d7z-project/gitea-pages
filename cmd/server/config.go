@@ -36,6 +36,8 @@ type Config struct {
 
 	Auth *ConfigAuth `yaml:"auth"` // 页面认证配置，可选
 
+	Server ConfigServer `yaml:"server"` // 服务端响应策略
+
 	Cache ConfigCache `yaml:"cache"` // 缓存配置
 
 	Page ConfigPage `yaml:"page"` // 页面配置
@@ -104,6 +106,10 @@ type ConfigAuthCookie struct {
 	Secure   bool   `yaml:"secure"`
 	Domain   string `yaml:"domain"`
 	SameSite string `yaml:"same_site"`
+}
+
+type ConfigServer struct {
+	StaticCacheMaxAge *time.Duration `yaml:"static_cache_max_age"`
 }
 
 type ConfigPage struct {

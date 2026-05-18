@@ -15,7 +15,7 @@ import (
 
 var portExp = regexp.MustCompile(`:\d+$`)
 
-func FilterInstRedirect(_ core.Params) (core.FilterInstance, error) {
+func FilterInstRedirect(_ core.GlobalFilterInit) (core.FilterInstance, error) {
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
 			Targets []string `json:"targets"`

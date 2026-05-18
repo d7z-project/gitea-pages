@@ -57,14 +57,14 @@ func init() {
 	}
 }
 
-func FilterInstGoJa(gl core.Params) (core.FilterInstance, error) {
+func FilterInstGoJa(init core.GlobalFilterInit) (core.FilterInstance, error) {
 	var global Config
 	global.EnableDebug = true
 	global.Realtime.EventBuffer = defaultEventPendingLimit
 	global.Fetch.Enabled = true
 	global.Fetch.MaxResponseBodyBytes = defaultFetchBodyLimit
 	global.Request.MaxBodyBytes = defaultRequestBodyLimit
-	if err := gl.Unmarshal(&global); err != nil {
+	if err := init.Config.Unmarshal(&global); err != nil {
 		return nil, err
 	}
 	sharedClient := newFetchClient(global.Fetch)

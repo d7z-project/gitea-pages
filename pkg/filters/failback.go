@@ -1,18 +1,14 @@
 package filters
 
 import (
-	"io"
-	"mime"
 	"net/http"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/pkg/errors"
 	"gopkg.d7z.net/gitea-pages/pkg/core"
 )
 
-func FilterInstFailback(_ core.Params) (core.FilterInstance, error) {
+func FilterInstFailback(init core.GlobalFilterInit) (core.FilterInstance, error) {
 	return func(config core.Params) (core.FilterCall, error) {
 		var param struct {
 			Path string `json:"path"`
@@ -35,16 +31,7 @@ func FilterInstFailback(_ core.Params) (core.FilterInstance, error) {
 			if err != nil {
 				return err
 			}
-			writer.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(param.Path)))
-			lastMod, err := time.Parse(http.TimeFormat, resp.Header.Get("Last-Modified"))
-			if err == nil {
-				if seeker, ok := resp.Body.(io.ReadSeeker); ok {
-					http.ServeContent(writer, request, filepath.Base(param.Path), lastMod, seeker)
-					return nil
-				}
-			}
-			_, err = io.Copy(writer, resp.Body)
-			return err
+			return writeStaticFileResponse(writer, request, param.Path, resp, init.Server.StaticCacheControl)
 		}, nil
 	}, nil
 }

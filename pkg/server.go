@@ -58,6 +58,7 @@ type serverConfig struct {
 	storage                    mwstorage.Storage
 	errorHandler               func(w http.ResponseWriter, r *http.Request, err error)
 	filterConfig               map[string]map[string]any
+	filterServerConfig         core.FilterServerConfig
 	trustedProxies             []string
 	authService                *core.AuthService
 }
@@ -110,6 +111,12 @@ func WithFilterConfig(config map[string]map[string]any) ServerOption {
 	}
 }
 
+func WithFilterServerConfig(config core.FilterServerConfig) ServerOption {
+	return func(c *serverConfig) {
+		c.filterServerConfig = config
+	}
+}
+
 func WithTrustedProxies(entries []string) ServerOption {
 	return func(c *serverConfig) {
 		c.trustedProxies = append([]string(nil), entries...)
@@ -132,6 +139,9 @@ func NewPageServer(
 	cfg := &serverConfig{
 		client:       http.DefaultClient,
 		filterConfig: make(map[string]map[string]any),
+		filterServerConfig: core.FilterServerConfig{
+			StaticCacheControl: "public, max-age=60",
+		},
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -186,7 +196,7 @@ func NewPageServer(
 	if err != nil {
 		return nil, err
 	}
-	defaultFilters, err := filters.DefaultFilters(cfg.filterConfig)
+	defaultFilters, err := filters.DefaultFilters(cfg.filterConfig, cfg.filterServerConfig)
 	if err != nil {
 		return nil, err
 	}

@@ -68,6 +68,9 @@ auth:
     secure: true
     domain: ""
     same_site: lax
+server:
+  # direct / failback 返回静态文件时下发给浏览器的 Cache-Control 缓存时长
+  static_cache_max_age: 60s
 cache:
   # 元数据缓存
   # 同 db/user_db，使用 KV URL 写法

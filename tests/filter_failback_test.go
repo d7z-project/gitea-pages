@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,9 +21,11 @@ routes:
     path: app/index.html
 `)
 
-	data, _, err := server.OpenFile("https://org1.example.com/repo1/app/dashboard")
+	data, resp, err := server.OpenFile("https://org1.example.com/repo1/app/dashboard")
 	assert.NoError(t, err)
 	assert.Equal(t, "app shell", string(data))
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "public, max-age=60", resp.Header.Get("Cache-Control"))
 }
 
 func Test_Filter_FailbackKeepsExistingFileResponse(t *testing.T) {

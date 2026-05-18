@@ -43,10 +43,10 @@ type proxyPolicy struct {
 	transportTemplate    *http.Transport
 }
 
-func FilterInstProxy(globalParams core.Params) (core.FilterInstance, error) {
+func FilterInstProxy(init core.GlobalFilterInit) (core.FilterInstance, error) {
 	var global proxyGlobalConfig
-	if globalParams != nil {
-		if err := globalParams.Unmarshal(&global); err != nil {
+	if init.Config != nil {
+		if err := init.Config.Unmarshal(&global); err != nil {
 			return nil, err
 		}
 	}

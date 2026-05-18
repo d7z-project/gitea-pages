@@ -11,7 +11,7 @@ import (
 )
 
 func TestRedirectUsesRequestInfoScheme(t *testing.T) {
-	instance, err := FilterInstRedirect(nil)
+	instance, err := FilterInstRedirect(core.GlobalFilterInit{})
 	require.NoError(t, err)
 
 	call, err := instance(core.Params{
