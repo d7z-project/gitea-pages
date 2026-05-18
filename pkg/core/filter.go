@@ -78,7 +78,8 @@ type FilterCall func(
 ) error
 
 type FilterServerConfig struct {
-	StaticCacheControl string
+	StaticCacheControl  string
+	MaxRequestBodyBytes int64
 }
 
 type GlobalFilterInit struct {

@@ -17,9 +17,8 @@ import (
 var programCache *lru.Cache[string, *goja.Program]
 
 const (
-	defaultRequestBodyLimit int64 = 4 << 20
-	defaultFetchBodyLimit   int64 = 4 << 20
-	runtimeShutdownTimeout        = 2 * time.Second
+	defaultFetchBodyLimit  int64 = 4 << 20
+	runtimeShutdownTimeout       = 2 * time.Second
 )
 
 var (
@@ -34,10 +33,6 @@ type FetchConfig struct {
 	BlockPrivateNetwork  bool     `json:"block_private_network"`
 }
 
-type RequestConfig struct {
-	MaxBodyBytes int64 `json:"max_body_bytes"`
-}
-
 type RealtimeConfig struct {
 	EventBuffer int `json:"event_buffer"`
 }
@@ -46,7 +41,6 @@ type Config struct {
 	EnableDebug bool           `json:"debug"`
 	Realtime    RealtimeConfig `json:"realtime"`
 	Fetch       FetchConfig    `json:"fetch"`
-	Request     RequestConfig  `json:"request"`
 }
 
 func init() {
@@ -63,7 +57,6 @@ func FilterInstGoJa(init core.GlobalFilterInit) (core.FilterInstance, error) {
 	global.Realtime.EventBuffer = defaultEventPendingLimit
 	global.Fetch.Enabled = true
 	global.Fetch.MaxResponseBodyBytes = defaultFetchBodyLimit
-	global.Request.MaxBodyBytes = defaultRequestBodyLimit
 	if err := init.Config.Unmarshal(&global); err != nil {
 		return nil, err
 	}
@@ -100,7 +93,7 @@ func FilterInstGoJa(init core.GlobalFilterInit) (core.FilterInstance, error) {
 
 			closers := NewClosers()
 
-			return debug.Flush(runProgram(ctx, jsLoop, program, request, w, global, sharedClient, debug, closers))
+			return debug.Flush(runProgram(ctx, jsLoop, program, request, w, global, init.Server.MaxRequestBodyBytes, sharedClient, debug, closers))
 		}, nil
 	}, nil
 }
@@ -126,6 +119,7 @@ func runProgram(
 	request *http.Request,
 	writer http.ResponseWriter,
 	global Config,
+	maxRequestBodyBytes int64,
 	sharedClient *http.Client,
 	debug *DebugData,
 	closers *Closers,
@@ -157,7 +151,7 @@ func runProgram(
 			finish(ctx.Err())
 		}()
 
-		requestObj, err := initRuntime(ctx, vm, request, global, sharedClient, debug, closers, jsLoop, runtime)
+		requestObj, err := initRuntime(ctx, vm, request, global, maxRequestBodyBytes, sharedClient, debug, closers, jsLoop, runtime)
 		if err != nil {
 			finish(errors.Join(err, errors.New("js init failed")))
 			return

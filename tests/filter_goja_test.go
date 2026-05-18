@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"gopkg.d7z.net/gitea-pages/pkg"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 	testcore "gopkg.d7z.net/gitea-pages/tests/core"
 	"gopkg.d7z.net/middleware/kv"
 	mwstorage "gopkg.d7z.net/middleware/storage"
@@ -200,6 +201,31 @@ serve(async function(request) {
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 	assert.Contains(t, string(body), "request body exceeds limit: 4194304")
+}
+
+func Test_GoJa_RequestBodyServerLimit(t *testing.T) {
+	server := newGoJaTestServerWithOptions(`
+serve(async function(request) {
+  return new Response(await request.text())
+})
+`, []pkg.ServerOption{
+		pkg.WithFilterServerConfig(core.FilterServerConfig{MaxRequestBodyBytes: 8}),
+	}, "api/v1/**")
+	defer server.Close()
+
+	httpServer := server.StartHTTPServer("org1.example.com")
+	defer httpServer.Close()
+
+	resp, err := http.Post(httpServer.URL+"/repo1/api/v1/fetch", "text/plain", strings.NewReader("123456789"))
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	assert.Contains(t, string(body), "request body exceeds limit: 8")
 }
 
 func Test_GoJa_GiteaPagesFS(t *testing.T) {

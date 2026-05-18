@@ -140,7 +140,8 @@ func NewPageServer(
 		client:       http.DefaultClient,
 		filterConfig: make(map[string]map[string]any),
 		filterServerConfig: core.FilterServerConfig{
-			StaticCacheControl: "public, max-age=60",
+			StaticCacheControl:  "public, max-age=60",
+			MaxRequestBodyBytes: 4 << 20,
 		},
 	}
 	for _, opt := range opts {

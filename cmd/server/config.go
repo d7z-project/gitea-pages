@@ -109,7 +109,8 @@ type ConfigAuthCookie struct {
 }
 
 type ConfigServer struct {
-	StaticCacheMaxAge *time.Duration `yaml:"static_cache_max_age"`
+	StaticCacheMaxAge   *time.Duration    `yaml:"static_cache_max_age"`
+	MaxRequestBodyBytes *units.Base2Bytes `yaml:"max_request_body_bytes"`
 }
 
 type ConfigPage struct {

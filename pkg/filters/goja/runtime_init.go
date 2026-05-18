@@ -17,6 +17,7 @@ func initRuntime(
 	vm *goja.Runtime,
 	request *http.Request,
 	global Config,
+	maxRequestBodyBytes int64,
 	sharedClient *http.Client,
 	debug *DebugData,
 	closers *Closers,
@@ -66,5 +67,5 @@ func initRuntime(
 		return nil, err
 	}
 	closers.AddCloser(closer.Close)
-	return newIncomingRequestObject(vm, jsLoop, runtime, request, global.Request.MaxBodyBytes, closers)
+	return newIncomingRequestObject(vm, jsLoop, runtime, request, maxRequestBodyBytes, closers)
 }

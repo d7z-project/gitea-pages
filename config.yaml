@@ -71,6 +71,8 @@ auth:
 server:
   # direct / failback 返回静态文件时下发给浏览器的 Cache-Control 缓存时长
   static_cache_max_age: 60s
+  # 单次请求体最大大小；0 表示不限制
+  max_request_body_bytes: 4MB
 cache:
   # 元数据缓存
   # 同 db/user_db，使用 KV URL 写法
@@ -149,9 +151,6 @@ filters:
     realtime:
       # shared/version event 的每个 key 在单次请求中的待处理消息上限
       event_buffer: 256
-    # 请求体读取限制，0 表示不限制
-    request:
-      max_body_bytes: 0
     # fetch 能力限制
     fetch:
       enabled: true

@@ -136,6 +136,8 @@ func main() {
 	if config.Filters == nil {
 		config.Filters = make(map[string]map[string]any)
 	}
+	filterServerConfig := core.FilterServerConfig{}
+	hasFilterServerConfig := false
 	serverOptions := []pkg.ServerOption{
 		pkg.WithClient(http.DefaultClient),
 		pkg.WithEvent(event),
@@ -148,12 +150,18 @@ func main() {
 		pkg.WithAuth(authService),
 	}
 	if config.Server.StaticCacheMaxAge != nil {
-		filterServerConfig := core.FilterServerConfig{}
 		if *config.Server.StaticCacheMaxAge <= 0 {
 			filterServerConfig.StaticCacheControl = ""
 		} else {
 			filterServerConfig.StaticCacheControl = fmt.Sprintf("public, max-age=%d", int64(*config.Server.StaticCacheMaxAge/time.Second))
 		}
+		hasFilterServerConfig = true
+	}
+	if config.Server.MaxRequestBodyBytes != nil {
+		filterServerConfig.MaxRequestBodyBytes = int64(*config.Server.MaxRequestBodyBytes)
+		hasFilterServerConfig = true
+	}
+	if hasFilterServerConfig {
 		serverOptions = append(serverOptions, pkg.WithFilterServerConfig(filterServerConfig))
 	}
 	pageServer, err := pkg.NewPageServer(
