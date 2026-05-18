@@ -3,6 +3,7 @@ package tests
 import (
 	"bytes"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,4 +83,30 @@ routes:
 	assert.NoError(t, err)
 	assert.Equal(t, "download body", string(data))
 	assert.Empty(t, resp.Header.Get("Cache-Control"))
+}
+
+func Test_Filter_DirectDowngradesPublicCacheControlForAuthenticatedRequest(t *testing.T) {
+	server := testcore.NewDefaultTestServer()
+	defer server.Close()
+	server.AddFile("org1/repo1/gh-pages/index.html", "home")
+	server.AddFile("org1/repo1/gh-pages/assets/download/readme.txt", "download body")
+	server.AddFile("org1/repo1/gh-pages/.pages.yaml", `
+routes:
+- path: "download/**"
+  direct:
+    prefix: assets
+`)
+
+	req := httptest.NewRequest(http.MethodGet, "https://org1.example.com/repo1/download/readme.txt", nil)
+	req = req.WithContext(core.ContextWithAuthSession(req.Context(), &core.AuthSession{
+		ID: "session-1",
+		Identity: core.AuthIdentity{
+			Subject: "user-1",
+			Name:    "demo",
+		},
+	}))
+	data, resp, err := server.Do(req)
+	assert.NoError(t, err)
+	assert.Equal(t, "download body", string(data))
+	assert.Equal(t, "private, max-age=60", resp.Header.Get("Cache-Control"))
 }

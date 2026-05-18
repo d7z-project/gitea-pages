@@ -31,7 +31,7 @@ func FilterInstFailback(init core.GlobalFilterInit) (core.FilterInstance, error)
 			if err != nil {
 				return err
 			}
-			return writeStaticFileResponse(writer, request, param.Path, resp, init.Server.StaticCacheControl)
+			return writeStaticFileResponse(ctx, writer, request, param.Path, resp, init.Server.StaticCacheControl)
 		}, nil
 	}, nil
 }

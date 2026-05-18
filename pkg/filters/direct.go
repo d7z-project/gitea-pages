@@ -56,7 +56,7 @@ func FilterInstDirect(init core.GlobalFilterInit) (core.FilterInstance, error) {
 			if err != nil {
 				return err
 			}
-			return writeStaticFileResponse(writer, request, path, resp, init.Server.StaticCacheControl)
+			return writeStaticFileResponse(ctx, writer, request, path, resp, init.Server.StaticCacheControl)
 		}, nil
 	}, nil
 }
