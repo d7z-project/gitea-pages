@@ -12,6 +12,7 @@ import (
 
 	"github.com/pkg/errors"
 	"gopkg.d7z.net/gitea-pages/pkg"
+	"gopkg.d7z.net/gitea-pages/pkg/core"
 	"gopkg.d7z.net/gitea-pages/pkg/providers"
 	"gopkg.d7z.net/gitea-pages/pkg/utils"
 	"gopkg.d7z.net/middleware/cache"
@@ -93,6 +94,10 @@ func main() {
 			"redirect": {
 				"scheme": "http",
 			},
+		}),
+		pkg.WithFilterServerConfig(core.FilterServerConfig{
+			StaticCacheControl:  "public, max-age=60",
+			MaxRequestBodyBytes: 100 << 20,
 		}),
 	)
 	if err != nil {

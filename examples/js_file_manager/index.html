@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storage File Manager Example</title>
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: ui-sans-serif, system-ui, sans-serif;
+        }
+
+        body {
+            margin: 0;
+            background: #f5f7fb;
+            color: #1f2937;
+        }
+
+        main {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        .panel {
+            background: #fff;
+            border: 1px solid #dbe3f0;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 6px 24px rgba(15, 23, 42, 0.06);
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        input[type="text"], input[type="file"] {
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        input[type="text"] {
+            min-width: 220px;
+        }
+
+        button, a.button {
+            border: 0;
+            border-radius: 8px;
+            padding: 10px 14px;
+            background: #2563eb;
+            color: #fff;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        button.secondary, a.button.secondary {
+            background: #475569;
+        }
+
+        button.danger {
+            background: #dc2626;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        code, pre {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 8px;
+        }
+
+        code {
+            padding: 2px 6px;
+        }
+
+        pre {
+            padding: 12px;
+            overflow: auto;
+            min-height: 80px;
+        }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Storage File Manager Example</h1>
+    <p>演示文件上传、下载、删除、重命名、目录创建、子目录浏览和递归删除。所有文件都写入当前 repo 的 <code>storage.child("workspace")</code>。</p>
+
+    <section class="panel">
+        <div class="row" style="justify-content: space-between;">
+            <div>
+                <strong>当前目录:</strong>
+                <code id="current-path">/</code>
+            </div>
+            <div class="row">
+                <button id="go-parent" class="secondary" type="button">返回上级</button>
+                <button id="refresh" class="secondary" type="button">刷新</button>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2>上传文件</h2>
+        <p>当前单次上传限制: <strong id="upload-limit">加载中...</strong></p>
+        <div class="row">
+            <input id="upload-file" type="file">
+            <button id="upload-submit" type="button">上传到当前目录</button>
+        </div>
+        <p id="upload-error" style="color: #dc2626; min-height: 24px; margin-bottom: 0;"></p>
+    </section>
+
+    <section class="panel">
+        <h2>创建子目录</h2>
+        <div class="row">
+            <input id="directory-name" type="text" placeholder="例如: docs">
+            <button id="directory-submit" type="button">创建目录</button>
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2>文件与目录</h2>
+        <table>
+            <thead>
+            <tr>
+                <th>名称</th>
+                <th>类型</th>
+                <th>大小</th>
+                <th>更新时间</th>
+                <th>操作</th>
+            </tr>
+            </thead>
+            <tbody id="entries"></tbody>
+        </table>
+    </section>
+
+    <section class="panel">
+        <h2>最近响应</h2>
+        <pre id="output">{}</pre>
+    </section>
+</main>
+
+<script>
+    let currentPath = "";
+    let maxRequestBodyBytes = 0;
+    const currentPathNode = document.getElementById("current-path");
+    const entriesNode = document.getElementById("entries");
+    const outputNode = document.getElementById("output");
+    const uploadLimitNode = document.getElementById("upload-limit");
+    const uploadErrorNode = document.getElementById("upload-error");
+
+    function showOutput(data) {
+        outputNode.textContent = JSON.stringify(data, null, 2);
+    }
+
+    function showUploadError(message) {
+        uploadErrorNode.textContent = message || "";
+    }
+
+    function pathLabel(path) {
+        return path ? "/" + path : "/";
+    }
+
+    function formatBytes(bytes) {
+        if (bytes <= 0) {
+            return "0 B";
+        }
+        const units = ["B", "KiB", "MiB", "GiB"];
+        let value = bytes;
+        let unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.length - 1) {
+            value /= 1024;
+            unitIndex += 1;
+        }
+        return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+    }
+
+    async function loadUploadConfig() {
+        const response = await fetch("/files/config");
+        const payload = await response.json();
+        maxRequestBodyBytes = Number(payload.maxRequestBodyBytes) || 0;
+        uploadLimitNode.textContent = maxRequestBodyBytes > 0 ? formatBytes(maxRequestBodyBytes) : "不限制";
+    }
+
+    async function loadDirectory(path) {
+        const response = await fetch(`/files/list?path=${encodeURIComponent(path || "")}`);
+        const payload = await response.json();
+        currentPath = payload.path || "";
+        currentPathNode.textContent = pathLabel(currentPath);
+        showOutput(payload);
+        renderEntries(payload.items || []);
+    }
+
+    function renderEntries(items) {
+        entriesNode.innerHTML = "";
+        for (const item of items) {
+            const row = document.createElement("tr");
+            const actions = [];
+
+            if (item.type === "dir") {
+                actions.push(`<button type="button" data-open="${item.path}">打开</button>`);
+                actions.push(`<button type="button" class="danger" data-delete-dir="${item.path}">删除目录</button>`);
+            } else {
+                actions.push(`<a class="button secondary" href="/files/download?path=${encodeURIComponent(item.path)}">下载</a>`);
+                actions.push(`<button type="button" data-rename="${item.path}" data-name="${item.name}">重命名</button>`);
+                actions.push(`<button type="button" class="danger" data-delete-file="${item.path}">删除文件</button>`);
+            }
+
+            row.innerHTML = `
+                <td><code>${item.name}</code></td>
+                <td>${item.type}</td>
+                <td>${item.size}</td>
+                <td>${item.modTime}</td>
+                <td><div class="row">${actions.join("")}</div></td>
+            `;
+            entriesNode.appendChild(row);
+        }
+    }
+
+    entriesNode.addEventListener("click", async function(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+
+        if (target.dataset.open) {
+            await loadDirectory(target.dataset.open);
+            return;
+        }
+
+        if (target.dataset.deleteDir) {
+            const response = await fetch(`/files/directories?path=${encodeURIComponent(target.dataset.deleteDir)}`, {
+                method: "DELETE",
+            });
+            showOutput(await response.json());
+            await loadDirectory(currentPath);
+            return;
+        }
+
+        if (target.dataset.deleteFile) {
+            const response = await fetch(`/files/file?path=${encodeURIComponent(target.dataset.deleteFile)}`, {
+                method: "DELETE",
+            });
+            showOutput(await response.json());
+            await loadDirectory(currentPath);
+            return;
+        }
+
+        if (target.dataset.rename) {
+            const nextName = prompt("输入新文件名", target.dataset.name || "");
+            if (!nextName) {
+                return;
+            }
+            const response = await fetch("/files/rename", {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                    path: target.dataset.rename,
+                    name: nextName,
+                }),
+            });
+            showOutput(await response.json());
+            await loadDirectory(currentPath);
+        }
+    });
+
+    document.getElementById("go-parent").addEventListener("click", async function() {
+        if (!currentPath.includes("/")) {
+            await loadDirectory("");
+            return;
+        }
+        await loadDirectory(currentPath.slice(0, currentPath.lastIndexOf("/")));
+    });
+
+    document.getElementById("refresh").addEventListener("click", async function() {
+        await loadDirectory(currentPath);
+    });
+
+    document.getElementById("directory-submit").addEventListener("click", async function() {
+        const input = document.getElementById("directory-name");
+        const name = input.value.trim();
+        if (!name) {
+            return;
+        }
+        const response = await fetch("/files/directories", {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({
+                path: currentPath,
+                name,
+            }),
+        });
+        input.value = "";
+        showOutput(await response.json());
+        await loadDirectory(currentPath);
+    });
+
+    document.getElementById("upload-submit").addEventListener("click", async function() {
+        const input = document.getElementById("upload-file");
+        const file = input.files && input.files[0];
+        if (!file) {
+            return;
+        }
+        if (maxRequestBodyBytes > 0 && file.size > maxRequestBodyBytes) {
+            showUploadError(`文件大小 ${formatBytes(file.size)}，超过当前上传限制 ${formatBytes(maxRequestBodyBytes)}`);
+            return;
+        }
+        showUploadError("");
+        const response = await fetch(`/files/upload?path=${encodeURIComponent(currentPath)}&name=${encodeURIComponent(file.name)}`, {
+            method: "POST",
+            headers: {
+                "content-type": file.type || "application/octet-stream",
+                "x-file-name": file.name,
+            },
+            body: file,
+        });
+        input.value = "";
+        showOutput(await response.json());
+        await loadDirectory(currentPath);
+    });
+
+    Promise.all([loadUploadConfig(), loadDirectory("")]).catch(function(error) {
+        showUploadError(String(error));
+    });
+</script>
+</body>
+</html>

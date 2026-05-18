@@ -227,6 +227,13 @@ declare global {
     }
 
     /**
+     * Request and upload limits resolved for the current page runtime.
+     */
+    interface PageLimits {
+        readonly maxRequestBodyBytes: number;
+    }
+
+    /**
      * Read-only directory entry from the page source tree.
      */
     interface PageEntry {
@@ -570,8 +577,9 @@ declare global {
      * Host metadata exposed to page scripts.
      */
     interface PageHost {
-        meta: PageMeta;
-        auth: PageAuth;
+        readonly meta: PageMeta;
+        readonly auth: PageAuth;
+        readonly limits: PageLimits;
     }
 
     /**

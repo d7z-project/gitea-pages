@@ -1,0 +1,4 @@
+routes:
+  - path: "files/**"
+    js:
+      exec: "index.js"

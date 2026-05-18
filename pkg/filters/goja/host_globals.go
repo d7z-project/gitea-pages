@@ -39,6 +39,7 @@ func installHostGlobals(
 	vm *goja.Runtime,
 	loop *eventloop.EventLoop,
 	eventPendingLimit int,
+	maxRequestBodyBytes int64,
 	runtime *runtimeState,
 	closers *Closers,
 ) (*goja.Object, error) {
@@ -46,18 +47,33 @@ func installHostGlobals(
 		eventPendingLimit = defaultEventPendingLimit
 	}
 
-	host := vm.NewObject()
-	if err := host.Set("meta", map[string]any{
+	meta, err := newFrozenObject(vm, map[string]any{
 		"org":    ctx.Owner,
 		"repo":   ctx.Repo,
 		"commit": ctx.CommitID,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := host.Set("auth", map[string]any{
+	auth, err := newFrozenObject(vm, map[string]any{
 		"authenticated": ctx.Auth.Authenticated,
 		"identity":      authIdentityMap(ctx.Auth.Identity),
-	}); err != nil {
+	})
+	if err != nil {
+		return nil, err
+	}
+	limits, err := newFrozenObject(vm, map[string]any{
+		"maxRequestBodyBytes": maxRequestBodyBytes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	host, err := newFrozenObject(vm, map[string]any{
+		"meta":   meta,
+		"auth":   auth,
+		"limits": limits,
+	})
+	if err != nil {
 		return nil, err
 	}
 	if err := vm.Set("fs", map[string]any{
@@ -172,6 +188,26 @@ func installHostGlobals(
 		return nil, err
 	}
 	return host, nil
+}
+
+func newFrozenObject(vm *goja.Runtime, values map[string]any) (*goja.Object, error) {
+	object := vm.NewObject()
+	for key, value := range values {
+		if err := object.Set(key, value); err != nil {
+			return nil, err
+		}
+	}
+	return object, freezeObject(vm, object)
+}
+
+func freezeObject(vm *goja.Runtime, object *goja.Object) error {
+	objectValue := vm.Get("Object")
+	freeze, ok := goja.AssertFunction(objectValue.ToObject(vm).Get("freeze"))
+	if !ok {
+		return errors.New("Object.freeze is unavailable")
+	}
+	_, err := freeze(goja.Undefined(), object)
+	return err
 }
 
 func newEventAPI(

@@ -228,6 +228,24 @@ serve(async function(request) {
 	assert.Contains(t, string(body), "request body exceeds limit: 8")
 }
 
+func Test_GoJa_PageLimits(t *testing.T) {
+	server := newGoJaTestServerWithOptions(`
+serve(function() {
+  page.limits.maxRequestBodyBytes = 1
+  return Response.json({
+    maxRequestBodyBytes: page.limits.maxRequestBodyBytes,
+  })
+})
+`, []pkg.ServerOption{
+		pkg.WithFilterServerConfig(core.FilterServerConfig{MaxRequestBodyBytes: 8}),
+	}, "api/v1/**")
+	defer server.Close()
+
+	data, _, err := server.OpenFile("https://org1.example.com/repo1/api/v1/limits")
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"maxRequestBodyBytes":8}`, string(data))
+}
+
 func Test_GoJa_GiteaPagesFS(t *testing.T) {
 	server := testcore.NewDefaultTestServer()
 	defer server.Close()
